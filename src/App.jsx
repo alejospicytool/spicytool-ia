@@ -6,6 +6,124 @@ const SUPABASE_URL = "https://khuavhbraikzreyhptog.supabase.co";
 const SUPABASE_KEY = "sb_publishable_O8UPfP8BYLWhlIg0Fv45Gg_coidezqc";
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// ── SpicyTool Brand ────────────────────────────────────────────────────────
+const ST_RED    = "#EF3E3E";
+const ST_RED_BG = "#FEF0F0";
+const ST_RED_DARK = "#C42F2F";
+
+function BrandStyles() {
+  useEffect(() => {
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = "https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap";
+    document.head.appendChild(link);
+    const style = document.createElement("style");
+    style.textContent = `
+      *, body { font-family: 'DM Sans', sans-serif !important; }
+      body { background: #F7F7F8 !important; margin: 0; }
+      .spicy-root { min-height: 100vh; background: #F7F7F8; }
+      .spicy-sidebar {
+        position: fixed; left: 0; top: 0; bottom: 0; width: 220px;
+        background: #1A1A2E; display: flex; flex-direction: column;
+        padding: 0; z-index: 100;
+      }
+      .spicy-logo {
+        display: flex; align-items: center; gap: 10px;
+        padding: 20px 20px 16px; border-bottom: 1px solid rgba(255,255,255,0.08);
+      }
+      .spicy-logo-icon {
+        width: 32px; height: 32px; background: ${ST_RED};
+        border-radius: 8px; display: flex; align-items: center; justify-content: center;
+        font-size: 16px; color: white; font-weight: 700; flex-shrink: 0;
+      }
+      .spicy-logo-text { font-size: 16px; font-weight: 600; color: white; }
+      .spicy-nav { padding: 12px 10px; flex: 1; overflow-y: auto; }
+      .spicy-nav-btn {
+        display: flex; align-items: center; gap: 10px; width: 100%;
+        padding: 9px 12px; border-radius: 8px; border: none; cursor: pointer;
+        font-size: 13px; font-weight: 500; text-align: left; transition: all 0.15s;
+        margin-bottom: 2px;
+      }
+      .spicy-nav-btn.active { background: ${ST_RED}; color: white; }
+      .spicy-nav-btn:not(.active) { background: transparent; color: rgba(255,255,255,0.6); }
+      .spicy-nav-btn:not(.active):hover { background: rgba(255,255,255,0.08); color: white; }
+      .spicy-nav-badge {
+        margin-left: auto; font-size: 10px; background: #F59E0B;
+        color: white; border-radius: 10px; padding: 1px 6px; font-weight: 600;
+      }
+      .spicy-user {
+        padding: 14px 16px; border-top: 1px solid rgba(255,255,255,0.08);
+        display: flex; align-items: center; gap: 10px;
+      }
+      .spicy-avatar {
+        width: 32px; height: 32px; border-radius: 50%; background: ${ST_RED};
+        display: flex; align-items: center; justify-content: center;
+        font-size: 13px; font-weight: 600; color: white; flex-shrink: 0;
+      }
+      .spicy-main { margin-left: 220px; padding: 28px 32px; max-width: 960px; }
+      .spicy-page-title { font-size: 22px; font-weight: 600; color: #111; margin-bottom: 24px; }
+      .spicy-card {
+        background: white; border-radius: 12px; border: 1px solid #EBEBEB;
+        padding: 20px 24px; margin-bottom: 16px;
+      }
+      .spicy-kpi {
+        background: white; border-radius: 12px; border: 1px solid #EBEBEB; padding: 16px 20px;
+      }
+      .spicy-kpi-label { font-size: 12px; color: #888; margin-bottom: 6px; font-weight: 500; }
+      .spicy-kpi-value { font-size: 22px; font-weight: 600; color: #111; }
+      .spicy-kpi-sub { font-size: 11px; color: #aaa; margin-top: 4px; }
+      .spicy-btn-primary {
+        background: ${ST_RED}; color: white; border: none; border-radius: 8px;
+        padding: 9px 18px; font-size: 13px; font-weight: 600; cursor: pointer;
+        transition: background 0.15s;
+      }
+      .spicy-btn-primary:hover { background: ${ST_RED_DARK}; }
+      .spicy-btn-primary:disabled { background: #FFAAAA; cursor: not-allowed; }
+      .spicy-btn-secondary {
+        background: white; color: #444; border: 1px solid #E0E0E0; border-radius: 8px;
+        padding: 8px 16px; font-size: 13px; font-weight: 500; cursor: pointer;
+        transition: all 0.15s;
+      }
+      .spicy-btn-secondary:hover { border-color: #ccc; background: #fafafa; }
+      .spicy-input {
+        width: 100%; padding: 9px 12px; border: 1px solid #E0E0E0; border-radius: 8px;
+        font-size: 13px; font-family: 'DM Sans', sans-serif !important;
+        outline: none; transition: border 0.15s; box-sizing: border-box;
+        background: white; color: #111;
+      }
+      .spicy-input:focus { border-color: ${ST_RED}; }
+      .spicy-select {
+        padding: 8px 12px; border: 1px solid #E0E0E0; border-radius: 8px;
+        font-size: 13px; font-family: 'DM Sans', sans-serif !important;
+        outline: none; background: white; color: #111; cursor: pointer;
+      }
+      .spicy-table-row {
+        display: flex; align-items: center; gap: 12px;
+        padding: 12px 0; border-bottom: 1px solid #F0F0F0;
+      }
+      .spicy-table-row:last-child { border-bottom: none; }
+      .spicy-badge-red { background: ${ST_RED_BG}; color: ${ST_RED}; font-size: 10px; padding: 2px 7px; border-radius: 5px; font-weight: 600; }
+      .spicy-badge-green { background: #EDFAF3; color: #16A34A; font-size: 10px; padding: 2px 7px; border-radius: 5px; font-weight: 600; }
+      .spicy-badge-gray { background: #F4F4F5; color: #666; font-size: 10px; padding: 2px 7px; border-radius: 5px; font-weight: 500; }
+      .spicy-badge-amber { background: #FEF3C7; color: #D97706; font-size: 10px; padding: 2px 7px; border-radius: 5px; font-weight: 600; }
+      input, select, textarea { font-family: 'DM Sans', sans-serif !important; }
+    `;
+    document.head.appendChild(style);
+    return () => { document.head.removeChild(style); };
+  }, []);
+  return null;
+}
+
+// ── Nav icon map ───────────────────────────────────────────────────────────
+const NAV_ICONS = {
+  dashboard: "▦", accounts: "🏦", referrals: "🤝",
+  add: "+", history: "☰", categories: "⊞"
+};
+const NAV_LABELS = {
+  dashboard: "Resumen", accounts: "Cuentas", referrals: "Referidos",
+  add: "Registrar", history: "Historial", categories: "Categorías"
+};
+
 const WORKER_URL = "";
 const COMMISSION_RATE = 0.20;
 const MONTH_LABELS = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
@@ -17,7 +135,7 @@ const monthKey = (d) => { const dt = new Date(d+"T00:00:00"); return `${dt.getFu
 const monthLabel = (mk) => { const [y,m]=mk.split("-"); return MONTH_LABELS[parseInt(m)-1]+" "+y; };
 
 // ── Login Screen ───────────────────────────────────────────────────────────
-function LoginScreen({ onLogin }) {
+function LoginScreen() {
   const [email, setEmail]     = useState("");
   const [pass,  setPass]      = useState("");
   const [error, setError]     = useState("");
@@ -33,33 +151,30 @@ function LoginScreen({ onLogin }) {
   }
 
   return (
-    <div style={{ display:"flex", alignItems:"center", justifyContent:"center", minHeight:400, fontFamily:"var(--font-sans)" }}>
-      <div style={{ width:"100%", maxWidth:360 }}>
-        <div style={{ marginBottom:"2rem" }}>
-          <div style={{ fontSize:11, fontWeight:500, color:"var(--color-text-tertiary)", letterSpacing:1, textTransform:"uppercase", marginBottom:6 }}>SpicyTool</div>
-          <div style={{ fontSize:24, fontWeight:500 }}>Control financiero</div>
-          <div style={{ fontSize:13, color:"var(--color-text-secondary)", marginTop:6 }}>Ingresá con tu cuenta del equipo.</div>
+    <div style={{ minHeight:"100vh", background:"#F7F7F8", display:"flex", alignItems:"center", justifyContent:"center" }}>
+      <BrandStyles/>
+      <div style={{ width:"100%", maxWidth:380, padding:"0 20px" }}>
+        <div style={{ textAlign:"center", marginBottom:32 }}>
+          <div style={{ width:52, height:52, background:ST_RED, borderRadius:14, display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 16px", fontSize:24, color:"white", fontWeight:700 }}>S</div>
+          <div style={{ fontSize:22, fontWeight:700, color:"#111", marginBottom:6 }}>Control financiero</div>
+          <div style={{ fontSize:14, color:"#888" }}>Ingresá con tu cuenta de SpicyTool</div>
         </div>
-
-        <div style={{ background:"var(--color-background-primary)", border:"0.5px solid var(--color-border-tertiary)", borderRadius:"var(--border-radius-lg)", padding:"1.5rem" }}>
-          <div style={{ marginBottom:14 }}>
-            <div style={{ fontSize:12, color:"var(--color-text-tertiary)", marginBottom:6 }}>Email</div>
-            <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="alejo@spicytool.com"
-              style={{ width:"100%", fontSize:13, boxSizing:"border-box" }}/>
+        <div style={{ background:"white", borderRadius:14, border:"1px solid #EBEBEB", padding:"28px 28px" }}>
+          <div style={{ marginBottom:16 }}>
+            <div style={{ fontSize:12, fontWeight:600, color:"#555", marginBottom:8, textTransform:"uppercase", letterSpacing:0.5 }}>Email</div>
+            <input className="spicy-input" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="alejo@spicytool.net"/>
           </div>
           <div style={{ marginBottom:20 }}>
-            <div style={{ fontSize:12, color:"var(--color-text-tertiary)", marginBottom:6 }}>Contraseña</div>
-            <input type="password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••"
-              onKeyDown={e=>e.key==="Enter"&&handleLogin(e)}
-              style={{ width:"100%", fontSize:13, boxSizing:"border-box" }}/>
+            <div style={{ fontSize:12, fontWeight:600, color:"#555", marginBottom:8, textTransform:"uppercase", letterSpacing:0.5 }}>Contraseña</div>
+            <input className="spicy-input" type="password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&handleLogin(e)}/>
           </div>
-          {error && <div style={{ fontSize:12, color:"var(--color-text-danger)", marginBottom:14, padding:"8px 10px", background:"var(--color-background-danger)", borderRadius:"var(--border-radius-md)" }}>{error}</div>}
-          <button onClick={handleLogin} disabled={loading||!email||!pass} style={{ width:"100%", padding:"10px", borderRadius:"var(--border-radius-md)", fontSize:14, fontWeight:500, cursor:"pointer", background:"var(--color-background-info)", color:"var(--color-text-info)", border:"0.5px solid var(--color-border-info)", opacity:loading?0.7:1 }}>
+          {error && <div style={{ fontSize:12, color:ST_RED, marginBottom:16, padding:"10px 12px", background:ST_RED_BG, borderRadius:8 }}>{error}</div>}
+          <button className="spicy-btn-primary" onClick={handleLogin} disabled={loading||!email||!pass} style={{ width:"100%", padding:"11px" }}>
             {loading ? "Ingresando…" : "Ingresar"}
           </button>
         </div>
-        <div style={{ marginTop:12, fontSize:12, color:"var(--color-text-tertiary)", textAlign:"center" }}>
-          ¿No tenés cuenta? Pedile a Alejo que te invite desde Supabase → Authentication → Invite user.
+        <div style={{ marginTop:16, fontSize:12, color:"#aaa", textAlign:"center" }}>
+          ¿No tenés cuenta? Pedile a Alejo que te invite.
         </div>
       </div>
     </div>
@@ -323,88 +438,211 @@ function CategoriesPanel({ catsIncome, catsExpense, isAdmin, onRefresh }) {
 
 // ── Referral Dashboard ─────────────────────────────────────────────────────
 function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
-  const [expanded, setExpanded] = useState(null);
-  const [showAdd,  setShowAdd]  = useState(false);
-  const [newRef,   setNewRef]   = useState({id:"",name:"",email:"",commission_rate:20});
-  const now=new Date(), curMK=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
-  const referredIncome=txns.filter(t=>t.type==="income"&&t.referrer_id);
-  const paidCommissions=txns.filter(t=>t.category==="Comisiones referidos"&&t.referrer_id);
-  const stats=referrers.map(ref=>{
-    const rate=(ref.commission_rate||20)/100;
-    const inc=referredIncome.filter(t=>t.referrer_id===ref.id);
-    const paid=paidCommissions.filter(t=>t.referrer_id===ref.id);
-    const totalRevenue=inc.reduce((s,t)=>s+t.amount,0);
-    const totalCommission=totalRevenue*rate;
-    const totalPaid=paid.reduce((s,t)=>s+t.amount,0);
-    const totalOwed=Math.max(0,totalCommission-totalPaid);
-    const months={};
-    inc.forEach(t=>{const mk=monthKey(t.date);if(!months[mk])months[mk]={revenue:0,commission:0,paid:0};months[mk].revenue+=t.amount;months[mk].commission+=t.amount*rate;});
-    paid.forEach(t=>{const mk=monthKey(t.date);if(!months[mk])months[mk]={revenue:0,commission:0,paid:0};months[mk].paid+=t.amount;});
-    return {...ref,totalRevenue,totalCommission,totalPaid,totalOwed,months,curCommission:inc.filter(t=>monthKey(t.date)===curMK).reduce((s,t)=>s+t.amount,0)*rate,activeBrokers:new Set(inc.map(t=>t.description)).size};
-  }).sort((a,b)=>b.totalOwed-a.totalOwed);
+  const [expanded,   setExpanded]   = useState(null);
+  const [showAdd,    setShowAdd]    = useState(false);
+  const [newRef,     setNewRef]     = useState({id:"",name:"",email:"",commission_rate:20});
+  const [stripeData, setStripeData] = useState(null); // data from Worker
+  const [syncing,    setSyncing]    = useState(false);
+  const [syncMsg,    setSyncMsg]    = useState("");
 
-  async function markPaid(ref,mk,amount) {
-    await sb.from("transactions").insert({id:"pay_"+ref.id+"_"+mk+"_"+Date.now(),type:"expense",category:"Comisiones referidos",amount:Math.round(amount*100)/100,description:`Comisión ${ref.name} — ${monthLabel(mk)}`,date:new Date().toISOString().split("T")[0],account_id:"mercury",referrer_id:ref.id,referrer_name:ref.name,paid:true});
+  const now=new Date(), curMK=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+
+  // Pull referral data from Stripe via Worker
+  async function syncFromStripe() {
+    if (!WORKER_URL) { setSyncMsg("Configurá WORKER_URL primero."); return; }
+    setSyncing(true); setSyncMsg("");
+    try {
+      const res = await fetch(WORKER_URL + "/referrals");
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const data = await res.json();
+      setStripeData(data);
+      // Import new transactions into Supabase
+      if (data.referrers?.length) {
+        const allTxns = data.referrers.flatMap(r =>
+          r.transactions.map(t => ({
+            ...t,
+            type: "income",
+            category: "SaaS MRR",
+            account_id: "mercury",
+            referrer_id: r.id,
+            referrer_name: r.name,
+          }))
+        );
+        const existingIds = new Set(txns.map(t => t.id));
+        const newTxns = allTxns.filter(t => !existingIds.has(t.id));
+        if (newTxns.length) {
+          await sb.from("transactions").insert(newTxns);
+          onRefresh();
+          setSyncMsg(`${newTxns.length} transacciones importadas desde Stripe.`);
+        } else {
+          setSyncMsg("Todo al día — sin transacciones nuevas.");
+        }
+      }
+    } catch(e) { setSyncMsg("Error: " + e.message); }
+    setSyncing(false);
+  }
+
+  // Calculate commissions using per-referrer rate from Supabase
+  const paidCommissions = txns.filter(t => t.category === "Comisiones referidos" && t.referrer_id);
+  const referredIncome  = txns.filter(t => t.type === "income" && t.referrer_id);
+
+  const stats = referrers.map(ref => {
+    const rate = (ref.commission_rate || 20) / 100;
+    const inc  = referredIncome.filter(t => t.referrer_id === ref.id);
+    const paid = paidCommissions.filter(t => t.referrer_id === ref.id);
+    const totalRevenue    = inc.reduce((s,t) => s + Number(t.amount), 0);
+    const totalCommission = totalRevenue * rate;
+    const totalPaid       = paid.reduce((s,t) => s + Number(t.amount), 0);
+    const totalOwed       = Math.max(0, totalCommission - totalPaid);
+    const months = {};
+    inc.forEach(t => {
+      const mk = monthKey(t.date);
+      if (!months[mk]) months[mk] = { revenue:0, commission:0, paid:0 };
+      months[mk].revenue    += Number(t.amount);
+      months[mk].commission += Number(t.amount) * rate;
+    });
+    paid.forEach(t => {
+      const mk = monthKey(t.date);
+      if (!months[mk]) months[mk] = { revenue:0, commission:0, paid:0 };
+      months[mk].paid += Number(t.amount);
+    });
+    const curRevenue = inc.filter(t => monthKey(t.date) === curMK).reduce((s,t) => s + Number(t.amount), 0);
+    return { ...ref, totalRevenue, totalCommission, totalPaid, totalOwed, months,
+      curCommission: curRevenue * rate, activeBrokers: new Set(inc.map(t => t.description)).size };
+  }).sort((a,b) => b.totalOwed - a.totalOwed);
+
+  const totalOwedNow = stats.reduce((s,r) => s + r.curCommission, 0);
+  const totalOwedAll = stats.reduce((s,r) => s + r.totalOwed, 0);
+  const totalPaidAll = stats.reduce((s,r) => s + r.totalPaid, 0);
+
+  async function markPaid(ref, mk, amount) {
+    await sb.from("transactions").insert({
+      id: "pay_"+ref.id+"_"+mk+"_"+Date.now(), type:"expense",
+      category:"Comisiones referidos", amount: Math.round(amount*100)/100,
+      description: `Comisión ${ref.name} — ${monthLabel(mk)}`,
+      date: new Date().toISOString().split("T")[0],
+      account_id:"mercury", referrer_id:ref.id, referrer_name:ref.name, paid:true,
+    });
     onRefresh();
   }
+
   async function saveReferrer() {
-    if (!newRef.id.trim()||!newRef.name.trim()) return;
-    await sb.from("referrers").insert({id:newRef.id.trim(),name:newRef.name.trim(),email:newRef.email,commission_rate:newRef.commission_rate});
+    if (!newRef.id.trim() || !newRef.name.trim()) return;
+    await sb.from("referrers").insert({ id:newRef.id.trim(), name:newRef.name.trim(), email:newRef.email, commission_rate:newRef.commission_rate });
     setNewRef({id:"",name:"",email:"",commission_rate:20}); setShowAdd(false); onRefresh();
   }
 
-  const totalOwedNow=stats.reduce((s,r)=>s+r.curCommission,0);
-  const totalOwedAll=stats.reduce((s,r)=>s+r.totalOwed,0);
-  const totalPaidAll=stats.reduce((s,r)=>s+r.totalPaid,0);
+  async function updateRate(id, rate) {
+    await sb.from("referrers").update({ commission_rate: rate }).eq("id", id);
+    onRefresh();
+  }
 
   return (
     <div>
-      <div style={{ display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:12,marginBottom:"1.5rem" }}>
-        {[{label:"A pagar este mes",value:fmtDec(totalOwedNow),warn:totalOwedNow>0},{label:"Deuda acumulada",value:fmtDec(totalOwedAll),warn:totalOwedAll>0},{label:"Pagado historial",value:fmtDec(totalPaidAll)}].map(k=>(
-          <div key={k.label} style={{ background:"var(--color-background-secondary)",borderRadius:"var(--border-radius-md)",padding:"1rem" }}>
-            <div style={{ fontSize:12,color:"var(--color-text-tertiary)",marginBottom:6 }}>{k.label}</div>
-            <div style={{ fontSize:20,fontWeight:500,color:k.warn?"var(--color-text-warning)":"var(--color-text-primary)" }}>{k.value}</div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
+        <div style={{ fontSize:20, fontWeight:700, color:"#111" }}>Referidos</div>
+        <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+          {syncMsg && <span style={{ fontSize:12, color: syncMsg.startsWith("Error") ? ST_RED : "#16A34A", fontWeight:500 }}>{syncMsg}</span>}
+          {WORKER_URL && <button onClick={syncFromStripe} disabled={syncing} className="spicy-btn-primary" style={{ fontSize:13, padding:"7px 16px" }}>
+            {syncing ? "Sincronizando…" : "⟳ Sync desde Stripe"}
+          </button>}
+        </div>
+      </div>
+
+      {/* Info box: cómo configurar Stripe */}
+      {referrers.length > 0 && (
+        <div style={{ background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:10, padding:"12px 16px", marginBottom:20, fontSize:12, color:"#166534", lineHeight:1.7 }}>
+          Para que un broker quede asociado a un referidor, editá el customer en Stripe → Metadata → agregar:<br/>
+          <code style={{ fontFamily:"monospace" }}>referrer_id: socio_id</code> · <code style={{ fontFamily:"monospace" }}>referrer_name: Nombre del socio</code>
+        </div>
+      )}
+
+      {/* KPIs */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:20 }}>
+        {[
+          { label:"A pagar este mes", value:fmtDec(totalOwedNow), warn:totalOwedNow>0 },
+          { label:"Deuda acumulada",  value:fmtDec(totalOwedAll),  warn:totalOwedAll>0 },
+          { label:"Pagado historial", value:fmtDec(totalPaidAll) },
+        ].map(k=>(
+          <div key={k.label} className="spicy-kpi">
+            <div className="spicy-kpi-label">{k.label}</div>
+            <div className="spicy-kpi-value" style={{ color:k.warn?"#D97706":"#111" }}>{k.value}</div>
           </div>
         ))}
       </div>
-      <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+
+      {/* Lista de socios */}
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        {stats.length === 0 && (
+          <div className="spicy-card" style={{ textAlign:"center", padding:"2rem" }}>
+            <div style={{ fontSize:13, color:"#aaa", marginBottom:12 }}>No hay socios registrados.</div>
+            {isAdmin && <button className="spicy-btn-primary" onClick={()=>setShowAdd(true)}>+ Agregar socio</button>}
+          </div>
+        )}
+
         {stats.map(ref=>(
-          <div key={ref.id} style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",overflow:"hidden" }}>
-            <div onClick={()=>setExpanded(expanded===ref.id?null:ref.id)} style={{ display:"flex",alignItems:"center",gap:12,padding:"14px 16px",cursor:"pointer" }}>
-              <div style={{ width:36,height:36,borderRadius:"50%",background:"var(--color-background-info)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:500,color:"var(--color-text-info)",flexShrink:0 }}>{ref.name.split(" ").map(w=>w[0]).slice(0,2).join("")}</div>
-              <div style={{ flex:1,minWidth:0 }}>
-                <div style={{ fontSize:14,fontWeight:500 }}>{ref.name}</div>
-                <div style={{ fontSize:11,color:"var(--color-text-tertiary)",marginTop:2 }}>{ref.email} · {ref.commission_rate}% · {ref.activeBrokers} brokers</div>
+          <div key={ref.id} className="spicy-card" style={{ padding:0, overflow:"hidden" }}>
+            <div onClick={()=>setExpanded(expanded===ref.id?null:ref.id)}
+              style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px", cursor:"pointer" }}>
+              <div style={{ width:38,height:38,borderRadius:"50%",background:ST_RED_BG,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:ST_RED,flexShrink:0 }}>
+                {ref.name.split(" ").map(w=>w[0]).slice(0,2).join("")}
               </div>
-              <div style={{ textAlign:"right",flexShrink:0 }}>
-                <div style={{ fontSize:13,fontWeight:500,color:ref.totalOwed>0?"var(--color-text-warning)":"var(--color-text-success)" }}>{ref.totalOwed>0?`Debo ${fmtDec(ref.totalOwed)}`:"Al día"}</div>
-                <div style={{ fontSize:11,color:"var(--color-text-tertiary)",marginTop:2 }}>este mes: {fmtDec(ref.curCommission)}</div>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:14, fontWeight:600, color:"#111" }}>{ref.name}</div>
+                <div style={{ fontSize:11, color:"#aaa", marginTop:2, display:"flex", alignItems:"center", gap:8 }}>
+                  <span>{ref.email}</span>
+                  {isAdmin ? (
+                    <span style={{ display:"flex", alignItems:"center", gap:4 }}>
+                      · comisión:
+                      <input type="number" value={ref.commission_rate} min="1" max="100"
+                        onClick={e=>e.stopPropagation()}
+                        onChange={e=>updateRate(ref.id, Number(e.target.value))}
+                        style={{ width:44, fontSize:11, padding:"1px 4px", borderRadius:5, border:"1px solid #E0E0E0", textAlign:"center", fontFamily:"DM Sans,sans-serif" }}/>%
+                    </span>
+                  ) : <span>· {ref.commission_rate}%</span>}
+                  <span>· {ref.activeBrokers} brokers</span>
+                </div>
               </div>
-              <span style={{ fontSize:12,color:"var(--color-text-tertiary)" }}>{expanded===ref.id?"▲":"▼"}</span>
+              <div style={{ textAlign:"right", flexShrink:0 }}>
+                <div style={{ fontSize:13, fontWeight:700, color:ref.totalOwed>0?"#D97706":"#16A34A" }}>
+                  {ref.totalOwed>0 ? `Debo ${fmtDec(ref.totalOwed)}` : "Al día ✓"}
+                </div>
+                <div style={{ fontSize:11, color:"#aaa", marginTop:2 }}>este mes: {fmtDec(ref.curCommission)}</div>
+              </div>
+              <span style={{ fontSize:12, color:"#ccc" }}>{expanded===ref.id?"▲":"▼"}</span>
             </div>
+
             {expanded===ref.id&&(
-              <div style={{ borderTop:"0.5px solid var(--color-border-tertiary)",padding:"14px 16px" }}>
+              <div style={{ borderTop:"1px solid #F3F3F3", padding:"16px 20px" }}>
+                <div style={{ fontSize:12, fontWeight:600, color:"#555", marginBottom:12, textTransform:"uppercase", letterSpacing:0.5 }}>Detalle por mes</div>
                 {Object.entries(ref.months).sort(([a],[b])=>b.localeCompare(a)).map(([mk,m])=>{
-                  const owed=Math.max(0,m.commission-m.paid);
+                  const owed = Math.max(0, m.commission - m.paid);
                   return (
-                    <div key={mk} style={{ display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"0.5px solid var(--color-border-tertiary)" }}>
-                      <div style={{ flex:1,fontSize:13 }}>{monthLabel(mk)}</div>
-                      <div style={{ fontSize:12,color:"var(--color-text-tertiary)",minWidth:90,textAlign:"right" }}>Rev {fmtDec(m.revenue)}</div>
-                      <div style={{ fontSize:13,fontWeight:500,minWidth:80,textAlign:"right" }}>{fmtDec(m.commission)}</div>
-                      <div style={{ minWidth:90,textAlign:"right" }}>
-                        {owed<0.01
-                          ?<span style={{ fontSize:11,background:"var(--color-background-success)",color:"var(--color-text-success)",padding:"2px 8px",borderRadius:4 }}>pagado</span>
-                          :isAdmin&&<button onClick={()=>markPaid(ref,mk,owed)} style={{ fontSize:11,padding:"2px 10px",borderRadius:4,cursor:"pointer",background:"var(--color-background-warning)",color:"var(--color-text-warning)",border:"none" }}>marcar pagado</button>
+                    <div key={mk} style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 0", borderBottom:"1px solid #F3F3F3" }}>
+                      <div style={{ flex:1, fontSize:13, fontWeight:500 }}>{monthLabel(mk)}</div>
+                      <div style={{ fontSize:12, color:"#888", minWidth:100, textAlign:"right" }}>Rev {fmtDec(m.revenue)}</div>
+                      <div style={{ fontSize:13, fontWeight:700, color:"#111", minWidth:90, textAlign:"right" }}>{fmtDec(m.commission)}</div>
+                      <div style={{ minWidth:110, textAlign:"right" }}>
+                        {owed < 0.01
+                          ? <span className="spicy-badge-green">pagado</span>
+                          : isAdmin && <button onClick={()=>markPaid(ref,mk,owed)} style={{ fontSize:11, padding:"3px 10px", borderRadius:6, cursor:"pointer", background:"#FEF3C7", color:"#92400E", border:"1px solid #FCD34D", fontWeight:600 }}>marcar pagado</button>
                         }
                       </div>
                     </div>
                   );
                 })}
-                <div style={{ display:"flex",gap:10,marginTop:14 }}>
-                  {[{label:"Generado",value:fmtDec(ref.totalRevenue)},{label:"Comisión",value:fmtDec(ref.totalCommission)},{label:"Pagado",value:fmtDec(ref.totalPaid)},{label:"Pendiente",value:fmtDec(ref.totalOwed),warn:ref.totalOwed>0}].map(s=>(
-                    <div key={s.label} style={{ flex:1,background:"var(--color-background-secondary)",borderRadius:"var(--border-radius-md)",padding:"8px 10px" }}>
-                      <div style={{ fontSize:11,color:"var(--color-text-tertiary)",marginBottom:4 }}>{s.label}</div>
-                      <div style={{ fontSize:14,fontWeight:500,color:s.warn?"var(--color-text-warning)":"var(--color-text-primary)" }}>{s.value}</div>
+                {Object.keys(ref.months).length===0 && <div style={{ fontSize:13, color:"#bbb" }}>Sin transacciones aún. Sincronizá desde Stripe.</div>}
+
+                <div style={{ display:"flex", gap:10, marginTop:16 }}>
+                  {[
+                    {label:"Generado",  value:fmtDec(ref.totalRevenue)},
+                    {label:"Comisión",  value:fmtDec(ref.totalCommission)},
+                    {label:"Pagado",    value:fmtDec(ref.totalPaid)},
+                    {label:"Pendiente", value:fmtDec(ref.totalOwed), warn:ref.totalOwed>0},
+                  ].map(s=>(
+                    <div key={s.label} className="spicy-kpi" style={{ flex:1, padding:"10px 12px" }}>
+                      <div className="spicy-kpi-label">{s.label}</div>
+                      <div style={{ fontSize:15, fontWeight:700, color:s.warn?"#D97706":"#111" }}>{s.value}</div>
                     </div>
                   ))}
                 </div>
@@ -412,40 +650,48 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
             )}
           </div>
         ))}
-        {isAdmin&&(showAdd?(
-          <div style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1.25rem" }}>
-            <div style={{ fontSize:15,fontWeight:500,marginBottom:12 }}>Nuevo socio referidor</div>
-            {[{label:"ID único",field:"id",placeholder:"socio_pablo"},{label:"Nombre",field:"name",placeholder:"Pablo Méndez"},{label:"Email",field:"email",placeholder:"pablo@example.com"}].map(row=>(
+
+        {isAdmin && (showAdd ? (
+          <div className="spicy-card">
+            <div style={{ fontSize:15, fontWeight:700, color:"#111", marginBottom:16 }}>Nuevo socio referidor</div>
+            {[{label:"ID único",field:"id",placeholder:"socio_felipe"},{label:"Nombre",field:"name",placeholder:"Felipe"},{label:"Email",field:"email",placeholder:"felipe@stoke.agency"}].map(row=>(
               <div key={row.field} style={{ marginBottom:12 }}>
-                <div style={{ fontSize:12,color:"var(--color-text-tertiary)",marginBottom:5 }}>{row.label}</div>
-                <input value={newRef[row.field]} placeholder={row.placeholder} onChange={e=>setNewRef(f=>({...f,[row.field]:e.target.value}))} style={{ width:"100%",fontSize:13,boxSizing:"border-box" }}/>
+                <div style={{ fontSize:12, fontWeight:600, color:"#555", marginBottom:6, textTransform:"uppercase", letterSpacing:0.5 }}>{row.label}</div>
+                <input className="spicy-input" value={newRef[row.field]} placeholder={row.placeholder} onChange={e=>setNewRef(f=>({...f,[row.field]:e.target.value}))}/>
               </div>
             ))}
-            <div style={{ marginBottom:14 }}>
-              <div style={{ fontSize:12,color:"var(--color-text-tertiary)",marginBottom:5 }}>Comisión (%)</div>
-              <input type="number" value={newRef.commission_rate} onChange={e=>setNewRef(f=>({...f,commission_rate:Number(e.target.value)}))} style={{ width:"100%",fontSize:13,boxSizing:"border-box" }}/>
+            <div style={{ marginBottom:16 }}>
+              <div style={{ fontSize:12, fontWeight:600, color:"#555", marginBottom:6, textTransform:"uppercase", letterSpacing:0.5 }}>Comisión (%)</div>
+              <input className="spicy-input" type="number" value={newRef.commission_rate} min="1" max="100" onChange={e=>setNewRef(f=>({...f,commission_rate:Number(e.target.value)}))}/>
             </div>
-            <div style={{ display:"flex",gap:8 }}>
-              <button onClick={()=>setShowAdd(false)} style={{ flex:1,padding:"8px",borderRadius:"var(--border-radius-md)",fontSize:13,cursor:"pointer",border:"0.5px solid var(--color-border-tertiary)",background:"transparent",color:"var(--color-text-secondary)" }}>Cancelar</button>
-              <button onClick={saveReferrer} style={{ flex:2,padding:"8px",borderRadius:"var(--border-radius-md)",fontSize:13,fontWeight:500,cursor:"pointer",background:"var(--color-background-info)",color:"var(--color-text-info)",border:"0.5px solid var(--color-border-info)" }}>Guardar</button>
+            <div style={{ background:"#F0FDF4", borderRadius:8, padding:"10px 12px", fontSize:12, color:"#166534", marginBottom:16, lineHeight:1.7 }}>
+              En Stripe, al customer que refirió agregá:<br/>
+              <code style={{ fontFamily:"monospace" }}>referrer_id: {newRef.id||"socio_id"}</code><br/>
+              <code style={{ fontFamily:"monospace" }}>referrer_name: {newRef.name||"Nombre"}</code>
+            </div>
+            <div style={{ display:"flex", gap:8 }}>
+              <button className="spicy-btn-secondary" onClick={()=>setShowAdd(false)} style={{ flex:1 }}>Cancelar</button>
+              <button className="spicy-btn-primary" onClick={saveReferrer} style={{ flex:2 }}>Guardar socio</button>
             </div>
           </div>
-        ):(
-          <button onClick={()=>setShowAdd(true)} style={{ width:"100%",padding:"9px",borderRadius:"var(--border-radius-md)",fontSize:13,cursor:"pointer",border:"0.5px dashed var(--color-border-secondary)",background:"transparent",color:"var(--color-text-secondary)" }}>+ Agregar socio referidor</button>
+        ) : (
+          <button onClick={()=>setShowAdd(true)} style={{ width:"100%", padding:"11px", borderRadius:10, fontSize:13, cursor:"pointer", border:"2px dashed #E0E0E0", background:"transparent", color:"#888", fontWeight:500, fontFamily:"DM Sans,sans-serif" }}>
+            + Agregar socio referidor
+          </button>
         ))}
       </div>
     </div>
   );
 }
 
-// ── CSV Parser ─────────────────────────────────────────────────────────────
+// ── CSV Parser (sin Supabase, solo parsea rows) ────────────────────────────
 function autoCategory(desc,type){const d=(desc||"").toLowerCase();if(type==="income"){if(d.includes("subscription")||d.includes("mrr")||d.includes("plan"))return"SaaS MRR";if(d.includes("invest")||d.includes("capital"))return"Inversión";return"Otro ingreso";}if(d.includes("salary")||d.includes("deel")||d.includes("sueldo"))return"Salarios";if(d.includes("aws")||d.includes("vercel")||d.includes("notion")||d.includes("openai")||d.includes("stripe fee"))return"SaaS Tools";if(d.includes("meta")||d.includes("facebook")||d.includes("ads"))return"Marketing / Ads";return"Otro gasto";}
 function parseCSVRows(text,defaultAccountId){const lines=text.trim().split(/\r?\n/);if(lines.length<2)return[];const cols=lines[0].split(",").map(c=>c.trim().replace(/^"|"$/g,"").toLowerCase());const isMercury=cols.some(c=>c.includes("bank description"))||(cols.includes("amount")&&cols.includes("status"));const isStripe=cols.some(c=>c.includes("created (utc)"))||(cols.includes("net")&&cols.includes("fee"));if(!isMercury&&!isStripe)return[];const rows=[];for(let i=1;i<lines.length;i++){const line=lines[i].trim();if(!line)continue;const values=[];let cur="",inQ=false;for(const ch of line){if(ch==='"'){inQ=!inQ;}else if(ch===","&&!inQ){values.push(cur.trim());cur="";}else cur+=ch;}values.push(cur.trim());const get=(key)=>{const idx=cols.findIndex(c=>c.includes(key));return idx>=0?(values[idx]||"").replace(/^"|"$/g,"").trim():"";};if(isMercury){const rawDate=get("date"),rawAmount=parseFloat(get("amount").replace(/,/g,""))||0,desc=get("description")||get("bank description");if(get("status").toLowerCase()==="pending"||!rawDate||rawAmount===0)continue;const type=rawAmount>0?"income":"expense";rows.push({id:"imp_"+i+"_"+Date.now(),type,amount:Math.abs(rawAmount),description:desc,category:autoCategory(desc,type),date:rawDate.split("T")[0],source:"mercury",account_id:"mercury"});}else{const rawDate=get("created (utc)")||get("created"),rawNet=parseFloat(get("net").replace(/,/g,""))||0,txType=get("type").toLowerCase(),desc=get("description")||get("source");if(!rawDate||txType==="payout")continue;const type=rawNet<0?"expense":"income";rows.push({id:"imp_str_"+i+"_"+Date.now(),type,amount:Math.abs(rawNet),description:desc,category:autoCategory(desc,type),date:rawDate.split(" ")[0],source:"stripe",account_id:defaultAccountId||"mercury"});}}return rows;}
 
 // ── Main App ───────────────────────────────────────────────────────────────
 export default function SpicyFinanzas() {
   const [session,  setSession]  = useState(null);
-  const [role,     setRole]     = useState(null);
+  const [role,     setRole]     = useState(null); // 'admin' | 'reader' | null
   const [authReady,setAuthReady]= useState(false);
 
   const [txns,      setTxns]      = useState([]);
@@ -463,6 +709,7 @@ export default function SpicyFinanzas() {
   const [form, setForm] = useState({type:"income",category:"SaaS MRR",amount:"",description:"",date:new Date().toISOString().split("T")[0],account_id:"mercury"});
   const [saved, setSaved] = useState(false);
 
+  // ── Auth listener ────────────────────────────────────────────────────────
   useEffect(()=>{
     sb.auth.getSession().then(({data:{session}})=>{
       setSession(session); setAuthReady(true);
@@ -473,6 +720,7 @@ export default function SpicyFinanzas() {
     return ()=>subscription.unsubscribe();
   },[]);
 
+  // ── Load role + data when session available ──────────────────────────────
   useEffect(()=>{
     if (!session) return;
     loadAll();
@@ -506,6 +754,11 @@ export default function SpicyFinanzas() {
     setSaved(true); setTimeout(()=>setSaved(false),2000); setView("dashboard"); loadAll();
   }
 
+  async function updateCategory(id, category) {
+    await sb.from("transactions").update({ category }).eq("id", id);
+    setTxns(prev => prev.map(t => t.id === id ? { ...t, category } : t));
+  }
+
   async function deleteTxn(id) {
     await sb.from("transactions").delete().eq("id",id);
     setTxns(prev=>prev.filter(t=>t.id!==id));
@@ -528,6 +781,7 @@ export default function SpicyFinanzas() {
     setSyncing(false);
   }
 
+  // ── Métricas ─────────────────────────────────────────────────────────────
   const now=new Date();
   const income=txns.filter(t=>t.type==="income").reduce((s,t)=>s+Number(t.amount),0);
   const expenses=txns.filter(t=>t.type==="expense").reduce((s,t)=>s+Number(t.amount),0);
@@ -552,97 +806,114 @@ export default function SpicyFinanzas() {
     return null;
   };
 
-  if (!authReady) return <div style={{ padding:"2rem",color:"var(--color-text-secondary)",fontSize:14 }}>Cargando...</div>;
+  if (!authReady) return <div style={{ display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"#F7F7F8",fontSize:14,color:"#888" }}>Cargando...</div>;
   if (!session)   return <LoginScreen/>;
-  if (!dataLoaded)return <div style={{ padding:"2rem",color:"var(--color-text-secondary)",fontSize:14 }}>Cargando datos...</div>;
+  if (!dataLoaded)return <div style={{ display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"#F7F7F8",fontSize:14,color:"#888" }}>Cargando datos...</div>;
 
-  const navBtn=(v,label,badge)=>(
-    <button key={v} onClick={()=>setView(v)} style={{ fontSize:13,padding:"6px 14px",borderRadius:"var(--border-radius-md)",background:view===v?"var(--color-background-info)":"transparent",color:view===v?"var(--color-text-info)":"var(--color-text-secondary)",border:view===v?"0.5px solid var(--color-border-info)":"0.5px solid var(--color-border-tertiary)",cursor:"pointer",fontWeight:view===v?500:400 }}>
-      {label}{badge&&<span style={{ fontSize:10,background:"#BA7517",color:"#fff",borderRadius:10,padding:"1px 5px",marginLeft:5 }}>{badge}</span>}
-    </button>
-  );
+  const navViews = isAdmin
+    ? ["dashboard","accounts","referrals","add","history","categories"]
+    : ["dashboard","accounts","referrals","history","categories"];
+
+  const userInitials = session.user.email.slice(0,2).toUpperCase();
 
   return (
-    <div style={{ fontFamily:"var(--font-sans)",padding:"1rem 0",maxWidth:720 }}>
-      <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1.5rem",flexWrap:"wrap",gap:10 }}>
-        <div>
-          <div style={{ fontSize:11,fontWeight:500,color:"var(--color-text-tertiary)",letterSpacing:1,textTransform:"uppercase",marginBottom:4 }}>SpicyTool</div>
-          <div style={{ fontSize:22,fontWeight:500 }}>Control financiero</div>
+    <div className="spicy-root">
+      <BrandStyles/>
+
+      {/* Sidebar */}
+      <div className="spicy-sidebar">
+        <div className="spicy-logo">
+          <div className="spicy-logo-icon">S</div>
+          <div className="spicy-logo-text">SpicyTool</div>
         </div>
-        <div style={{ display:"flex",gap:8,flexWrap:"wrap",alignItems:"center" }}>
-          {navBtn("dashboard","Resumen")}
-          {navBtn("accounts","Cuentas")}
-          {navBtn("referrals","Referidos",referralOwed>0?fmt(referralOwed):null)}
-          {isAdmin&&navBtn("add","+ Registrar")}
-          {navBtn("history","Historial")}
-          {navBtn("categories","Categorías")}
-          {WORKER_URL&&<button onClick={handleSync} disabled={syncing} style={{ fontSize:13,padding:"6px 14px",borderRadius:"var(--border-radius-md)",background:"transparent",color:"var(--color-text-secondary)",border:"0.5px solid var(--color-border-tertiary)",cursor:"pointer" }}>{syncing?"Sincronizando…":"⟳ Sync"}</button>}
-          <div style={{ display:"flex",alignItems:"center",gap:6,marginLeft:4 }}>
-            <span style={{ fontSize:11,color:"var(--color-text-tertiary)" }}>{session.user.email}</span>
-            <span style={{ fontSize:10,padding:"2px 7px",borderRadius:10,background:isAdmin?"var(--color-background-success)":"var(--color-background-secondary)",color:isAdmin?"var(--color-text-success)":"var(--color-text-tertiary)" }}>{role}</span>
-            <button onClick={()=>sb.auth.signOut()} style={{ fontSize:11,padding:"4px 8px",borderRadius:"var(--border-radius-md)",cursor:"pointer",border:"0.5px solid var(--color-border-tertiary)",background:"transparent",color:"var(--color-text-tertiary)" }}>Salir</button>
+
+        <nav className="spicy-nav">
+          <div style={{ fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.3)",textTransform:"uppercase",letterSpacing:1,padding:"8px 12px 6px",marginTop:4 }}>Finanzas</div>
+          {navViews.map(v=>(
+            <button key={v} onClick={()=>setView(v)} className={`spicy-nav-btn${view===v?" active":""}`}>
+              <span style={{ fontSize:14 }}>{NAV_ICONS[v]}</span>
+              {NAV_LABELS[v]}
+              {v==="referrals"&&referralOwed>0&&<span className="spicy-nav-badge">{fmt(referralOwed)}</span>}
+            </button>
+          ))}
+        </nav>
+
+        <div className="spicy-user">
+          <div className="spicy-avatar">{userInitials}</div>
+          <div style={{ flex:1,minWidth:0 }}>
+            <div style={{ fontSize:12,fontWeight:600,color:"white",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{session.user.email}</div>
+            <span className="spicy-badge-gray" style={{ background:"rgba(255,255,255,0.1)",color:"rgba(255,255,255,0.5)" }}>{role}</span>
           </div>
+          <button onClick={()=>sb.auth.signOut()} title="Cerrar sesión" style={{ background:"none",border:"none",cursor:"pointer",color:"rgba(255,255,255,0.4)",fontSize:16,padding:"4px",lineHeight:1,flexShrink:0 }}>→</button>
         </div>
       </div>
-      {syncError&&<div style={{ fontSize:12,color:"var(--color-text-danger)",marginBottom:12,padding:"8px 12px",background:"var(--color-background-danger)",borderRadius:"var(--border-radius-md)" }}>{syncError}</div>}
 
+      {/* Main content */}
+      <div className="spicy-main">
+        {syncError&&<div style={{ fontSize:13,color:ST_RED,marginBottom:16,padding:"10px 14px",background:ST_RED_BG,borderRadius:10,border:`1px solid ${ST_RED}22` }}>{syncError}</div>}
+
+      {/* DASHBOARD */}
       {view==="dashboard"&&(
         <>
-          <div style={{ display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:10,marginBottom:"1.25rem" }}>
+          <div style={{ fontSize:20,fontWeight:700,color:"#111",marginBottom:20 }}>Resumen financiero</div>
+          <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:20 }}>
             {[{label:"MRR",value:fmt(mrr),sub:"último mes"},{label:"ARR",value:fmt(mrr*12),sub:"proyectado"},{label:"Cash total",value:fmt(totalCash),sub:`${accounts.filter(a=>a.balance>0).length} cuentas`},{label:"Runway",value:runway>0?`${runway} meses`:"—",sub:monthlyBurn>0?`burn ${fmt(monthlyBurn)}/mes`:"sin burn"}].map(k=>(
-              <div key={k.label} style={{ background:"var(--color-background-secondary)",borderRadius:"var(--border-radius-md)",padding:"0.875rem" }}>
-                <div style={{ fontSize:12,color:"var(--color-text-tertiary)",marginBottom:6 }}>{k.label}</div>
-                <div style={{ fontSize:18,fontWeight:500 }}>{k.value}</div>
-                <div style={{ fontSize:11,color:"var(--color-text-tertiary)",marginTop:4 }}>{k.sub}</div>
+              <div key={k.label} className="spicy-kpi">
+                <div className="spicy-kpi-label">{k.label}</div>
+                <div className="spicy-kpi-value">{k.value}</div>
+                <div className="spicy-kpi-sub">{k.sub}</div>
               </div>
             ))}
           </div>
 
-          <div style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"12px 16px",marginBottom:"1.25rem" }}>
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
-              <span style={{ fontSize:13,fontWeight:500 }}>Saldos por banco</span>
-              <button onClick={()=>setView("accounts")} style={{ fontSize:12,color:"var(--color-text-info)",background:"none",border:"none",cursor:"pointer" }}>Ver todas →</button>
+          {/* Saldos por banco */}
+          <div className="spicy-card">
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+              <span style={{ fontSize:14,fontWeight:600,color:"#111" }}>Saldos por banco</span>
+              <button onClick={()=>setView("accounts")} style={{ fontSize:12,color:ST_RED,background:"none",border:"none",cursor:"pointer",fontWeight:600 }}>Ver todas →</button>
             </div>
             <div style={{ display:"flex",flexWrap:"wrap",gap:8 }}>
               {accounts.map(a=>(
-                <div key={a.id} onClick={()=>setView("accounts")} style={{ display:"flex",alignItems:"center",gap:6,padding:"6px 10px",background:"var(--color-background-secondary)",borderRadius:"var(--border-radius-md)",cursor:"pointer" }}>
+                <div key={a.id} onClick={()=>setView("accounts")} style={{ display:"flex",alignItems:"center",gap:6,padding:"7px 12px",background:"#F7F7F8",borderRadius:8,cursor:"pointer",border:"1px solid #EBEBEB" }}>
                   <div style={{ width:8,height:8,borderRadius:"50%",background:a.color }}/>
-                  <span style={{ fontSize:12,color:"var(--color-text-secondary)" }}>{a.name}</span>
-                  <span style={{ fontSize:13,fontWeight:500,color:a.balance>0?"var(--color-text-primary)":"var(--color-text-tertiary)" }}>{fmt(a.balance)}</span>
+                  <span style={{ fontSize:12,color:"#666",fontWeight:500 }}>{a.name}</span>
+                  <span style={{ fontSize:13,fontWeight:600,color:a.balance>0?"#111":"#bbb" }}>{fmt(a.balance)}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          {referralOwed>0&&<div onClick={()=>setView("referrals")} style={{ background:"var(--color-background-warning)",border:"0.5px solid var(--color-border-warning)",borderRadius:"var(--border-radius-md)",padding:"10px 14px",marginBottom:"1.25rem",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between" }}>
-            <div style={{ fontSize:13,color:"var(--color-text-warning)",fontWeight:500 }}>Comisiones a pagar este mes: {fmtDec(referralOwed)}</div>
-            <span style={{ fontSize:12,color:"var(--color-text-warning)" }}>Ver →</span>
+          {referralOwed>0&&<div onClick={()=>setView("referrals")} style={{ background:"#FEF3C7",border:"1px solid #FCD34D",borderRadius:10,padding:"12px 16px",marginBottom:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between" }}>
+            <div style={{ fontSize:13,color:"#92400E",fontWeight:600 }}>⚠ Comisiones a pagar este mes: {fmtDec(referralOwed)}</div>
+            <span style={{ fontSize:12,color:"#92400E",fontWeight:600 }}>Ver →</span>
           </div>}
 
-          <div style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1rem 1.25rem",marginBottom:"1.25rem" }}>
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem" }}>
-              <span style={{ fontSize:14,fontWeight:500 }}>Ingresos vs egresos — 6 meses</span>
-              <div style={{ display:"flex",gap:10,fontSize:12,color:"var(--color-text-secondary)" }}>
-                <span style={{ display:"flex",alignItems:"center",gap:3 }}><span style={{ width:9,height:9,borderRadius:2,background:"#1D9E75",display:"inline-block" }}/> Ing.</span>
-                <span style={{ display:"flex",alignItems:"center",gap:3 }}><span style={{ width:9,height:9,borderRadius:2,background:"#D85A30",display:"inline-block" }}/> Egr.</span>
-                <span style={{ display:"flex",alignItems:"center",gap:3 }}><span style={{ width:9,height:9,borderRadius:2,background:"#BA7517",display:"inline-block" }}/> Ref.</span>
+          {/* Chart */}
+          <div className="spicy-card">
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+              <span style={{ fontSize:14,fontWeight:600,color:"#111" }}>Ingresos vs egresos — 6 meses</span>
+              <div style={{ display:"flex",gap:12,fontSize:12,color:"#888" }}>
+                <span style={{ display:"flex",alignItems:"center",gap:4 }}><span style={{ width:10,height:10,borderRadius:2,background:"#1D9E75",display:"inline-block" }}/> Ing.</span>
+                <span style={{ display:"flex",alignItems:"center",gap:4 }}><span style={{ width:10,height:10,borderRadius:2,background:ST_RED,display:"inline-block" }}/> Egr.</span>
+                <span style={{ display:"flex",alignItems:"center",gap:4 }}><span style={{ width:10,height:10,borderRadius:2,background:"#F59E0B",display:"inline-block" }}/> Ref.</span>
               </div>
             </div>
-            <div style={{ display:"flex",alignItems:"flex-end",gap:6,paddingTop:4 }}>
+            <div style={{ display:"flex",alignItems:"flex-end",gap:8,paddingTop:4 }}>
               {chartData.map(d=><ChartBar key={d.label} {...d} maxVal={maxVal}/>)}
             </div>
           </div>
 
-          <div style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1rem 1.25rem" }}>
-            <div style={{ fontSize:14,fontWeight:500,marginBottom:"1rem" }}>Egresos por categoría</div>
+          {/* Egresos por cat */}
+          <div className="spicy-card">
+            <div style={{ fontSize:14,fontWeight:600,color:"#111",marginBottom:16 }}>Egresos por categoría</div>
             {expByCat.map(x=>(
-              <div key={x.cat} style={{ marginBottom:11 }}>
-                <div style={{ display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:5 }}>
-                  <span style={{ color:x.cat==="Comisiones referidos"?"var(--color-text-warning)":"var(--color-text-secondary)" }}>{x.cat}</span>
-                  <span style={{ fontWeight:500 }}>{fmt(x.total)}</span>
+              <div key={x.cat} style={{ marginBottom:14 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6 }}>
+                  <span style={{ color:x.cat==="Comisiones referidos"?"#D97706":"#555",fontWeight:500 }}>{x.cat}</span>
+                  <span style={{ fontWeight:600,color:"#111" }}>{fmt(x.total)}</span>
                 </div>
-                <div style={{ height:5,background:"var(--color-background-secondary)",borderRadius:3,overflow:"hidden" }}>
-                  <div style={{ height:"100%",width:`${Math.round((x.total/totalExpAll)*100)}%`,background:x.cat==="Comisiones referidos"?"#BA7517":"#D85A30",borderRadius:3 }}/>
+                <div style={{ height:6,background:"#F3F3F3",borderRadius:4,overflow:"hidden" }}>
+                  <div style={{ height:"100%",width:`${Math.round((x.total/totalExpAll)*100)}%`,background:x.cat==="Comisiones referidos"?"#F59E0B":ST_RED,borderRadius:4 }}/>
                 </div>
               </div>
             ))}
@@ -654,15 +925,16 @@ export default function SpicyFinanzas() {
       {view==="referrals"&&<ReferralDashboard txns={txns} referrers={referrers} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="categories"&&<CategoriesPanel catsIncome={catsIncome} catsExpense={catsExpense} isAdmin={isAdmin} onRefresh={loadAll}/>}
 
+      {/* ADD */}
       {view==="add"&&isAdmin&&(
-        <div style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1.25rem" }}>
-          <div style={{ fontSize:16,fontWeight:500,marginBottom:"1.25rem" }}>Registrar movimiento</div>
-          <div style={{ marginBottom:14 }}>
-            <div style={{ fontSize:12,color:"var(--color-text-tertiary)",marginBottom:6 }}>Tipo</div>
+        <div className="spicy-card" style={{ maxWidth:480 }}>
+          <div style={{ fontSize:18,fontWeight:700,color:"#111",marginBottom:20 }}>Registrar movimiento</div>
+          <div style={{ marginBottom:16 }}>
+            <div style={{ fontSize:12,fontWeight:600,color:"#555",marginBottom:8,textTransform:"uppercase",letterSpacing:0.5 }}>Tipo</div>
             <div style={{ display:"flex",gap:8 }}>
               {["income","expense"].map(t=>(
-                <button key={t} onClick={()=>setForm(f=>({...f,type:t,category:t==="income"?(catsIncome[0]?.name||"SaaS MRR"):(catsExpense[0]?.name||"Salarios")}))} style={{ flex:1,padding:"8px",borderRadius:"var(--border-radius-md)",fontSize:13,cursor:"pointer",background:form.type===t?(t==="income"?"var(--color-background-success)":"var(--color-background-danger)"):"var(--color-background-secondary)",color:form.type===t?(t==="income"?"var(--color-text-success)":"var(--color-text-danger)"):"var(--color-text-secondary)",border:"0.5px solid var(--color-border-tertiary)",fontWeight:form.type===t?500:400 }}>
-                  {t==="income"?"Ingreso":"Egreso"}
+                <button key={t} onClick={()=>setForm(f=>({...f,type:t,category:t==="income"?(catsIncome[0]?.name||"SaaS MRR"):(catsExpense[0]?.name||"Salarios")}))} style={{ flex:1,padding:"9px",borderRadius:8,fontSize:13,cursor:"pointer",fontWeight:600,border:"2px solid",borderColor:form.type===t?(t==="income"?"#1D9E75":ST_RED):"#E0E0E0",background:form.type===t?(t==="income"?"#EDFAF3":ST_RED_BG):"white",color:form.type===t?(t==="income"?"#16A34A":ST_RED):"#888",transition:"all 0.15s" }}>
+                  {t==="income"?"↑ Ingreso":"↓ Egreso"}
                 </button>
               ))}
             </div>
@@ -671,54 +943,68 @@ export default function SpicyFinanzas() {
             {label:"Cuenta",field:"account_id",type:"select",options:accounts.map(a=>({value:a.id,label:a.name}))},
             {label:"Categoría",field:"category",type:"select",options:(form.type==="income"?catsIncome:catsExpense).map(c=>({value:c.name,label:c.name}))},
             {label:"Monto (USD)",field:"amount",type:"number",placeholder:"0.00"},
-            {label:"Descripción",field:"description",type:"text",placeholder:"Concepto"},
+            {label:"Descripción",field:"description",type:"text",placeholder:"Concepto del movimiento"},
             {label:"Fecha",field:"date",type:"date"},
           ].map(row=>(
             <div key={row.field} style={{ marginBottom:14 }}>
-              <div style={{ fontSize:12,color:"var(--color-text-tertiary)",marginBottom:6 }}>{row.label}</div>
+              <div style={{ fontSize:12,fontWeight:600,color:"#555",marginBottom:7,textTransform:"uppercase",letterSpacing:0.5 }}>{row.label}</div>
               {row.type==="select"
-                ?<select value={form[row.field]} onChange={e=>setForm(f=>({...f,[row.field]:e.target.value}))} style={{ width:"100%",fontSize:13 }}>{row.options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select>
-                :<input type={row.type} value={form[row.field]} placeholder={row.placeholder} onChange={e=>setForm(f=>({...f,[row.field]:e.target.value}))} style={{ width:"100%",fontSize:13,boxSizing:"border-box" }}/>
+                ?<select className="spicy-select" value={form[row.field]} onChange={e=>setForm(f=>({...f,[row.field]:e.target.value}))} style={{ width:"100%" }}>{row.options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select>
+                :<input className="spicy-input" type={row.type} value={form[row.field]} placeholder={row.placeholder} onChange={e=>setForm(f=>({...f,[row.field]:e.target.value}))}/>
               }
             </div>
           ))}
-          <button onClick={handleAdd} style={{ width:"100%",padding:"10px",marginTop:8,borderRadius:"var(--border-radius-md)",fontSize:14,fontWeight:500,cursor:"pointer",background:"var(--color-background-info)",color:"var(--color-text-info)",border:"0.5px solid var(--color-border-info)" }}>
+          <button className="spicy-btn-primary" onClick={handleAdd} style={{ width:"100%",padding:"12px",marginTop:8,fontSize:14 }}>
             {saved?"Guardado ✓":"Guardar movimiento"}
           </button>
         </div>
       )}
 
+      {/* HISTORY */}
       {view==="history"&&(
         <>
-          <div style={{ display:"flex",gap:8,marginBottom:"1rem",flexWrap:"wrap" }}>
+          <div style={{ fontSize:20,fontWeight:700,color:"#111",marginBottom:20 }}>Historial</div>
+          <div style={{ display:"flex",gap:8,marginBottom:16,flexWrap:"wrap" }}>
             {[["all","Todos"],["income","Ingresos"],["expense","Egresos"]].map(([f,l])=>(
-              <button key={f} onClick={()=>setFilterType(f)} style={{ fontSize:12,padding:"5px 12px",borderRadius:"var(--border-radius-md)",background:filterType===f?"var(--color-background-secondary)":"transparent",color:filterType===f?"var(--color-text-primary)":"var(--color-text-tertiary)",border:"0.5px solid var(--color-border-tertiary)",cursor:"pointer",fontWeight:filterType===f?500:400 }}>{l}</button>
+              <button key={f} onClick={()=>setFilterType(f)} style={{ fontSize:12,padding:"6px 14px",borderRadius:8,fontWeight:600,cursor:"pointer",border:"2px solid",borderColor:filterType===f?ST_RED:"#E0E0E0",background:filterType===f?ST_RED_BG:"white",color:filterType===f?ST_RED:"#888",transition:"all 0.15s" }}>{l}</button>
             ))}
-            <select value={filterAcc} onChange={e=>setFilterAcc(e.target.value)} style={{ fontSize:12,padding:"4px 8px",borderRadius:"var(--border-radius-md)",border:"0.5px solid var(--color-border-tertiary)",background:"transparent",color:"var(--color-text-secondary)",cursor:"pointer" }}>
+            <select value={filterAcc} onChange={e=>setFilterAcc(e.target.value)} className="spicy-select">
               <option value="all">Todas las cuentas</option>
               {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
-            <span style={{ marginLeft:"auto",fontSize:12,color:"var(--color-text-tertiary)",alignSelf:"center" }}>{visibleTxns.length} registros</span>
+            <span style={{ marginLeft:"auto",fontSize:12,color:"#aaa",alignSelf:"center",fontWeight:500 }}>{visibleTxns.length} registros</span>
           </div>
-          <div style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",overflow:"hidden" }}>
-            {visibleTxns.length===0&&<div style={{ padding:"2rem",textAlign:"center",fontSize:13,color:"var(--color-text-tertiary)" }}>Sin movimientos.</div>}
+          <div className="spicy-card" style={{ padding:0,overflow:"hidden" }}>
+            {visibleTxns.length===0&&<div style={{ padding:"2rem",textAlign:"center",fontSize:13,color:"#bbb" }}>Sin movimientos.</div>}
             {visibleTxns.map((t,i)=>{
               const acc=accounts.find(a=>a.id===t.account_id);
+              const cats=t.type==="income"?catsIncome:catsExpense;
               return(
-                <div key={t.id} style={{ display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<visibleTxns.length-1?"0.5px solid var(--color-border-tertiary)":"none" }}>
-                  <div style={{ width:8,height:8,borderRadius:"50%",flexShrink:0,background:t.type==="income"?"#1D9E75":"#D85A30" }}/>
+                <div key={t.id} style={{ display:"flex",alignItems:"center",gap:12,padding:"13px 20px",borderBottom:i<visibleTxns.length-1?"1px solid #F3F3F3":"none" }}>
+                  <div style={{ width:9,height:9,borderRadius:"50%",flexShrink:0,background:t.type==="income"?"#1D9E75":ST_RED }}/>
                   <div style={{ flex:1,minWidth:0 }}>
-                    <div style={{ fontSize:13,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{t.description||t.category}{sourceBadge(t)}</div>
-                    <div style={{ fontSize:11,color:"var(--color-text-tertiary)",marginTop:2 }}>{t.category} · {t.date}{acc&&<span style={{ marginLeft:6 }}>· <span style={{ color:acc.color }}>{acc.name}</span></span>}</div>
+                    <div style={{ fontSize:13,fontWeight:600,color:"#111",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{t.description||t.category}{sourceBadge(t)}</div>
+                    <div style={{ fontSize:11,color:"#aaa",marginTop:3,display:"flex",alignItems:"center",gap:6 }}>
+                      {isAdmin?(
+                        <select value={t.category} onChange={e=>updateCategory(t.id,e.target.value)}
+                          style={{ fontSize:11,padding:"1px 6px",borderRadius:5,border:"1px solid #E0E0E0",background:"#F7F7F8",color:"#666",cursor:"pointer",fontFamily:"DM Sans,sans-serif" }}>
+                          {cats.map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+                        </select>
+                      ):<span>{t.category}</span>}
+                      <span>· {t.date}</span>
+                      {acc&&<span>· <span style={{ color:acc.color,fontWeight:600 }}>{acc.name}</span></span>}
+                    </div>
                   </div>
-                  <div style={{ fontSize:14,fontWeight:500,color:t.type==="income"?"var(--color-text-success)":"var(--color-text-danger)",flexShrink:0 }}>{t.type==="income"?"+":"−"}{fmt(t.amount)}</div>
-                  {isAdmin&&<button onClick={()=>deleteTxn(t.id)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:16,color:"var(--color-text-tertiary)",padding:"0 4px",lineHeight:1 }}>×</button>}
+                  <div style={{ fontSize:14,fontWeight:700,color:t.type==="income"?"#16A34A":ST_RED,flexShrink:0 }}>{t.type==="income"?"+":"−"}{fmt(t.amount)}</div>
+                  {isAdmin&&<button onClick={()=>deleteTxn(t.id)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:18,color:"#ccc",padding:"0 4px",lineHeight:1 }}>×</button>}
                 </div>
               );
             })}
           </div>
         </>
       )}
+
+      </div>{/* end spicy-main */}
     </div>
   );
 }
