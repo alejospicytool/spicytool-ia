@@ -116,12 +116,12 @@ function BrandStyles() {
 
 // ── Nav icon map ───────────────────────────────────────────────────────────
 const NAV_ICONS = {
-  dashboard: "▦", accounts: "🏦", referrals: "🤝",
-  add: "+", history: "☰", categories: "⊞"
+  dashboard:"▦", accounts:"🏦", referrals:"🤝", runway:"📈",
+  add:"+", history:"☰", categories:"⊞"
 };
 const NAV_LABELS = {
-  dashboard: "Resumen", accounts: "Cuentas", referrals: "Referidos",
-  add: "Registrar", history: "Historial", categories: "Categorías"
+  dashboard:"Resumen", accounts:"Cuentas", referrals:"Referidos", runway:"Runway",
+  add:"Registrar", history:"Historial", categories:"Categorías"
 };
 
 const WORKER_URL = "";
@@ -207,26 +207,22 @@ function ChartBar({ label, income, expense, referralCost, maxVal }) {
 
 // ── Accounts Panel ─────────────────────────────────────────────────────────
 function AccountsPanel({ accounts, txns, isAdmin, onRefresh }) {
-  const [importingId,   setImportingId]   = useState(null);
-  const [showAdd,       setShowAdd]       = useState(false);
-  const [newForm,       setNewForm]       = useState({ name:"", currency:"USD", balance:"" });
+  const [importingId, setImportingId] = useState(null);
+  const [showAdd,     setShowAdd]     = useState(false);
+  const [newForm,     setNewForm]     = useState({ name:"", currency:"USD", balance:"" });
   const [confirmDelete, setConfirmDelete] = useState(null);
-  const [saving,        setSaving]        = useState(false);
+  const [saving, setSaving] = useState(false);
   const fileRef = useRef();
 
   const total = accounts.reduce((s,a) => {
-    const calc = txns.filter(t => t.account_id === a.id)
-      .reduce((b,t) => b + (t.type==="income" ? Number(t.amount) : -Number(t.amount)), 0);
+    const accTxns = txns.filter(t => t.account_id === a.id);
+    const calc = accTxns.reduce((b,t) => b + (t.type==="income" ? Number(t.amount) : -Number(t.amount)), 0);
     return s + calc;
   }, 0);
-
   const txnsByAccount = {};
-  accounts.forEach(a => {
-    const at = txns.filter(t => t.account_id === a.id);
-    txnsByAccount[a.id] = {
-      income:  at.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0),
-      expense: at.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0),
-    };
+  accounts.forEach(a=>{
+    const at=txns.filter(t=>t.account_id===a.id);
+    txnsByAccount[a.id]={ income:at.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0), expense:at.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0) };
   });
 
   async function addAccount() {
@@ -267,58 +263,54 @@ function AccountsPanel({ accounts, txns, isAdmin, onRefresh }) {
           <div style={{ fontSize:12,color:"var(--color-text-tertiary)",marginTop:4 }}>{accounts.length} cuentas</div>
         </div>
         <div style={{ display:"flex",alignItems:"flex-end",gap:4,height:48 }}>
-          {accounts.map(a=>{
-            const cb=txns.filter(t=>t.account_id===a.id).reduce((b,t)=>b+(t.type==="income"?Number(t.amount):-Number(t.amount)),0);
-            const h=total>0&&cb>0?Math.max(4,Math.round((cb/total)*48)):0;
-            return cb>0?<div key={a.id} title={`${a.name}: ${fmt(cb)}`} style={{ width:10,height:h,background:a.color,borderRadius:"2px 2px 0 0",opacity:0.85 }}/>:null;
-          })}
+          {accounts.map(a=>{const cb=txns.filter(t=>t.account_id===a.id).reduce((b,t)=>b+(t.type==="income"?Number(t.amount):-Number(t.amount)),0);const h=total>0&&cb>0?Math.max(4,Math.round((cb/total)*48)):0;return cb>0?<div key={a.id} title={`${a.name}: ${fmt(cb)}`} style={{ width:10,height:h,background:a.color,borderRadius:"2px 2px 0 0",opacity:0.85 }}/>:null;}) }
         </div>
       </div>
 
       <div style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",overflow:"hidden",marginBottom:10 }}>
-        {accounts.map((a,i) => {
-          const calcBalance = txns.filter(t => t.account_id === a.id)
-            .reduce((b,t) => b + (t.type==="income" ? Number(t.amount) : -Number(t.amount)), 0);
+        {accounts.map((a,i)=>{
+          const accTxns = txns.filter(t => t.account_id === a.id);
+          const calcBalance = accTxns.reduce((b,t) => b + (t.type==="income" ? Number(t.amount) : -Number(t.amount)), 0);
           return (
-            <div key={a.id} style={{ display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<accounts.length-1?"0.5px solid var(--color-border-tertiary)":"none" }}>
-              <div style={{ width:10,height:10,borderRadius:"50%",background:a.color,flexShrink:0 }}/>
-              <div style={{ flex:1,minWidth:0 }}>
-                <div style={{ display:"flex",alignItems:"center",gap:6 }}>
-                  <span style={{ fontSize:14,fontWeight:500 }}>{a.name}</span>
-                  {a.api&&<span style={{ fontSize:10,padding:"1px 6px",borderRadius:4,background:"var(--color-background-info)",color:"var(--color-text-info)" }}>API</span>}
-                  <span style={{ fontSize:11,color:"var(--color-text-tertiary)" }}>{a.currency}</span>
-                </div>
-                <div style={{ fontSize:11,color:"var(--color-text-tertiary)",marginTop:2 }}>{fmt(txnsByAccount[a.id]?.income||0)} ing · {fmt(txnsByAccount[a.id]?.expense||0)} egr</div>
+          <div key={a.id} style={{ display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<accounts.length-1?"0.5px solid var(--color-border-tertiary)":"none" }}>
+            <div style={{ width:10,height:10,borderRadius:"50%",background:a.color,flexShrink:0 }}/>
+            <div style={{ flex:1,minWidth:0 }}>
+              <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                <span style={{ fontSize:14,fontWeight:500 }}>{a.name}</span>
+                {a.api&&<span style={{ fontSize:10,padding:"1px 6px",borderRadius:4,background:"var(--color-background-info)",color:"var(--color-text-info)" }}>API</span>}
+                <span style={{ fontSize:11,color:"var(--color-text-tertiary)" }}>{a.currency}</span>
               </div>
-
-              <div style={{ fontSize:16,fontWeight:600,color:calcBalance>0?"#111":calcBalance<0?"#EF3E3E":"#bbb",minWidth:90,textAlign:"right" }}>
-                {fmt(calcBalance)}
-                <div style={{ fontSize:10,color:"#aaa",fontWeight:400,marginTop:1 }}>calculado</div>
-              </div>
-
-              {isAdmin&&(
-                <div style={{ position:"relative" }}>
-                  <button onClick={()=>setImportingId(importingId===a.id?null:a.id)} style={{ fontSize:11,padding:"4px 9px",borderRadius:"var(--border-radius-md)",cursor:"pointer",border:"0.5px solid var(--color-border-tertiary)",background:"transparent",color:"var(--color-text-tertiary)" }}>↑ CSV</button>
-                  {importingId===a.id&&(
-                    <div style={{ position:"absolute",right:0,top:30,zIndex:10,background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-secondary)",borderRadius:"var(--border-radius-md)",padding:"10px 12px",width:200,boxShadow:"0 4px 16px rgba(0,0,0,0.12)" }}>
-                      <div style={{ fontSize:12,fontWeight:500,marginBottom:8 }}>Importar a {a.name}</div>
-                      <input type="file" accept=".csv" ref={fileRef} style={{ display:"none" }} onChange={e=>handleFile(e,a.id)}/>
-                      <button onClick={()=>fileRef.current.click()} style={{ width:"100%",padding:"7px",borderRadius:"var(--border-radius-md)",fontSize:12,cursor:"pointer",background:"var(--color-background-info)",color:"var(--color-text-info)",border:"0.5px solid var(--color-border-info)",fontWeight:500 }}>Seleccionar archivo</button>
-                      <button onClick={()=>setImportingId(null)} style={{ width:"100%",marginTop:6,padding:"5px",borderRadius:"var(--border-radius-md)",fontSize:11,cursor:"pointer",background:"transparent",color:"var(--color-text-tertiary)",border:"none" }}>Cancelar</button>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {isAdmin&&(confirmDelete===a.id?(
-                <div style={{ display:"flex",gap:6 }}>
-                  <button onClick={()=>deleteAccount(a.id)} style={{ fontSize:11,padding:"4px 8px",borderRadius:"var(--border-radius-md)",cursor:"pointer",background:"var(--color-background-danger)",color:"var(--color-text-danger)",border:"0.5px solid var(--color-border-danger)",fontWeight:500 }}>Sí</button>
-                  <button onClick={()=>setConfirmDelete(null)} style={{ fontSize:11,padding:"4px 8px",borderRadius:"var(--border-radius-md)",cursor:"pointer",border:"0.5px solid var(--color-border-tertiary)",background:"transparent",color:"var(--color-text-tertiary)" }}>No</button>
-                </div>
-              ):(
-                <button onClick={()=>setConfirmDelete(a.id)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:16,color:"var(--color-text-tertiary)",padding:"0 2px",lineHeight:1,opacity:0.5 }}>×</button>
-              ))}
+              <div style={{ fontSize:11,color:"var(--color-text-tertiary)",marginTop:2 }}>{fmt(txnsByAccount[a.id]?.income||0)} ing · {fmt(txnsByAccount[a.id]?.expense||0)} egr</div>
             </div>
+
+            <div style={{ fontSize:16,fontWeight:600,color:calcBalance>0?"#111":calcBalance<0?"#EF3E3E":"#bbb",minWidth:90,textAlign:"right" }}>
+              {fmt(calcBalance)}
+              <div style={{ fontSize:10,color:"#aaa",fontWeight:400,marginTop:1 }}>calculado</div>
+            </div>
+
+            {isAdmin&&(
+              <div style={{ position:"relative" }}>
+                <button onClick={()=>setImportingId(importingId===a.id?null:a.id)} style={{ fontSize:11,padding:"4px 9px",borderRadius:"var(--border-radius-md)",cursor:"pointer",border:"0.5px solid var(--color-border-tertiary)",background:"transparent",color:"var(--color-text-tertiary)" }}>↑ CSV</button>
+                {importingId===a.id&&(
+                  <div style={{ position:"absolute",right:0,top:30,zIndex:10,background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-secondary)",borderRadius:"var(--border-radius-md)",padding:"10px 12px",width:200,boxShadow:"0 4px 16px rgba(0,0,0,0.12)" }}>
+                    <div style={{ fontSize:12,fontWeight:500,marginBottom:8 }}>Importar a {a.name}</div>
+                    <input type="file" accept=".csv" ref={fileRef} style={{ display:"none" }} onChange={e=>handleFile(e,a.id)}/>
+                    <button onClick={()=>fileRef.current.click()} style={{ width:"100%",padding:"7px",borderRadius:"var(--border-radius-md)",fontSize:12,cursor:"pointer",background:"var(--color-background-info)",color:"var(--color-text-info)",border:"0.5px solid var(--color-border-info)",fontWeight:500 }}>Seleccionar archivo</button>
+                    <button onClick={()=>setImportingId(null)} style={{ width:"100%",marginTop:6,padding:"5px",borderRadius:"var(--border-radius-md)",fontSize:11,cursor:"pointer",background:"transparent",color:"var(--color-text-tertiary)",border:"none" }}>Cancelar</button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {isAdmin&&(confirmDelete===a.id?(
+              <div style={{ display:"flex",gap:6 }}>
+                <button onClick={()=>deleteAccount(a.id)} style={{ fontSize:11,padding:"4px 8px",borderRadius:"var(--border-radius-md)",cursor:"pointer",background:"var(--color-background-danger)",color:"var(--color-text-danger)",border:"0.5px solid var(--color-border-danger)",fontWeight:500 }}>Sí</button>
+                <button onClick={()=>setConfirmDelete(null)} style={{ fontSize:11,padding:"4px 8px",borderRadius:"var(--border-radius-md)",cursor:"pointer",border:"0.5px solid var(--color-border-tertiary)",background:"transparent",color:"var(--color-text-tertiary)" }}>No</button>
+              </div>
+            ):(
+              <button onClick={()=>setConfirmDelete(a.id)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:16,color:"var(--color-text-tertiary)",padding:"0 2px",lineHeight:1,opacity:0.5 }}>×</button>
+            ))}
+          </div>
           );
         })}
       </div>
@@ -459,15 +451,15 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
     if (!txnForm.amount || isNaN(Number(txnForm.amount)) || Number(txnForm.amount) <= 0) return;
     setSavingTxn(true);
     await sb.from("transactions").insert({
-      id:            "manual_ref_" + ref.id + "_" + Date.now(),
-      type:          "income",
-      category:      "SaaS MRR",
-      amount:        Number(txnForm.amount),
-      description:   txnForm.description || ref.name,
-      date:          txnForm.date,
-      account_id:    "mercury",
-      referrer_id:   ref.id,
-      referrer_name: ref.name,
+      id:           "manual_ref_" + ref.id + "_" + Date.now(),
+      type:         "income",
+      category:     "SaaS MRR",
+      amount:       Number(txnForm.amount),
+      description:  txnForm.description || ref.name,
+      date:         txnForm.date,
+      account_id:   "mercury",
+      referrer_id:  ref.id,
+      referrer_name:ref.name,
     });
     setTxnForm({amount:"", description:"", date:new Date().toISOString().split("T")[0]});
     setAddTxnFor(null);
@@ -488,8 +480,12 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
       if (data.referrers?.length) {
         const allTxns = data.referrers.flatMap(r =>
           r.transactions.map(t => ({
-            ...t, type:"income", category:"SaaS MRR",
-            account_id:"mercury", referrer_id:r.id, referrer_name:r.name,
+            ...t,
+            type: "income",
+            category: "SaaS MRR",
+            account_id: "mercury",
+            referrer_id: r.id,
+            referrer_name: r.name,
           }))
         );
         const existingIds = new Set(txns.map(t => t.id));
@@ -647,6 +643,7 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
 
             {expanded===ref.id&&(
               <div style={{ borderTop:"1px solid #F3F3F3", padding:"16px 20px" }}>
+
                 <div style={{ display:"flex", gap:10, marginBottom:20 }}>
                   {[
                     {label:"Generado",  value:fmtDec(ref.totalRevenue)},
@@ -863,19 +860,27 @@ function parseCSVRows(text, defaultAccountId) {
     if (isMercury) {
       const status = get("status").toLowerCase();
       if (status === "pending" || status === "failed") continue;
+
       const rawDate   = get("date");
       const rawAmount = parseFloat(get("amount").replace(/,/g,"")) || 0;
       if (!rawDate || rawAmount === 0) continue;
+
       const desc       = get("description") || get("bank description");
       const mercuryCat = get("mercury category");
       const manualCat  = get("category");
+
       if (isCuentaTransfer(desc, mercuryCat, manualCat)) continue;
+
       const type = rawAmount > 0 ? "income" : "expense";
       rows.push({
-        id: "imp_" + i + "_" + Date.now(), type,
-        amount: Math.abs(rawAmount), description: desc,
-        category: autoCategory(desc, type, mercuryCat, manualCat),
-        date: rawDate.split("T")[0], source: "mercury", account_id: "mercury",
+        id: "imp_" + i + "_" + Date.now(),
+        type,
+        amount:      Math.abs(rawAmount),
+        description: desc,
+        category:    autoCategory(desc, type, mercuryCat, manualCat),
+        date:        rawDate.split("T")[0],
+        source:      "mercury",
+        account_id:  "mercury",
       });
     } else {
       const rawDate = get("created (utc)") || get("created");
@@ -885,11 +890,14 @@ function parseCSVRows(text, defaultAccountId) {
       if (!rawDate || txType === "payout") continue;
       const type = rawNet < 0 ? "expense" : "income";
       rows.push({
-        id: "imp_str_" + i + "_" + Date.now(), type,
-        amount: Math.abs(rawNet), description: desc,
-        category: autoCategory(desc, type),
-        date: rawDate.split(" ")[0], source: "stripe",
-        account_id: defaultAccountId || "mercury",
+        id: "imp_str_" + i + "_" + Date.now(),
+        type,
+        amount:      Math.abs(rawNet),
+        description: desc,
+        category:    autoCategory(desc, type),
+        date:        rawDate.split(" ")[0],
+        source:      "stripe",
+        account_id:  defaultAccountId || "mercury",
       });
     }
   }
@@ -912,10 +920,10 @@ function HistoryView({ txns, accounts, catsIncome, catsExpense, filterType, setF
   const availableMonths = [...new Set(txns.map(t => monthKey(t.date)))].sort((a,b) => b.localeCompare(a));
 
   const filtered = txns.filter(t =>
-    (filterType  === "all" || t.type           === filterType)  &&
-    (filterAcc   === "all" || t.account_id     === filterAcc)   &&
+    (filterType  === "all" || t.type        === filterType)  &&
+    (filterAcc   === "all" || t.account_id  === filterAcc)   &&
     (filterMonth === "all" || monthKey(t.date) === filterMonth) &&
-    (filterCat   === "all" || t.category       === filterCat)
+    (filterCat   === "all" || t.category    === filterCat)
   );
 
   const totalPages  = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -1024,12 +1032,267 @@ function HistoryView({ txns, accounts, catsIncome, catsExpense, filterType, setF
         <div style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginTop:16 }}>
           <button onClick={()=>setPage(1)} disabled={safePage===1} className="spicy-btn-secondary" style={{ padding:"5px 10px",fontSize:12 }}>«</button>
           <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={safePage===1} className="spicy-btn-secondary" style={{ padding:"5px 12px",fontSize:12 }}>‹ Ant</button>
-          <span style={{ fontSize:13,color:"#555",fontWeight:500,padding:"0 8px" }}>Pág {safePage} de {totalPages}</span>
+          <span style={{ fontSize:13,color:"#555",fontWeight:500,padding:"0 8px" }}>
+            Pág {safePage} de {totalPages}
+          </span>
           <button onClick={()=>setPage(p=>Math.min(totalPages,p+1))} disabled={safePage===totalPages} className="spicy-btn-secondary" style={{ padding:"5px 12px",fontSize:12 }}>Sig ›</button>
           <button onClick={()=>setPage(totalPages)} disabled={safePage===totalPages} className="spicy-btn-secondary" style={{ padding:"5px 10px",fontSize:12 }}>»</button>
         </div>
       )}
     </>
+  );
+}
+
+// ── Runway Projection ─────────────────────────────────────────────────────
+function RunwayView({ txns, accounts }) {
+  const now = new Date();
+
+  const mercuryTxns = txns.filter(t => t.account_id === "mercury" && t.category !== MOVIMIENTO_CUENTA);
+
+  const last3 = [1,2,3].map(i => {
+    const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+  });
+  const avgExpense = last3.reduce((s,mk) =>
+    s + mercuryTxns.filter(t=>t.type==="expense"&&monthKey(t.date)===mk).reduce((a,t)=>a+Number(t.amount),0), 0) / 3;
+
+  const prevMK = (() => { const d=new Date(now.getFullYear(),now.getMonth()-1,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
+  const currentMRR = mercuryTxns.filter(t=>t.category==="SaaS MRR"&&monthKey(t.date)===prevMK).reduce((s,t)=>s+Number(t.amount),0);
+
+  const calcBalances = {};
+  txns.forEach(t => {
+    if (!calcBalances[t.account_id]) calcBalances[t.account_id] = 0;
+    calcBalances[t.account_id] += t.type==="income" ? Number(t.amount) : -Number(t.amount);
+  });
+  const currentCash = Object.values(calcBalances).reduce((s,v)=>s+v,0);
+
+  const [mrrGrowthBase,  setMrrGrowthBase]  = useState(10);
+  const [mrrGrowthOpt,   setMrrGrowthOpt]   = useState(20);
+  const [mrrGrowthPess,  setMrrGrowthPess]  = useState(3);
+  const [fundraise,      setFundraise]      = useState(0);
+  const [fundraiseMonth, setFundraiseMonth] = useState(1);
+
+  const MONTHS = 6;
+
+  function project(mrrGrowthPct) {
+    const months = [];
+    let cash = currentCash;
+    let mrr  = currentMRR;
+    const exp = avgExpense;
+
+    for (let i = 0; i < MONTHS; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+      const label = MONTH_LABELS[d.getMonth()] + " " + d.getFullYear();
+      const injection = (i + 1 === fundraiseMonth && fundraise > 0) ? fundraise : 0;
+      const netFlow = mrr - exp + injection;
+      cash += netFlow;
+      months.push({ label, mrr: Math.round(mrr), expense: Math.round(exp), netFlow: Math.round(netFlow), cash: Math.round(cash), injection });
+      mrr = mrr * (1 + mrrGrowthPct / 100);
+    }
+    return months;
+  }
+
+  const scenarios = [
+    { key:"opt",  label:"Optimista",  color:"#16A34A", bg:"#EDFAF3", growth:mrrGrowthOpt,  data: project(mrrGrowthOpt)  },
+    { key:"base", label:"Base",       color:"#185FA5", bg:"#E6F1FB", growth:mrrGrowthBase, data: project(mrrGrowthBase) },
+    { key:"pess", label:"Pesimista",  color:ST_RED,    bg:ST_RED_BG, growth:mrrGrowthPess, data: project(mrrGrowthPess) },
+  ];
+
+  function runwayMonths(data) {
+    const idx = data.findIndex(m => m.cash <= 0);
+    return idx === -1 ? "+6 meses" : idx === 0 ? "Este mes" : `${idx} mes${idx!==1?"es":""}`;
+  }
+
+  const allCash = [currentCash, ...scenarios.flatMap(s => s.data.map(m => m.cash))];
+  const maxCash = Math.max(...allCash, 1);
+  const minCash = Math.min(...allCash, 0);
+  const chartH  = 160;
+  function cashToY(cash) {
+    const range = maxCash - minCash;
+    return range > 0 ? chartH - Math.round(((cash - minCash) / range) * chartH) : chartH / 2;
+  }
+
+  const breakEvenMRR = Math.round(avgExpense);
+
+  return (
+    <div>
+      <div style={{ fontSize:20,fontWeight:700,color:"#111",marginBottom:4 }}>Proyección de Runway</div>
+      <div style={{ fontSize:13,color:"#888",marginBottom:24 }}>6 meses · egresos fijos (promedio real últimos 3 meses Mercury)</div>
+
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:24 }}>
+        {[
+          { label:"Cash actual",     value:fmt(currentCash),         sub:"desde transacciones" },
+          { label:"MRR base",        value:fmt(currentMRR),          sub:monthLabel(prevMK) },
+          { label:"Egreso fijo/mes", value:fmt(Math.round(avgExpense)), sub:"prom. 3 meses reales" },
+          { label:"Break-even MRR",  value:fmt(breakEvenMRR),        sub:"para cubrir egresos", warn:currentMRR < breakEvenMRR },
+        ].map(k=>(
+          <div key={k.label} className="spicy-kpi">
+            <div className="spicy-kpi-label">{k.label}</div>
+            <div className="spicy-kpi-value" style={{ color:k.warn?ST_RED:"#111" }}>{k.value}</div>
+            <div className="spicy-kpi-sub">{k.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="spicy-card" style={{ marginBottom:16 }}>
+        <div style={{ fontSize:14,fontWeight:600,color:"#111",marginBottom:16 }}>Parámetros de crecimiento MRR</div>
+        <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:20,marginBottom:20 }}>
+          {[
+            { label:"Optimista",  val:mrrGrowthOpt,  set:setMrrGrowthOpt,  color:"#16A34A" },
+            { label:"Base",       val:mrrGrowthBase, set:setMrrGrowthBase, color:"#185FA5" },
+            { label:"Pesimista",  val:mrrGrowthPess, set:setMrrGrowthPess, color:ST_RED },
+          ].map(c=>(
+            <div key={c.label}>
+              <div style={{ display:"flex",justifyContent:"space-between",marginBottom:6 }}>
+                <span style={{ fontSize:12,fontWeight:600,color:c.color }}>{c.label}</span>
+                <span style={{ fontSize:14,fontWeight:700,color:c.color }}>{c.val}%/mes</span>
+              </div>
+              <input type="range" min="-10" max="50" step="1" value={c.val}
+                onChange={e=>c.set(Number(e.target.value))}
+                style={{ width:"100%",accentColor:c.color }}/>
+              <div style={{ fontSize:11,color:"#aaa",marginTop:4 }}>
+                MRR mes 6: {fmt(Math.round(currentMRR * Math.pow(1 + c.val/100, 6)))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ background:"#F9F9F9",borderRadius:8,padding:"10px 14px",fontSize:12,color:"#555",marginBottom:20 }}>
+          Egresos fijos en <strong>{fmt(Math.round(avgExpense))}/mes</strong> — promedio de {last3.map(mk=>monthLabel(mk)).join(", ")}
+        </div>
+
+        <div style={{ borderTop:"1px solid #F0F0F0",paddingTop:16 }}>
+          <div style={{ fontSize:13,fontWeight:600,color:"#111",marginBottom:12 }}>💰 Inyección de capital (opcional)</div>
+          <div style={{ display:"flex",gap:16,alignItems:"flex-end",flexWrap:"wrap" }}>
+            <div style={{ flex:2,minWidth:140 }}>
+              <div style={{ fontSize:12,color:"#888",marginBottom:6 }}>Monto (USD)</div>
+              <input className="spicy-input" type="number" value={fundraise||""} placeholder="0"
+                onChange={e=>setFundraise(Number(e.target.value))} style={{ fontSize:13 }}/>
+            </div>
+            <div style={{ flex:1,minWidth:100 }}>
+              <div style={{ fontSize:12,color:"#888",marginBottom:6 }}>En el mes</div>
+              <select className="spicy-select" value={fundraiseMonth} onChange={e=>setFundraiseMonth(Number(e.target.value))} style={{ width:"100%",fontSize:13 }}>
+                {Array.from({length:6},(_,i)=>{
+                  const d=new Date(now.getFullYear(),now.getMonth()+i,1);
+                  return <option key={i+1} value={i+1}>{MONTH_LABELS[d.getMonth()]} {d.getFullYear()}</option>;
+                })}
+              </select>
+            </div>
+            {fundraise > 0 && (
+              <button onClick={()=>setFundraise(0)} style={{ fontSize:12,padding:"8px 14px",borderRadius:8,cursor:"pointer",border:"1px solid #E0E0E0",background:"white",color:"#888" }}>Quitar</button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:20 }}>
+        {scenarios.map(s=>{
+          const last = s.data[s.data.length-1];
+          const runway = runwayMonths(s.data);
+          const endsPositive = last.cash > 0;
+          const breakEvenMonth = s.data.findIndex(m => m.mrr >= avgExpense);
+          return (
+            <div key={s.key} style={{ background:s.bg,borderRadius:12,padding:"16px 18px",border:`1px solid ${s.color}33` }}>
+              <div style={{ fontSize:12,fontWeight:700,color:s.color,textTransform:"uppercase",letterSpacing:0.5,marginBottom:10 }}>{s.label}</div>
+              <div style={{ fontSize:11,color:"#888",marginBottom:2 }}>MRR mes 6</div>
+              <div style={{ fontSize:20,fontWeight:700,color:"#111",marginBottom:10 }}>{fmt(last.mrr)}</div>
+              <div style={{ fontSize:11,color:"#888",marginBottom:2 }}>Cash mes 6</div>
+              <div style={{ fontSize:16,fontWeight:700,color:endsPositive?"#111":ST_RED,marginBottom:10 }}>{fmt(last.cash)}</div>
+              {breakEvenMonth >= 0 ? (
+                <div style={{ fontSize:12,fontWeight:600,color:"#16A34A" }}>✓ Break-even en {s.data[breakEvenMonth].label}</div>
+              ) : (
+                <div style={{ fontSize:12,fontWeight:600,color:ST_RED }}>✗ No alcanza break-even</div>
+              )}
+              <div style={{ fontSize:12,fontWeight:600,color:endsPositive?"#16A34A":ST_RED,marginTop:4 }}>
+                {endsPositive ? `Runway: ${runway}` : `⚠ Se acaba en ${runway}`}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="spicy-card" style={{ marginBottom:16 }}>
+        <div style={{ fontSize:14,fontWeight:600,color:"#111",marginBottom:4 }}>Evolución de cash</div>
+        <div style={{ fontSize:12,color:"#aaa",marginBottom:16 }}>Línea punteada = cero · Egresos fijos {fmt(Math.round(avgExpense))}/mes</div>
+        <div style={{ position:"relative",height:chartH+40,overflowX:"auto" }}>
+          <svg width="100%" height={chartH+40} viewBox={`0 0 ${MONTHS*100} ${chartH+40}`} preserveAspectRatio="none">
+            <line x1="0" y1={cashToY(0)} x2={MONTHS*100} y2={cashToY(0)} stroke="#E0E0E0" strokeWidth="1.5" strokeDasharray="6,4"/>
+            {scenarios.map(s=>{
+              const points = [[0, cashToY(currentCash)], ...s.data.map((m,i) => [(i+1)*100, cashToY(m.cash)])];
+              const d = points.map((p,i)=>(i===0?"M":"L")+p[0]+","+p[1]).join(" ");
+              return <path key={s.key} d={d} fill="none" stroke={s.color} strokeWidth="2.5" strokeLinejoin="round"/>;
+            })}
+            {scenarios.map(s=>
+              s.data.map((m,i)=>(
+                <g key={s.key+i}>
+                  <circle cx={(i+1)*100} cy={cashToY(m.cash)} r="4" fill={s.color}/>
+                  {i===MONTHS-1&&(
+                    <text x={(i+1)*100-2} y={cashToY(m.cash)-10} fontSize="10" fill={s.color} textAnchor="middle" fontWeight="600">
+                      {fmt(m.cash)}
+                    </text>
+                  )}
+                  {m.injection>0&&(
+                    <text x={(i+1)*100} y={cashToY(m.cash)-22} fontSize="10" fill="#059669" textAnchor="middle">+{fmt(m.injection)}</text>
+                  )}
+                </g>
+              ))
+            )}
+            {scenarios[0].data.map((m,i)=>(
+              <text key={i} x={(i+1)*100} y={chartH+32} fontSize="11" fill="#aaa" textAnchor="middle">{m.label.split(" ")[0]}</text>
+            ))}
+          </svg>
+        </div>
+        <div style={{ display:"flex",gap:16,marginTop:8,flexWrap:"wrap" }}>
+          {scenarios.map(s=>(
+            <span key={s.key} style={{ display:"flex",alignItems:"center",gap:5,fontSize:12,color:s.color,fontWeight:600 }}>
+              <span style={{ width:20,height:3,background:s.color,display:"inline-block",borderRadius:2 }}/>
+              {s.label} ({s.growth}%/mes)
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="spicy-card" style={{ padding:0,overflow:"hidden" }}>
+        <div style={{ padding:"14px 20px",borderBottom:"1px solid #F3F3F3",fontSize:14,fontWeight:600,color:"#111" }}>Detalle mes a mes</div>
+        <div style={{ overflowX:"auto" }}>
+          <table style={{ width:"100%",borderCollapse:"collapse",fontSize:12 }}>
+            <thead>
+              <tr style={{ background:"#FAFAFA" }}>
+                <th style={{ padding:"10px 16px",textAlign:"left",color:"#888",fontWeight:600,borderBottom:"1px solid #F3F3F3" }}>Mes</th>
+                {scenarios.map(s=>(
+                  <th key={s.key} colSpan={3} style={{ padding:"10px 8px",textAlign:"center",color:s.color,fontWeight:700,borderBottom:"1px solid #F3F3F3",borderLeft:"2px solid "+s.color+"33" }}>{s.label}</th>
+                ))}
+              </tr>
+              <tr style={{ background:"#FAFAFA" }}>
+                <th style={{ padding:"6px 16px",borderBottom:"1px solid #F0F0F0",fontSize:11 }}></th>
+                {scenarios.map(s=>["MRR","Egreso","Cash"].map(h=>(
+                  <th key={s.key+h} style={{ padding:"6px 8px",textAlign:"right",color:"#aaa",fontWeight:500,borderBottom:"1px solid #F0F0F0",fontSize:11,borderLeft:h==="MRR"?"2px solid "+s.color+"33":"none" }}>{h}</th>
+                )))}
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({length:MONTHS},(_,i)=>(
+                <tr key={i} style={{ borderBottom:"1px solid #F3F3F3",background:i%2===0?"white":"#FAFAFA" }}>
+                  <td style={{ padding:"10px 16px",fontWeight:600,color:"#111",fontSize:13 }}>{scenarios[0].data[i].label}</td>
+                  {scenarios.map(s=>{
+                    const m = s.data[i];
+                    return ["mrr","expense","cash"].map(k=>(
+                      <td key={s.key+k} style={{ padding:"10px 8px",textAlign:"right",fontWeight:k==="cash"?700:400,
+                        color:k==="cash"?(m.cash<0?ST_RED:"#111"):"#555",
+                        borderLeft:k==="mrr"?"2px solid "+s.color+"33":"none",
+                        fontSize:k==="cash"?13:12 }}>
+                        {k==="cash"&&m.injection>0&&<span style={{ fontSize:10,color:"#059669",marginRight:4 }}>+{fmt(m.injection)}</span>}
+                        {fmt(m[k])}
+                      </td>
+                    ));
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1125,9 +1388,11 @@ export default function SpicyFinanzas() {
   }
 
   const [expCatMonth, setExpCatMonth] = useState("all");
+  const [catDrilldown, setCatDrilldown] = useState(null);
 
-  // ── Métricas ─────────────────────────────────────────────────────────────
   const now=new Date();
+  const income=txns.filter(t=>t.type==="income").reduce((s,t)=>s+Number(t.amount),0);
+  const expenses=txns.filter(t=>t.type==="expense").reduce((s,t)=>s+Number(t.amount),0);
 
   const mercuryTxns = txns.filter(t =>
     t.account_id === "mercury" && t.category !== MOVIMIENTO_CUENTA
@@ -1172,7 +1437,6 @@ export default function SpicyFinanzas() {
   const expMonths = [...new Set(
     mercuryTxns.filter(t=>t.type==="expense").map(t=>monthKey(t.date))
   )].sort((a,b)=>b.localeCompare(a));
-
   const curMK=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
   const referralOwed=txns.filter(t=>t.type==="income"&&t.referrer_id&&monthKey(t.date)===curMK).reduce((s,t)=>s+Number(t.amount),0)*COMMISSION_RATE;
 
@@ -1187,8 +1451,8 @@ export default function SpicyFinanzas() {
   if (!dataLoaded)return <div style={{ display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"#F7F7F8",fontSize:14,color:"#888" }}>Cargando datos...</div>;
 
   const navViews = isAdmin
-    ? ["dashboard","accounts","referrals","add","history","categories"]
-    : ["dashboard","accounts","referrals","history","categories"];
+    ? ["dashboard","accounts","referrals","runway","add","history","categories"]
+    : ["dashboard","accounts","referrals","runway","history","categories"];
 
   const userInitials = session.user.email.slice(0,2).toUpperCase();
 
@@ -1240,7 +1504,8 @@ export default function SpicyFinanzas() {
                 neg: monthlyBurn < 0,
                 tooltip:`Ingreso ${fmt(prevIncome)} − Egreso ${fmt(prevExpense)}` },
             ].map(k=>(
-              <div key={k.label} className="spicy-kpi" style={{ position:"relative" }} title={k.tooltip||""}>
+              <div key={k.label} className="spicy-kpi" style={{ position:"relative" }}
+                title={k.tooltip||""}>
                 <div className="spicy-kpi-label">{k.label}{k.tooltip&&<span style={{ marginLeft:4,fontSize:10,color:"#ccc",cursor:"help" }}>ⓘ</span>}</div>
                 <div className="spicy-kpi-value" style={{ color:k.neg?"#EF3E3E":"#111" }}>{k.value}</div>
                 <div className="spicy-kpi-sub">{k.sub}</div>
@@ -1254,16 +1519,13 @@ export default function SpicyFinanzas() {
               <button onClick={()=>setView("accounts")} style={{ fontSize:12,color:ST_RED,background:"none",border:"none",cursor:"pointer",fontWeight:600 }}>Ver todas →</button>
             </div>
             <div style={{ display:"flex",flexWrap:"wrap",gap:8 }}>
-              {accounts.map(a=>{
-                const cb=txns.filter(t=>t.account_id===a.id).reduce((b,t)=>b+(t.type==="income"?Number(t.amount):-Number(t.amount)),0);
-                return (
-                  <div key={a.id} onClick={()=>setView("accounts")} style={{ display:"flex",alignItems:"center",gap:6,padding:"7px 12px",background:"#F7F7F8",borderRadius:8,cursor:"pointer",border:"1px solid #EBEBEB" }}>
-                    <div style={{ width:8,height:8,borderRadius:"50%",background:a.color }}/>
-                    <span style={{ fontSize:12,color:"#666",fontWeight:500 }}>{a.name}</span>
-                    <span style={{ fontSize:13,fontWeight:600,color:cb>0?"#111":"#bbb" }}>{fmt(cb)}</span>
-                  </div>
-                );
-              })}
+              {accounts.map(a=>(
+                <div key={a.id} onClick={()=>setView("accounts")} style={{ display:"flex",alignItems:"center",gap:6,padding:"7px 12px",background:"#F7F7F8",borderRadius:8,cursor:"pointer",border:"1px solid #EBEBEB" }}>
+                  <div style={{ width:8,height:8,borderRadius:"50%",background:a.color }}/>
+                  <span style={{ fontSize:12,color:"#666",fontWeight:500 }}>{a.name}</span>
+                  {(() => { const cb=txns.filter(t=>t.account_id===a.id).reduce((b,t)=>b+(t.type==="income"?Number(t.amount):-Number(t.amount)),0); return <span style={{ fontSize:13,fontWeight:600,color:cb>0?"#111":"#bbb" }}>{fmt(cb)}</span>; })()}
+                </div>
+              ))}
             </div>
           </div>
 
@@ -1288,7 +1550,7 @@ export default function SpicyFinanzas() {
 
           <div className="spicy-card">
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
-              <div style={{ fontSize:14,fontWeight:600,color:"#111" }}>Egresos por categoría</div>
+              <div style={{ fontSize:14,fontWeight:600,color:"#111" }}>Egresos por categoría <span style={{ fontSize:11,color:"#aaa",fontWeight:400 }}>— click para ver detalle</span></div>
               <select value={expCatMonth} onChange={e=>setExpCatMonth(e.target.value)} className="spicy-select" style={{ fontSize:12 }}>
                 <option value="all">Todo el período</option>
                 {expMonths.map(mk=><option key={mk} value={mk}>{monthLabel(mk)}</option>)}
@@ -1296,22 +1558,80 @@ export default function SpicyFinanzas() {
             </div>
             {expByCat.length===0&&<div style={{ fontSize:13,color:"#bbb",textAlign:"center",padding:"1rem" }}>Sin egresos en este período.</div>}
             {expByCat.map(x=>(
-              <div key={x.cat} style={{ marginBottom:14 }}>
+              <div key={x.cat} style={{ marginBottom:14,cursor:"pointer" }}
+                onClick={()=>setCatDrilldown({ cat:x.cat, month:expCatMonth })}>
                 <div style={{ display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6 }}>
                   <span style={{ color:x.cat==="Comisiones referidos"?"#D97706":"#555",fontWeight:500 }}>{x.cat}</span>
                   <span style={{ fontWeight:600,color:"#111" }}>{fmt(x.total)}</span>
                 </div>
                 <div style={{ height:6,background:"#F3F3F3",borderRadius:4,overflow:"hidden" }}>
-                  <div style={{ height:"100%",width:`${Math.round((x.total/totalExpAll)*100)}%`,background:x.cat==="Comisiones referidos"?"#F59E0B":ST_RED,borderRadius:4 }}/>
+                  <div style={{ height:"100%",width:`${Math.round((x.total/totalExpAll)*100)}%`,background:x.cat==="Comisiones referidos"?"#F59E0B":ST_RED,borderRadius:4,transition:"width 0.3s" }}/>
                 </div>
               </div>
             ))}
           </div>
+
+          {/* Drilldown popup */}
+          {catDrilldown&&(()=>{
+            const allCats = [...catsIncome,...catsExpense];
+            const drillTxns = mercuryTxns.filter(t =>
+              t.type==="expense" &&
+              t.category===catDrilldown.cat &&
+              (catDrilldown.month==="all" || monthKey(t.date)===catDrilldown.month)
+            ).sort((a,b)=>b.date.localeCompare(a.date));
+            const total = drillTxns.reduce((s,t)=>s+Number(t.amount),0);
+            return (
+              <div onClick={()=>setCatDrilldown(null)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}>
+                <div onClick={e=>e.stopPropagation()} style={{ background:"white",borderRadius:16,width:"100%",maxWidth:560,maxHeight:"80vh",display:"flex",flexDirection:"column",overflow:"hidden" }}>
+                  <div style={{ padding:"18px 20px",borderBottom:"1px solid #F0F0F0",display:"flex",alignItems:"center",justifyContent:"space-between" }}>
+                    <div>
+                      <div style={{ fontSize:16,fontWeight:700,color:"#111" }}>{catDrilldown.cat}</div>
+                      <div style={{ fontSize:12,color:"#aaa",marginTop:3 }}>
+                        {catDrilldown.month==="all" ? "Todo el período" : monthLabel(catDrilldown.month)} · {drillTxns.length} transacciones · {fmt(total)}
+                      </div>
+                    </div>
+                    <button onClick={()=>setCatDrilldown(null)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#ccc",lineHeight:1,padding:"4px 8px" }}>×</button>
+                  </div>
+
+                  <div style={{ overflowY:"auto",flex:1 }}>
+                    {drillTxns.length===0&&<div style={{ padding:"2rem",textAlign:"center",fontSize:13,color:"#bbb" }}>Sin transacciones.</div>}
+                    {drillTxns.map((t,i)=>(
+                      <div key={t.id} style={{ display:"flex",alignItems:"center",gap:10,padding:"11px 20px",borderBottom:i<drillTxns.length-1?"1px solid #F5F5F5":"none" }}>
+                        <div style={{ flex:1,minWidth:0 }}>
+                          <div style={{ fontSize:13,fontWeight:500,color:"#111",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{t.description||"—"}</div>
+                          <div style={{ fontSize:11,color:"#aaa",marginTop:2 }}>{t.date}</div>
+                        </div>
+                        {isAdmin ? (
+                          <select value={t.category}
+                            onChange={async e=>{
+                              await updateCategory(t.id, e.target.value);
+                              setCatDrilldown(prev=>({...prev}));
+                            }}
+                            style={{ fontSize:11,padding:"3px 6px",borderRadius:6,border:"1px solid #E0E0E0",background:"#F7F7F8",color:"#555",cursor:"pointer",fontFamily:"DM Sans,sans-serif",maxWidth:150 }}>
+                            {allCats.map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+                          </select>
+                        ) : (
+                          <span style={{ fontSize:11,color:"#888" }}>{t.category}</span>
+                        )}
+                        <div style={{ fontSize:13,fontWeight:700,color:ST_RED,flexShrink:0,minWidth:70,textAlign:"right" }}>−{fmt(t.amount)}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ padding:"14px 20px",borderTop:"1px solid #F0F0F0",display:"flex",justifyContent:"space-between",alignItems:"center",background:"#FAFAFA" }}>
+                    <span style={{ fontSize:13,color:"#888" }}>Total {catDrilldown.cat}</span>
+                    <span style={{ fontSize:16,fontWeight:700,color:ST_RED }}>{fmt(total)}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </>
       )}
 
       {view==="accounts"&&<AccountsPanel accounts={accounts} txns={txns} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="referrals"&&<ReferralDashboard txns={txns} referrers={referrers} isAdmin={isAdmin} onRefresh={loadAll}/>}
+      {view==="runway"&&<RunwayView txns={txns} accounts={accounts}/>}
       {view==="categories"&&<CategoriesPanel catsIncome={catsIncome} catsExpense={catsExpense} isAdmin={isAdmin} onRefresh={loadAll}/>}
 
       {view==="add"&&isAdmin&&(
