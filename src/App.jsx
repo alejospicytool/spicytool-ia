@@ -150,7 +150,7 @@ const NAV_SECTIONS = [
   },
 ];
 
-const WORKER_URL = "";
+const WORKER_URL = "https://spicy-finance.alejo-459.workers.dev";
 const COMMISSION_RATE = 0.20;
 const MONTH_LABELS = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
 const ACCOUNT_COLORS = ["#185FA5","#0F6E56","#533AB7","#3B6D11","#993C1D","#BA7517","#993556","#5F5E5A","#D85A30","#1D9E75"];
@@ -1360,130 +1360,141 @@ function RunwayView({ txns, accounts }) {
 // ── Services View (Dashboard Producto) ────────────────────────────────────
 function ServicesView() {
   const [azureData,    setAzureData]    = useState(null);
+  const [mongoData,    setMongoData]    = useState(null);
   const [azureLoading, setAzureLoading] = useState(false);
+  const [mongoLoading, setMongoLoading] = useState(false);
   const [azureError,   setAzureError]   = useState("");
+  const [mongoError,   setMongoError]   = useState("");
   const [lastUpdated,  setLastUpdated]  = useState(null);
 
-  async function fetchAzure() {
+  async function fetchAll() {
     if (!WORKER_URL) { setAzureError("Configurá WORKER_URL en el código."); return; }
-    setAzureLoading(true); setAzureError("");
-    try {
-      const res = await fetch(WORKER_URL + "/azure");
-      if (!res.ok) {
-        const d = await res.json().catch(()=>({}));
-        throw new Error(d.error || "HTTP " + res.status);
-      }
-      const data = await res.json();
-      setAzureData(data);
-      setLastUpdated(new Date().toLocaleTimeString("es-UY"));
-    } catch(e) { setAzureError(e.message); }
-    setAzureLoading(false);
+    setAzureLoading(true); setMongoLoading(true);
+    setAzureError(""); setMongoError("");
+
+    const [azureRes, mongoRes] = await Promise.allSettled([
+      fetch(WORKER_URL + "/azure"),
+      fetch(WORKER_URL + "/mongodb"),
+    ]);
+
+    if (azureRes.status === "fulfilled" && azureRes.value.ok) {
+      setAzureData(await azureRes.value.json());
+    } else {
+      const e = azureRes.status === "fulfilled" ? await azureRes.value.json().catch(()=>({})) : {};
+      setAzureError(e.error || "Error conectando con Azure");
+    }
+
+    if (mongoRes.status === "fulfilled" && mongoRes.value.ok) {
+      setMongoData(await mongoRes.value.json());
+    } else {
+      const e = mongoRes.status === "fulfilled" ? await mongoRes.value.json().catch(()=>({})) : {};
+      setMongoError(e.error || "Error conectando con MongoDB");
+    }
+
+    setAzureLoading(false); setMongoLoading(false);
+    setLastUpdated(new Date().toLocaleTimeString("es-UY"));
   }
 
-  useEffect(() => { fetchAzure(); }, []);
+  useEffect(() => { fetchAll(); }, []);
 
-  const alertCount = azureData?.services?.filter(s=>s.alert).length || 0;
+  const azureAlerts = azureData?.services?.filter(s=>s.alert).length || 0;
+  const mongoAlerts = mongoData?.services?.filter(s=>s.alert).length || 0;
+  const totalAlerts = azureAlerts + mongoAlerts;
+
+  function ServiceTable({ data, error, loading, title, icon }) {
+    if (loading && !data) return (
+      <div className="spicy-card" style={{ textAlign:"center", padding:"2rem", color:"#aaa", fontSize:13 }}>
+        <div style={{ fontSize:20, marginBottom:8 }}>{icon}</div>
+        Consultando {title}…
+      </div>
+    );
+    return (
+      <div className="spicy-card" style={{ padding:0, overflow:"hidden" }}>
+        <div style={{ padding:"14px 20px", borderBottom:"1px solid #F3F3F3", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:18 }}>{icon}</span>
+            <span style={{ fontSize:14, fontWeight:600, color:"#111" }}>{title}</span>
+          </div>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            {data && <span style={{ fontSize:12, color:"#aaa" }}>{data.services.length} servicios</span>}
+            {data && <span style={{ fontSize:13, fontWeight:700, color:"#111" }}>${data.totalCurrent?.toFixed(2)} este mes</span>}
+          </div>
+        </div>
+        {error && <div style={{ padding:"12px 20px", fontSize:12, color:ST_RED, background:"#FEF0F0" }}>{error}</div>}
+        {data?.services?.length === 0 && <div style={{ padding:"2rem", textAlign:"center", fontSize:13, color:"#bbb" }}>Sin costos en este período.</div>}
+        {data?.services?.map((s,i)=>(
+          <div key={s.service} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 20px", borderBottom:i<data.services.length-1?"1px solid #F5F5F5":"none", background:s.alert?"#FFFBEB":"white" }}>
+            <div style={{ width:8, height:8, borderRadius:"50%", flexShrink:0, background:s.alert?ST_RED:"#1D9E75" }}/>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:13, fontWeight:600, color:"#111" }}>{s.service}</div>
+              {s.prev > 0 && <div style={{ fontSize:11, color:"#aaa", marginTop:2 }}>Mes anterior: ${s.prev.toFixed(2)}</div>}
+            </div>
+            {s.change !== null && (
+              <span style={{ fontSize:11, padding:"2px 8px", borderRadius:5, fontWeight:600,
+                background: s.alert?"#FEF0F0":s.change<0?"#EDFAF3":"#F3F3F3",
+                color: s.alert?ST_RED:s.change<0?"#16A34A":"#888" }}>
+                {s.change>0?"+":""}{s.change}%
+              </span>
+            )}
+            <div style={{ fontSize:15, fontWeight:700, color:s.alert?ST_RED:"#111", minWidth:80, textAlign:"right" }}>
+              ${s.current.toFixed(2)}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:24 }}>
         <div>
-          <div style={{ fontSize:20,fontWeight:700,color:"#111",marginBottom:4 }}>Dashboard Producto</div>
-          <div style={{ fontSize:13,color:"#888" }}>Costos Azure por servicio · Resource Group: Spicytool</div>
+          <div style={{ fontSize:20, fontWeight:700, color:"#111", marginBottom:4 }}>Dashboard Producto</div>
+          <div style={{ fontSize:13, color:"#888" }}>Costos de infraestructura · Azure · MongoDB Atlas</div>
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-          {lastUpdated&&<span style={{ fontSize:11,color:"#aaa" }}>Actualizado {lastUpdated}</span>}
-          <button onClick={fetchAzure} disabled={azureLoading} className="spicy-btn-secondary" style={{ fontSize:13, padding:"7px 16px" }}>
-            {azureLoading ? "Cargando…" : "⟳ Actualizar"}
+          {lastUpdated && <span style={{ fontSize:11, color:"#aaa" }}>Actualizado {lastUpdated}</span>}
+          <button onClick={fetchAll} disabled={azureLoading||mongoLoading} className="spicy-btn-secondary" style={{ fontSize:13, padding:"7px 16px" }}>
+            {(azureLoading||mongoLoading) ? "Cargando…" : "⟳ Actualizar"}
           </button>
         </div>
       </div>
 
-      {azureError&&(
-        <div style={{ background:"#FEF0F0",border:"1px solid #FECACA",borderRadius:10,padding:"12px 16px",marginBottom:20,fontSize:13,color:ST_RED }}>
-          {azureError}
-          {!WORKER_URL&&<div style={{ marginTop:6,fontSize:12,color:"#888" }}>Agregá la URL del Worker en el código: <code style={{ fontFamily:"monospace" }}>const WORKER_URL = "https://..."</code></div>}
-        </div>
-      )}
-
       {/* Summary KPIs */}
-      {azureData&&(
-        <>
-          <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:20 }}>
-            {[
-              { label:"Azure este mes",     value:`$${azureData.totalCurrent.toFixed(2)}`,  sub:azureData.period?.current },
-              { label:"Azure mes anterior", value:`$${azureData.totalPrev.toFixed(2)}`,     sub:azureData.period?.prev },
-              { label:"Alertas",            value:alertCount,  sub:"servicios +20% vs mes anterior", warn:alertCount>0 },
-            ].map(k=>(
-              <div key={k.label} className="spicy-kpi">
-                <div className="spicy-kpi-label">{k.label}</div>
-                <div className="spicy-kpi-value" style={{ color:k.warn?ST_RED:"#111" }}>{k.value}</div>
-                <div className="spicy-kpi-sub">{k.sub}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* Alerts */}
-          {alertCount>0&&(
-            <div style={{ background:"#FEF0F0",border:"1px solid #FECACA",borderRadius:10,padding:"12px 16px",marginBottom:20 }}>
-              <div style={{ fontSize:13,fontWeight:700,color:ST_RED,marginBottom:8 }}>⚠ {alertCount} servicio{alertCount!==1?"s":""} con aumento mayor al 20%</div>
-              {azureData.services.filter(s=>s.alert).map(s=>(
-                <div key={s.service} style={{ fontSize:12,color:ST_RED,marginBottom:4 }}>
-                  <strong>{s.service}</strong> — ${s.current.toFixed(2)} vs ${s.prev.toFixed(2)} anterior (+{s.change}%)
-                </div>
-              ))}
+      {(azureData || mongoData) && (
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:20 }}>
+          {[
+            { label:"Azure este mes",   value:azureData?`$${azureData.totalCurrent.toFixed(2)}`:"—", sub:azureData?.period?.current||"" },
+            { label:"MongoDB este mes", value:mongoData?`$${mongoData.totalCurrent.toFixed(2)}`:"—", sub:mongoData?.period?.current||"" },
+            { label:"Alertas",          value:totalAlerts, sub:"servicios con +20% vs mes anterior", warn:totalAlerts>0 },
+          ].map(k=>(
+            <div key={k.label} className="spicy-kpi">
+              <div className="spicy-kpi-label">{k.label}</div>
+              <div className="spicy-kpi-value" style={{ color:k.warn?ST_RED:"#111" }}>{k.value}</div>
+              <div className="spicy-kpi-sub">{k.sub}</div>
             </div>
-          )}
-
-          {/* Services table */}
-          <div className="spicy-card" style={{ padding:0,overflow:"hidden" }}>
-            <div style={{ padding:"14px 20px",borderBottom:"1px solid #F3F3F3",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-              <span style={{ fontSize:14,fontWeight:600,color:"#111" }}>Servicios Azure</span>
-              <span style={{ fontSize:12,color:"#aaa" }}>{azureData.services.length} servicios activos</span>
-            </div>
-            {azureData.services.length===0&&(
-              <div style={{ padding:"2rem",textAlign:"center",fontSize:13,color:"#bbb" }}>Sin costos en este período.</div>
-            )}
-            {azureData.services.map((s,i)=>(
-              <div key={s.service} style={{ display:"flex",alignItems:"center",gap:12,padding:"13px 20px",borderBottom:i<azureData.services.length-1?"1px solid #F5F5F5":"none",background:s.alert?"#FFFBEB":"white" }}>
-                <div style={{ width:9,height:9,borderRadius:"50%",flexShrink:0,background:s.alert?ST_RED:"#1D9E75" }}/>
-                <div style={{ flex:1,minWidth:0 }}>
-                  <div style={{ fontSize:13,fontWeight:600,color:"#111" }}>{s.service}</div>
-                  {s.prev>0&&<div style={{ fontSize:11,color:"#aaa",marginTop:2 }}>Mes anterior: ${s.prev.toFixed(2)}</div>}
-                </div>
-                {s.change!==null&&(
-                  <span style={{ fontSize:11,padding:"2px 8px",borderRadius:5,fontWeight:600,
-                    background:s.alert?"#FEF0F0":s.change<0?"#EDFAF3":"#F3F3F3",
-                    color:s.alert?ST_RED:s.change<0?"#16A34A":"#888" }}>
-                    {s.change>0?"+":""}{s.change}%
-                  </span>
-                )}
-                <div style={{ fontSize:15,fontWeight:700,color:s.alert?ST_RED:"#111",minWidth:80,textAlign:"right" }}>
-                  ${s.current.toFixed(2)}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* MongoDB placeholder */}
-          <div className="spicy-card" style={{ marginTop:16,opacity:0.7 }}>
-            <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:8 }}>
-              <span style={{ fontSize:20 }}>🍃</span>
-              <div style={{ fontSize:15,fontWeight:700,color:"#111" }}>MongoDB Atlas</div>
-              <span style={{ fontSize:10,padding:"2px 8px",borderRadius:5,background:"#FEF3C7",color:"#92400E",fontWeight:600,marginLeft:"auto" }}>Pendiente</span>
-            </div>
-            <div style={{ fontSize:12,color:"#aaa" }}>
-              Necesita Public Key + Private Key de MongoDB Atlas (Organization → Access Manager → API Keys → Organization Billing Viewer)
-            </div>
-          </div>
-        </>
-      )}
-
-      {azureLoading&&!azureData&&(
-        <div style={{ display:"flex",alignItems:"center",justifyContent:"center",padding:"4rem",color:"#aaa",fontSize:13 }}>
-          Consultando Azure Cost Management…
+          ))}
         </div>
       )}
+
+      {/* Global alerts */}
+      {totalAlerts > 0 && (
+        <div style={{ background:"#FEF0F0", border:"1px solid #FECACA", borderRadius:10, padding:"12px 16px", marginBottom:20 }}>
+          <div style={{ fontSize:13, fontWeight:700, color:ST_RED, marginBottom:8 }}>⚠ {totalAlerts} servicio{totalAlerts!==1?"s":""} con aumento mayor al 20%</div>
+          {[...(azureData?.services||[]).filter(s=>s.alert).map(s=>({...s,src:"Azure"})),
+             ...(mongoData?.services||[]).filter(s=>s.alert).map(s=>({...s,src:"MongoDB"}))
+          ].map(s=>(
+            <div key={s.src+s.service} style={{ fontSize:12, color:ST_RED, marginBottom:3 }}>
+              <strong>[{s.src}] {s.service}</strong> — ${s.current.toFixed(2)} vs ${s.prev.toFixed(2)} anterior (+{s.change}%)
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+        <ServiceTable data={azureData} error={azureError} loading={azureLoading} title="Azure" icon="☁️"/>
+        <ServiceTable data={mongoData} error={mongoError} loading={mongoLoading} title="MongoDB Atlas" icon="🍃"/>
+      </div>
     </div>
   );
 }
