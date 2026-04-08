@@ -207,27 +207,27 @@ function ChartBar({ label, income, expense, referralCost, maxVal }) {
 
 // ── Accounts Panel ─────────────────────────────────────────────────────────
 function AccountsPanel({ accounts, txns, isAdmin, onRefresh }) {
-  const [editingId, setEditingId] = useState(null);
-  const [editVal,   setEditVal]   = useState("");
-  const [importingId, setImportingId] = useState(null);
-  const [showAdd,   setShowAdd]   = useState(false);
-  const [newForm,   setNewForm]   = useState({ name:"", currency:"USD", balance:"" });
+  const [importingId,   setImportingId]   = useState(null);
+  const [showAdd,       setShowAdd]       = useState(false);
+  const [newForm,       setNewForm]       = useState({ name:"", currency:"USD", balance:"" });
   const [confirmDelete, setConfirmDelete] = useState(null);
-  const [saving, setSaving] = useState(false);
+  const [saving,        setSaving]        = useState(false);
   const fileRef = useRef();
 
-  const total = accounts.reduce((s,a)=>s+Number(a.balance),0);
-  const txnsByAccount = {};
-  accounts.forEach(a=>{
-    const at=txns.filter(t=>t.account_id===a.id);
-    txnsByAccount[a.id]={ income:at.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0), expense:at.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0) };
-  });
+  const total = accounts.reduce((s,a) => {
+    const calc = txns.filter(t => t.account_id === a.id)
+      .reduce((b,t) => b + (t.type==="income" ? Number(t.amount) : -Number(t.amount)), 0);
+    return s + calc;
+  }, 0);
 
-  async function saveBalance(id) {
-    const val=parseFloat(editVal); if(isNaN(val)){setEditingId(null);return;}
-    await sb.from("accounts").update({balance:val}).eq("id",id);
-    setEditingId(null); onRefresh();
-  }
+  const txnsByAccount = {};
+  accounts.forEach(a => {
+    const at = txns.filter(t => t.account_id === a.id);
+    txnsByAccount[a.id] = {
+      income:  at.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0),
+      expense: at.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0),
+    };
+  });
 
   async function addAccount() {
     if (!newForm.name.trim()) return;
@@ -267,62 +267,60 @@ function AccountsPanel({ accounts, txns, isAdmin, onRefresh }) {
           <div style={{ fontSize:12,color:"var(--color-text-tertiary)",marginTop:4 }}>{accounts.length} cuentas</div>
         </div>
         <div style={{ display:"flex",alignItems:"flex-end",gap:4,height:48 }}>
-          {accounts.filter(a=>a.balance>0).map(a=>{const h=total>0?Math.max(4,Math.round((a.balance/total)*48)):4;return <div key={a.id} title={`${a.name}: ${fmt(a.balance)}`} style={{ width:10,height:h,background:a.color,borderRadius:"2px 2px 0 0",opacity:0.85 }}/>;}) }
+          {accounts.map(a=>{
+            const cb=txns.filter(t=>t.account_id===a.id).reduce((b,t)=>b+(t.type==="income"?Number(t.amount):-Number(t.amount)),0);
+            const h=total>0&&cb>0?Math.max(4,Math.round((cb/total)*48)):0;
+            return cb>0?<div key={a.id} title={`${a.name}: ${fmt(cb)}`} style={{ width:10,height:h,background:a.color,borderRadius:"2px 2px 0 0",opacity:0.85 }}/>:null;
+          })}
         </div>
       </div>
 
       <div style={{ background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",overflow:"hidden",marginBottom:10 }}>
-        {accounts.map((a,i)=>(
-          <div key={a.id} style={{ display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<accounts.length-1?"0.5px solid var(--color-border-tertiary)":"none" }}>
-            <div style={{ width:10,height:10,borderRadius:"50%",background:a.color,flexShrink:0 }}/>
-            <div style={{ flex:1,minWidth:0 }}>
-              <div style={{ display:"flex",alignItems:"center",gap:6 }}>
-                <span style={{ fontSize:14,fontWeight:500 }}>{a.name}</span>
-                {a.api&&<span style={{ fontSize:10,padding:"1px 6px",borderRadius:4,background:"var(--color-background-info)",color:"var(--color-text-info)" }}>API</span>}
-                <span style={{ fontSize:11,color:"var(--color-text-tertiary)" }}>{a.currency}</span>
+        {accounts.map((a,i) => {
+          const calcBalance = txns.filter(t => t.account_id === a.id)
+            .reduce((b,t) => b + (t.type==="income" ? Number(t.amount) : -Number(t.amount)), 0);
+          return (
+            <div key={a.id} style={{ display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<accounts.length-1?"0.5px solid var(--color-border-tertiary)":"none" }}>
+              <div style={{ width:10,height:10,borderRadius:"50%",background:a.color,flexShrink:0 }}/>
+              <div style={{ flex:1,minWidth:0 }}>
+                <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                  <span style={{ fontSize:14,fontWeight:500 }}>{a.name}</span>
+                  {a.api&&<span style={{ fontSize:10,padding:"1px 6px",borderRadius:4,background:"var(--color-background-info)",color:"var(--color-text-info)" }}>API</span>}
+                  <span style={{ fontSize:11,color:"var(--color-text-tertiary)" }}>{a.currency}</span>
+                </div>
+                <div style={{ fontSize:11,color:"var(--color-text-tertiary)",marginTop:2 }}>{fmt(txnsByAccount[a.id]?.income||0)} ing · {fmt(txnsByAccount[a.id]?.expense||0)} egr</div>
               </div>
-              <div style={{ fontSize:11,color:"var(--color-text-tertiary)",marginTop:2 }}>{fmt(txnsByAccount[a.id]?.income||0)} ing · {fmt(txnsByAccount[a.id]?.expense||0)} egr</div>
+
+              <div style={{ fontSize:16,fontWeight:600,color:calcBalance>0?"#111":calcBalance<0?"#EF3E3E":"#bbb",minWidth:90,textAlign:"right" }}>
+                {fmt(calcBalance)}
+                <div style={{ fontSize:10,color:"#aaa",fontWeight:400,marginTop:1 }}>calculado</div>
+              </div>
+
+              {isAdmin&&(
+                <div style={{ position:"relative" }}>
+                  <button onClick={()=>setImportingId(importingId===a.id?null:a.id)} style={{ fontSize:11,padding:"4px 9px",borderRadius:"var(--border-radius-md)",cursor:"pointer",border:"0.5px solid var(--color-border-tertiary)",background:"transparent",color:"var(--color-text-tertiary)" }}>↑ CSV</button>
+                  {importingId===a.id&&(
+                    <div style={{ position:"absolute",right:0,top:30,zIndex:10,background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-secondary)",borderRadius:"var(--border-radius-md)",padding:"10px 12px",width:200,boxShadow:"0 4px 16px rgba(0,0,0,0.12)" }}>
+                      <div style={{ fontSize:12,fontWeight:500,marginBottom:8 }}>Importar a {a.name}</div>
+                      <input type="file" accept=".csv" ref={fileRef} style={{ display:"none" }} onChange={e=>handleFile(e,a.id)}/>
+                      <button onClick={()=>fileRef.current.click()} style={{ width:"100%",padding:"7px",borderRadius:"var(--border-radius-md)",fontSize:12,cursor:"pointer",background:"var(--color-background-info)",color:"var(--color-text-info)",border:"0.5px solid var(--color-border-info)",fontWeight:500 }}>Seleccionar archivo</button>
+                      <button onClick={()=>setImportingId(null)} style={{ width:"100%",marginTop:6,padding:"5px",borderRadius:"var(--border-radius-md)",fontSize:11,cursor:"pointer",background:"transparent",color:"var(--color-text-tertiary)",border:"none" }}>Cancelar</button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {isAdmin&&(confirmDelete===a.id?(
+                <div style={{ display:"flex",gap:6 }}>
+                  <button onClick={()=>deleteAccount(a.id)} style={{ fontSize:11,padding:"4px 8px",borderRadius:"var(--border-radius-md)",cursor:"pointer",background:"var(--color-background-danger)",color:"var(--color-text-danger)",border:"0.5px solid var(--color-border-danger)",fontWeight:500 }}>Sí</button>
+                  <button onClick={()=>setConfirmDelete(null)} style={{ fontSize:11,padding:"4px 8px",borderRadius:"var(--border-radius-md)",cursor:"pointer",border:"0.5px solid var(--color-border-tertiary)",background:"transparent",color:"var(--color-text-tertiary)" }}>No</button>
+                </div>
+              ):(
+                <button onClick={()=>setConfirmDelete(a.id)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:16,color:"var(--color-text-tertiary)",padding:"0 2px",lineHeight:1,opacity:0.5 }}>×</button>
+              ))}
             </div>
-
-            {isAdmin&&editingId===a.id?(
-              <div style={{ display:"flex",gap:6,alignItems:"center" }}>
-                <span style={{ fontSize:13,color:"var(--color-text-secondary)" }}>$</span>
-                <input autoFocus type="number" value={editVal} onChange={e=>setEditVal(e.target.value)}
-                  onBlur={()=>saveBalance(a.id)} onKeyDown={e=>{if(e.key==="Enter")saveBalance(a.id);if(e.key==="Escape")setEditingId(null);}}
-                  style={{ width:100,fontSize:14,fontWeight:500,textAlign:"right",padding:"3px 6px" }}/>
-              </div>
-            ):(
-              <div onClick={()=>isAdmin&&(setEditingId(a.id),setEditVal(String(a.balance)))}
-                title={isAdmin?"Click para editar":""}
-                style={{ fontSize:16,fontWeight:500,cursor:isAdmin?"pointer":"default",color:a.balance>0?"var(--color-text-primary)":"var(--color-text-tertiary)",minWidth:90,textAlign:"right" }}>
-                {fmt(a.balance)}{isAdmin&&<span style={{ fontSize:11,color:"var(--color-text-tertiary)",marginLeft:4 }}>✎</span>}
-              </div>
-            )}
-
-            {isAdmin&&(
-              <div style={{ position:"relative" }}>
-                <button onClick={()=>setImportingId(importingId===a.id?null:a.id)} style={{ fontSize:11,padding:"4px 9px",borderRadius:"var(--border-radius-md)",cursor:"pointer",border:"0.5px solid var(--color-border-tertiary)",background:"transparent",color:"var(--color-text-tertiary)" }}>↑ CSV</button>
-                {importingId===a.id&&(
-                  <div style={{ position:"absolute",right:0,top:30,zIndex:10,background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-secondary)",borderRadius:"var(--border-radius-md)",padding:"10px 12px",width:200,boxShadow:"0 4px 16px rgba(0,0,0,0.12)" }}>
-                    <div style={{ fontSize:12,fontWeight:500,marginBottom:8 }}>Importar a {a.name}</div>
-                    <input type="file" accept=".csv" ref={fileRef} style={{ display:"none" }} onChange={e=>handleFile(e,a.id)}/>
-                    <button onClick={()=>fileRef.current.click()} style={{ width:"100%",padding:"7px",borderRadius:"var(--border-radius-md)",fontSize:12,cursor:"pointer",background:"var(--color-background-info)",color:"var(--color-text-info)",border:"0.5px solid var(--color-border-info)",fontWeight:500 }}>Seleccionar archivo</button>
-                    <button onClick={()=>setImportingId(null)} style={{ width:"100%",marginTop:6,padding:"5px",borderRadius:"var(--border-radius-md)",fontSize:11,cursor:"pointer",background:"transparent",color:"var(--color-text-tertiary)",border:"none" }}>Cancelar</button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {isAdmin&&(confirmDelete===a.id?(
-              <div style={{ display:"flex",gap:6 }}>
-                <button onClick={()=>deleteAccount(a.id)} style={{ fontSize:11,padding:"4px 8px",borderRadius:"var(--border-radius-md)",cursor:"pointer",background:"var(--color-background-danger)",color:"var(--color-text-danger)",border:"0.5px solid var(--color-border-danger)",fontWeight:500 }}>Sí</button>
-                <button onClick={()=>setConfirmDelete(null)} style={{ fontSize:11,padding:"4px 8px",borderRadius:"var(--border-radius-md)",cursor:"pointer",border:"0.5px solid var(--color-border-tertiary)",background:"transparent",color:"var(--color-text-tertiary)" }}>No</button>
-              </div>
-            ):(
-              <button onClick={()=>setConfirmDelete(a.id)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:16,color:"var(--color-text-tertiary)",padding:"0 2px",lineHeight:1,opacity:0.5 }}>×</button>
-            ))}
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {isAdmin&&(showAdd?(
@@ -453,6 +451,29 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
   const [stripeData, setStripeData] = useState(null);
   const [syncing,    setSyncing]    = useState(false);
   const [syncMsg,    setSyncMsg]    = useState("");
+  const [addTxnFor,  setAddTxnFor]  = useState(null);
+  const [txnForm,    setTxnForm]    = useState({amount:"", description:"", date:new Date().toISOString().split("T")[0]});
+  const [savingTxn,  setSavingTxn]  = useState(false);
+
+  async function saveManualTxn(ref) {
+    if (!txnForm.amount || isNaN(Number(txnForm.amount)) || Number(txnForm.amount) <= 0) return;
+    setSavingTxn(true);
+    await sb.from("transactions").insert({
+      id:            "manual_ref_" + ref.id + "_" + Date.now(),
+      type:          "income",
+      category:      "SaaS MRR",
+      amount:        Number(txnForm.amount),
+      description:   txnForm.description || ref.name,
+      date:          txnForm.date,
+      account_id:    "mercury",
+      referrer_id:   ref.id,
+      referrer_name: ref.name,
+    });
+    setTxnForm({amount:"", description:"", date:new Date().toISOString().split("T")[0]});
+    setAddTxnFor(null);
+    setSavingTxn(false);
+    onRefresh();
+  }
 
   const now=new Date(), curMK=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
 
@@ -467,12 +488,8 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
       if (data.referrers?.length) {
         const allTxns = data.referrers.flatMap(r =>
           r.transactions.map(t => ({
-            ...t,
-            type: "income",
-            category: "SaaS MRR",
-            account_id: "mercury",
-            referrer_id: r.id,
-            referrer_name: r.name,
+            ...t, type:"income", category:"SaaS MRR",
+            account_id:"mercury", referrer_id:r.id, referrer_name:r.name,
           }))
         );
         const existingIds = new Set(txns.map(t => t.id));
@@ -644,8 +661,49 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
                   ))}
                 </div>
 
-                <div style={{ fontSize:12, fontWeight:600, color:"#555", marginBottom:10, textTransform:"uppercase", letterSpacing:0.5 }}>Por mes</div>
-                {Object.keys(ref.months).length===0 && <div style={{ fontSize:13, color:"#bbb", marginBottom:16 }}>Sin transacciones. Sincronizá desde Stripe.</div>}
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                  <div style={{ fontSize:12, fontWeight:600, color:"#555", textTransform:"uppercase", letterSpacing:0.5 }}>Por mes</div>
+                  {isAdmin && (
+                    <button onClick={e=>{e.stopPropagation(); setAddTxnFor(addTxnFor===ref.id?null:ref.id); setTxnForm({amount:"",description:"",date:new Date().toISOString().split("T")[0]});}}
+                      style={{ fontSize:12, padding:"4px 12px", borderRadius:7, cursor:"pointer", background:addTxnFor===ref.id?ST_RED_BG:"white", color:addTxnFor===ref.id?ST_RED:"#555", border:`1px solid ${addTxnFor===ref.id?ST_RED:"#E0E0E0"}`, fontWeight:600 }}>
+                      {addTxnFor===ref.id ? "Cancelar" : "+ Agregar transacción"}
+                    </button>
+                  )}
+                </div>
+
+                {isAdmin && addTxnFor===ref.id && (
+                  <div style={{ background:"#F9F9F9", border:"1px solid #E8E8E8", borderRadius:10, padding:"14px 16px", marginBottom:16 }}>
+                    <div style={{ fontSize:13, fontWeight:600, color:"#111", marginBottom:12 }}>Nueva transacción para {ref.name}</div>
+                    <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+                      <div style={{ flex:1, minWidth:100 }}>
+                        <div style={{ fontSize:11, fontWeight:600, color:"#555", marginBottom:5, textTransform:"uppercase", letterSpacing:0.5 }}>Monto (USD)</div>
+                        <input className="spicy-input" type="number" value={txnForm.amount} placeholder="0.00"
+                          onChange={e=>setTxnForm(f=>({...f,amount:e.target.value}))} style={{ fontSize:13 }}/>
+                      </div>
+                      <div style={{ flex:2, minWidth:160 }}>
+                        <div style={{ fontSize:11, fontWeight:600, color:"#555", marginBottom:5, textTransform:"uppercase", letterSpacing:0.5 }}>Descripción</div>
+                        <input className="spicy-input" value={txnForm.description} placeholder="Broker, empresa, etc."
+                          onChange={e=>setTxnForm(f=>({...f,description:e.target.value}))} style={{ fontSize:13 }}/>
+                      </div>
+                      <div style={{ flex:1, minWidth:130 }}>
+                        <div style={{ fontSize:11, fontWeight:600, color:"#555", marginBottom:5, textTransform:"uppercase", letterSpacing:0.5 }}>Fecha</div>
+                        <input className="spicy-input" type="date" value={txnForm.date}
+                          onChange={e=>setTxnForm(f=>({...f,date:e.target.value}))} style={{ fontSize:13 }}/>
+                      </div>
+                      <div style={{ display:"flex", alignItems:"flex-end" }}>
+                        <button onClick={()=>saveManualTxn(ref)} disabled={!txnForm.amount||savingTxn} className="spicy-btn-primary"
+                          style={{ padding:"9px 18px", fontSize:13, whiteSpace:"nowrap" }}>
+                          {savingTxn ? "Guardando…" : "Guardar"}
+                        </button>
+                      </div>
+                    </div>
+                    <div style={{ fontSize:11, color:"#aaa", marginTop:8 }}>
+                      Se registra como ingreso SaaS MRR en Mercury, asociado a {ref.name}.
+                    </div>
+                  </div>
+                )}
+
+                {Object.keys(ref.months).length===0 && !addTxnFor && <div style={{ fontSize:13, color:"#bbb", marginBottom:16 }}>Sin transacciones. Sincronizá desde Stripe o agregá manualmente.</div>}
                 {Object.entries(ref.months).sort(([a],[b])=>b.localeCompare(a)).map(([mk,m])=>{
                   const owed = Math.max(0, m.commission - m.paid);
                   return (
@@ -805,27 +863,19 @@ function parseCSVRows(text, defaultAccountId) {
     if (isMercury) {
       const status = get("status").toLowerCase();
       if (status === "pending" || status === "failed") continue;
-
       const rawDate   = get("date");
       const rawAmount = parseFloat(get("amount").replace(/,/g,"")) || 0;
       if (!rawDate || rawAmount === 0) continue;
-
       const desc       = get("description") || get("bank description");
       const mercuryCat = get("mercury category");
       const manualCat  = get("category");
-
       if (isCuentaTransfer(desc, mercuryCat, manualCat)) continue;
-
       const type = rawAmount > 0 ? "income" : "expense";
       rows.push({
-        id: "imp_" + i + "_" + Date.now(),
-        type,
-        amount:      Math.abs(rawAmount),
-        description: desc,
-        category:    autoCategory(desc, type, mercuryCat, manualCat),
-        date:        rawDate.split("T")[0],
-        source:      "mercury",
-        account_id:  "mercury",
+        id: "imp_" + i + "_" + Date.now(), type,
+        amount: Math.abs(rawAmount), description: desc,
+        category: autoCategory(desc, type, mercuryCat, manualCat),
+        date: rawDate.split("T")[0], source: "mercury", account_id: "mercury",
       });
     } else {
       const rawDate = get("created (utc)") || get("created");
@@ -835,14 +885,11 @@ function parseCSVRows(text, defaultAccountId) {
       if (!rawDate || txType === "payout") continue;
       const type = rawNet < 0 ? "expense" : "income";
       rows.push({
-        id: "imp_str_" + i + "_" + Date.now(),
-        type,
-        amount:      Math.abs(rawNet),
-        description: desc,
-        category:    autoCategory(desc, type),
-        date:        rawDate.split(" ")[0],
-        source:      "stripe",
-        account_id:  defaultAccountId || "mercury",
+        id: "imp_str_" + i + "_" + Date.now(), type,
+        amount: Math.abs(rawNet), description: desc,
+        category: autoCategory(desc, type),
+        date: rawDate.split(" ")[0], source: "stripe",
+        account_id: defaultAccountId || "mercury",
       });
     }
   }
@@ -853,14 +900,27 @@ function parseCSVRows(text, defaultAccountId) {
 function HistoryView({ txns, accounts, catsIncome, catsExpense, filterType, setFilterType,
   filterAcc, setFilterAcc, isAdmin, updateCategory, deleteTxn, deleteMany, sourceBadge }) {
 
-  const [selected, setSelected] = useState({});
-  const [deleting, setDeleting] = useState(false);
+  const [selected,    setSelected]    = useState({});
+  const [deleting,    setDeleting]    = useState(false);
   const [confirmBulk, setConfirmBulk] = useState(false);
+  const [filterMonth, setFilterMonth] = useState("all");
+  const [filterCat,   setFilterCat]   = useState("all");
+  const [page,        setPage]        = useState(1);
+  const PAGE_SIZE = 25;
 
-  const visibleTxns = txns
-    .filter(t => (filterType==="all"||t.type===filterType) && (filterAcc==="all"||t.account_id===filterAcc))
-    .slice(0, 60);
+  const allCats = [...catsIncome, ...catsExpense];
+  const availableMonths = [...new Set(txns.map(t => monthKey(t.date)))].sort((a,b) => b.localeCompare(a));
 
+  const filtered = txns.filter(t =>
+    (filterType  === "all" || t.type           === filterType)  &&
+    (filterAcc   === "all" || t.account_id     === filterAcc)   &&
+    (filterMonth === "all" || monthKey(t.date) === filterMonth) &&
+    (filterCat   === "all" || t.category       === filterCat)
+  );
+
+  const totalPages  = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage    = Math.min(page, totalPages);
+  const visibleTxns = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
   const selectedIds = Object.entries(selected).filter(([,v])=>v).map(([id])=>id);
   const allSelected = visibleTxns.length > 0 && visibleTxns.every(t => selected[t.id]);
 
@@ -872,26 +932,32 @@ function HistoryView({ txns, accounts, catsIncome, catsExpense, filterType, setF
   async function handleDeleteSelected() {
     setDeleting(true);
     await deleteMany(selectedIds);
-    setSelected({});
-    setConfirmBulk(false);
-    setDeleting(false);
+    setSelected({}); setConfirmBulk(false); setDeleting(false);
   }
 
-  useEffect(() => setSelected({}), [filterType, filterAcc]);
+  useEffect(() => { setPage(1); setSelected({}); }, [filterType, filterAcc, filterMonth, filterCat]);
 
   return (
     <>
       <div style={{ fontSize:20,fontWeight:700,color:"#111",marginBottom:20 }}>Historial</div>
 
-      <div style={{ display:"flex",gap:8,marginBottom:16,flexWrap:"wrap",alignItems:"center" }}>
+      <div style={{ display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center" }}>
         {[["all","Todos"],["income","Ingresos"],["expense","Egresos"]].map(([f,l])=>(
-          <button key={f} onClick={()=>setFilterType(f)} style={{ fontSize:12,padding:"6px 14px",borderRadius:8,fontWeight:600,cursor:"pointer",border:"2px solid",borderColor:filterType===f?ST_RED:"#E0E0E0",background:filterType===f?ST_RED_BG:"white",color:filterType===f?ST_RED:"#888",transition:"all 0.15s" }}>{l}</button>
+          <button key={f} onClick={()=>setFilterType(f)} style={{ fontSize:12,padding:"6px 14px",borderRadius:8,fontWeight:600,cursor:"pointer",border:"2px solid",borderColor:filterType===f?ST_RED:"#E0E0E0",background:filterType===f?ST_RED_BG:"white",color:filterType===f?ST_RED:"#888" }}>{l}</button>
         ))}
         <select value={filterAcc} onChange={e=>setFilterAcc(e.target.value)} className="spicy-select">
           <option value="all">Todas las cuentas</option>
           {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
-        <span style={{ marginLeft:"auto",fontSize:12,color:"#aaa",fontWeight:500 }}>{visibleTxns.length} registros</span>
+        <select value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} className="spicy-select">
+          <option value="all">Todos los meses</option>
+          {availableMonths.map(mk=><option key={mk} value={mk}>{monthLabel(mk)}</option>)}
+        </select>
+        <select value={filterCat} onChange={e=>setFilterCat(e.target.value)} className="spicy-select">
+          <option value="all">Todas las categorías</option>
+          {allCats.map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+        </select>
+        <span style={{ marginLeft:"auto",fontSize:12,color:"#aaa",fontWeight:500 }}>{filtered.length} registros</span>
       </div>
 
       {isAdmin && selectedIds.length > 0 && (
@@ -901,16 +967,12 @@ function HistoryView({ txns, accounts, catsIncome, catsExpense, filterType, setF
           <div style={{ marginLeft:"auto" }}>
             {confirmBulk ? (
               <div style={{ display:"flex",gap:8,alignItems:"center" }}>
-                <span style={{ fontSize:12,color:"#92400E",fontWeight:500 }}>¿Eliminar {selectedIds.length} transacciones?</span>
-                <button onClick={handleDeleteSelected} disabled={deleting} style={{ fontSize:12,padding:"5px 14px",borderRadius:7,cursor:"pointer",background:ST_RED,color:"white",border:"none",fontWeight:600 }}>
-                  {deleting ? "Eliminando…" : "Sí, eliminar"}
-                </button>
+                <span style={{ fontSize:12,color:"#92400E",fontWeight:500 }}>¿Eliminar {selectedIds.length}?</span>
+                <button onClick={handleDeleteSelected} disabled={deleting} style={{ fontSize:12,padding:"5px 14px",borderRadius:7,cursor:"pointer",background:ST_RED,color:"white",border:"none",fontWeight:600 }}>{deleting?"Eliminando…":"Sí, eliminar"}</button>
                 <button onClick={()=>setConfirmBulk(false)} style={{ fontSize:12,padding:"5px 12px",borderRadius:7,cursor:"pointer",background:"white",color:"#555",border:"1px solid #E0E0E0" }}>Cancelar</button>
               </div>
             ) : (
-              <button onClick={()=>setConfirmBulk(true)} style={{ fontSize:12,padding:"6px 16px",borderRadius:7,cursor:"pointer",background:ST_RED,color:"white",border:"none",fontWeight:600 }}>
-                Eliminar seleccionadas
-              </button>
+              <button onClick={()=>setConfirmBulk(true)} style={{ fontSize:12,padding:"6px 16px",borderRadius:7,cursor:"pointer",background:ST_RED,color:"white",border:"none",fontWeight:600 }}>Eliminar seleccionadas</button>
             )}
           </div>
         </div>
@@ -919,16 +981,11 @@ function HistoryView({ txns, accounts, catsIncome, catsExpense, filterType, setF
       <div className="spicy-card" style={{ padding:0,overflow:"hidden" }}>
         {isAdmin && visibleTxns.length > 0 && (
           <div style={{ display:"flex",alignItems:"center",gap:12,padding:"10px 20px",borderBottom:"1px solid #F3F3F3",background:"#FAFAFA" }}>
-            <input type="checkbox" checked={allSelected} onChange={toggleAll}
-              style={{ cursor:"pointer",width:15,height:15,accentColor:ST_RED }}/>
-            <span style={{ fontSize:11,color:"#aaa",fontWeight:500 }}>
-              {allSelected ? "Deseleccionar todas" : "Seleccionar todas"}
-            </span>
+            <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{ cursor:"pointer",width:15,height:15,accentColor:ST_RED }}/>
+            <span style={{ fontSize:11,color:"#aaa",fontWeight:500 }}>{allSelected?"Deseleccionar todas":"Seleccionar todas"}</span>
           </div>
         )}
-
         {visibleTxns.length===0 && <div style={{ padding:"2rem",textAlign:"center",fontSize:13,color:"#bbb" }}>Sin movimientos.</div>}
-
         {visibleTxns.map((t,i)=>{
           const acc  = accounts.find(a=>a.id===t.account_id);
           const cats = t.type==="income" ? catsIncome : catsExpense;
@@ -962,6 +1019,16 @@ function HistoryView({ txns, accounts, catsIncome, catsExpense, filterType, setF
           );
         })}
       </div>
+
+      {totalPages > 1 && (
+        <div style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginTop:16 }}>
+          <button onClick={()=>setPage(1)} disabled={safePage===1} className="spicy-btn-secondary" style={{ padding:"5px 10px",fontSize:12 }}>«</button>
+          <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={safePage===1} className="spicy-btn-secondary" style={{ padding:"5px 12px",fontSize:12 }}>‹ Ant</button>
+          <span style={{ fontSize:13,color:"#555",fontWeight:500,padding:"0 8px" }}>Pág {safePage} de {totalPages}</span>
+          <button onClick={()=>setPage(p=>Math.min(totalPages,p+1))} disabled={safePage===totalPages} className="spicy-btn-secondary" style={{ padding:"5px 12px",fontSize:12 }}>Sig ›</button>
+          <button onClick={()=>setPage(totalPages)} disabled={safePage===totalPages} className="spicy-btn-secondary" style={{ padding:"5px 10px",fontSize:12 }}>»</button>
+        </div>
+      )}
     </>
   );
 }
@@ -1066,18 +1133,24 @@ export default function SpicyFinanzas() {
     t.account_id === "mercury" && t.category !== MOVIMIENTO_CUENTA
   );
 
-  const last3months=[0,1,2].map(i=>{const d=new Date(now.getFullYear(),now.getMonth()-i,1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;});
   const months6=Array.from({length:6},(_,i)=>{const d=new Date(now.getFullYear(),now.getMonth()-(5-i),1);return{key:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`,label:MONTH_LABELS[d.getMonth()]};});
 
-  const mrrTxns = mercuryTxns.filter(t=>t.category==="SaaS MRR").sort((a,b)=>b.date.localeCompare(a.date));
-  const mrrLastMonthKey = mrrTxns.length>0 ? monthKey(mrrTxns[0].date) : null;
-  const mrr = mrrLastMonthKey ? mrrTxns.filter(t=>monthKey(t.date)===mrrLastMonthKey).reduce((s,t)=>s+Number(t.amount),0) : 0;
-  const mrrMonthLabel = mrrLastMonthKey ? monthLabel(mrrLastMonthKey) : "—";
+  const prevMonth = (() => { const d=new Date(now.getFullYear(),now.getMonth()-1,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
 
-  const monthlyBurn = last3months.reduce((acc,mk) =>
-    acc + mercuryTxns.filter(t=>t.type==="expense"&&monthKey(t.date)===mk).reduce((a,t)=>a+Number(t.amount),0), 0) / 3;
-  const totalCash = accounts.reduce((s,a)=>s+Number(a.balance),0);
-  const runway = monthlyBurn>0 ? Math.round(totalCash/monthlyBurn) : 0;
+  const mrr = mercuryTxns.filter(t=>t.category==="SaaS MRR"&&monthKey(t.date)===prevMonth).reduce((s,t)=>s+Number(t.amount),0);
+  const mrrMonthLabel = monthLabel(prevMonth);
+
+  const prevIncome  = mercuryTxns.filter(t=>t.type==="income" &&monthKey(t.date)===prevMonth).reduce((s,t)=>s+Number(t.amount),0);
+  const prevExpense = mercuryTxns.filter(t=>t.type==="expense"&&monthKey(t.date)===prevMonth).reduce((s,t)=>s+Number(t.amount),0);
+  const monthlyBurn = prevIncome - prevExpense;
+
+  const calcBalances = {};
+  txns.forEach(t => {
+    if (!calcBalances[t.account_id]) calcBalances[t.account_id] = 0;
+    calcBalances[t.account_id] += t.type==="income" ? Number(t.amount) : -Number(t.amount);
+  });
+  const totalCash = Object.values(calcBalances).reduce((s,v)=>s+v,0);
+  const runway = prevExpense>0 ? Math.round(totalCash/prevExpense) : 0;
 
   const chartData = months6.map(m => ({
     label:        m.label,
@@ -1158,14 +1231,18 @@ export default function SpicyFinanzas() {
           <div style={{ fontSize:20,fontWeight:700,color:"#111",marginBottom:20 }}>Resumen financiero</div>
           <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:20 }}>
             {[
-              { label:"MRR", value:fmt(mrr), sub:mrrMonthLabel, tooltip:`Suma de SaaS MRR en ${mrrMonthLabel}` },
+              { label:"MRR", value:fmt(mrr), sub:mrrMonthLabel, tooltip:`Suma SaaS MRR de ${mrrMonthLabel}` },
               { label:"ARR", value:fmt(mrr*12), sub:"proyectado" },
-              { label:"Cash total", value:fmt(totalCash), sub:`${accounts.filter(a=>a.balance>0).length} cuentas` },
-              { label:"Runway", value:runway>0?`${runway} meses`:"—", sub:monthlyBurn>0?`burn ${fmt(monthlyBurn)}/mes`:"sin burn" },
+              { label:"Cash total", value:fmt(totalCash), sub:`${accounts.length} cuentas`, tooltip:"Calculado desde transacciones" },
+              { label:"Burn " + mrrMonthLabel,
+                value: monthlyBurn >= 0 ? `+${fmt(monthlyBurn)}` : fmt(monthlyBurn),
+                sub: monthlyBurn >= 0 ? "superávit" : "déficit",
+                neg: monthlyBurn < 0,
+                tooltip:`Ingreso ${fmt(prevIncome)} − Egreso ${fmt(prevExpense)}` },
             ].map(k=>(
               <div key={k.label} className="spicy-kpi" style={{ position:"relative" }} title={k.tooltip||""}>
                 <div className="spicy-kpi-label">{k.label}{k.tooltip&&<span style={{ marginLeft:4,fontSize:10,color:"#ccc",cursor:"help" }}>ⓘ</span>}</div>
-                <div className="spicy-kpi-value">{k.value}</div>
+                <div className="spicy-kpi-value" style={{ color:k.neg?"#EF3E3E":"#111" }}>{k.value}</div>
                 <div className="spicy-kpi-sub">{k.sub}</div>
               </div>
             ))}
@@ -1177,13 +1254,16 @@ export default function SpicyFinanzas() {
               <button onClick={()=>setView("accounts")} style={{ fontSize:12,color:ST_RED,background:"none",border:"none",cursor:"pointer",fontWeight:600 }}>Ver todas →</button>
             </div>
             <div style={{ display:"flex",flexWrap:"wrap",gap:8 }}>
-              {accounts.map(a=>(
-                <div key={a.id} onClick={()=>setView("accounts")} style={{ display:"flex",alignItems:"center",gap:6,padding:"7px 12px",background:"#F7F7F8",borderRadius:8,cursor:"pointer",border:"1px solid #EBEBEB" }}>
-                  <div style={{ width:8,height:8,borderRadius:"50%",background:a.color }}/>
-                  <span style={{ fontSize:12,color:"#666",fontWeight:500 }}>{a.name}</span>
-                  <span style={{ fontSize:13,fontWeight:600,color:a.balance>0?"#111":"#bbb" }}>{fmt(a.balance)}</span>
-                </div>
-              ))}
+              {accounts.map(a=>{
+                const cb=txns.filter(t=>t.account_id===a.id).reduce((b,t)=>b+(t.type==="income"?Number(t.amount):-Number(t.amount)),0);
+                return (
+                  <div key={a.id} onClick={()=>setView("accounts")} style={{ display:"flex",alignItems:"center",gap:6,padding:"7px 12px",background:"#F7F7F8",borderRadius:8,cursor:"pointer",border:"1px solid #EBEBEB" }}>
+                    <div style={{ width:8,height:8,borderRadius:"50%",background:a.color }}/>
+                    <span style={{ fontSize:12,color:"#666",fontWeight:500 }}>{a.name}</span>
+                    <span style={{ fontSize:13,fontWeight:600,color:cb>0?"#111":"#bbb" }}>{fmt(cb)}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
