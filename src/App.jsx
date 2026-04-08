@@ -183,15 +183,24 @@ function LoginScreen() {
 
 // ── Chart Bar ──────────────────────────────────────────────────────────────
 function ChartBar({ label, income, expense, referralCost, maxVal }) {
-  const h=110, iH=maxVal>0?Math.round((income/maxVal)*h):0, eH=maxVal>0?Math.round((expense/maxVal)*h):0, rH=maxVal>0?Math.round((referralCost/maxVal)*h):0;
+  const [hovered, setHovered] = useState(false);
+  const h=120, iH=maxVal>0?Math.round((income/maxVal)*h):0, eH=maxVal>0?Math.round((expense/maxVal)*h):0, rH=maxVal>0?Math.round((referralCost/maxVal)*h):0;
   return (
-    <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:4,flex:1,minWidth:0 }}>
+    <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:4,flex:1,minWidth:0,position:"relative" }}
+      onMouseEnter={()=>setHovered(true)} onMouseLeave={()=>setHovered(false)}>
+      {hovered&&(income>0||expense>0)&&(
+        <div style={{ position:"absolute",bottom:h+14,left:"50%",transform:"translateX(-50%)",background:"#1A1A2E",color:"white",borderRadius:8,padding:"6px 10px",fontSize:11,whiteSpace:"nowrap",zIndex:10,pointerEvents:"none",lineHeight:1.7 }}>
+          {income>0&&<div style={{ color:"#6EE7B7" }}>↑ {fmt(income)}</div>}
+          {expense>0&&<div style={{ color:"#FCA5A5" }}>↓ {fmt(expense)}</div>}
+          {referralCost>0&&<div style={{ color:"#FCD34D" }}>ref {fmt(referralCost)}</div>}
+        </div>
+      )}
       <div style={{ display:"flex",alignItems:"flex-end",gap:2,height:h }}>
-        <div style={{ width:13,height:iH,background:"#1D9E75",borderRadius:"3px 3px 0 0",minHeight:income>0?3:0 }}/>
-        <div style={{ width:13,height:eH,background:"#D85A30",borderRadius:"3px 3px 0 0",minHeight:expense>0?3:0 }}/>
-        {referralCost>0&&<div style={{ width:10,height:rH,background:"#BA7517",borderRadius:"3px 3px 0 0",opacity:0.85 }}/>}
+        <div style={{ width:13,height:iH,background:"#1D9E75",borderRadius:"3px 3px 0 0",minHeight:income>0?3:0,transition:"opacity 0.1s",opacity:hovered?0.8:1 }}/>
+        <div style={{ width:13,height:eH,background:ST_RED,borderRadius:"3px 3px 0 0",minHeight:expense>0?3:0,transition:"opacity 0.1s",opacity:hovered?0.8:1 }}/>
+        {referralCost>0&&<div style={{ width:10,height:rH,background:"#F59E0B",borderRadius:"3px 3px 0 0",opacity:hovered?0.7:0.85 }}/>}
       </div>
-      <span style={{ fontSize:11,color:"var(--color-text-tertiary)" }}>{label}</span>
+      <span style={{ fontSize:11,color:"#aaa" }}>{label}</span>
     </div>
   );
 }
@@ -441,13 +450,12 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
   const [expanded,   setExpanded]   = useState(null);
   const [showAdd,    setShowAdd]    = useState(false);
   const [newRef,     setNewRef]     = useState({id:"",name:"",email:"",commission_rate:20});
-  const [stripeData, setStripeData] = useState(null); // data from Worker
+  const [stripeData, setStripeData] = useState(null);
   const [syncing,    setSyncing]    = useState(false);
   const [syncMsg,    setSyncMsg]    = useState("");
 
   const now=new Date(), curMK=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
 
-  // Pull referral data from Stripe via Worker
   async function syncFromStripe() {
     if (!WORKER_URL) { setSyncMsg("Configurá WORKER_URL primero."); return; }
     setSyncing(true); setSyncMsg("");
@@ -456,7 +464,6 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
       if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
       setStripeData(data);
-      // Import new transactions into Supabase
       if (data.referrers?.length) {
         const allTxns = data.referrers.flatMap(r =>
           r.transactions.map(t => ({
@@ -482,7 +489,6 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
     setSyncing(false);
   }
 
-  // Calculate commissions using per-referrer rate from Supabase
   const paidCommissions = txns.filter(t => t.category === "Comisiones referidos" && t.referrer_id);
   const referredIncome  = txns.filter(t => t.type === "income" && t.referrer_id);
 
@@ -494,20 +500,33 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
     const totalCommission = totalRevenue * rate;
     const totalPaid       = paid.reduce((s,t) => s + Number(t.amount), 0);
     const totalOwed       = Math.max(0, totalCommission - totalPaid);
+
     const months = {};
     inc.forEach(t => {
       const mk = monthKey(t.date);
-      if (!months[mk]) months[mk] = { revenue:0, commission:0, paid:0 };
+      if (!months[mk]) months[mk] = { revenue:0, commission:0, paid:0, transactions:[] };
       months[mk].revenue    += Number(t.amount);
       months[mk].commission += Number(t.amount) * rate;
+      months[mk].transactions.push(t);
     });
     paid.forEach(t => {
       const mk = monthKey(t.date);
-      if (!months[mk]) months[mk] = { revenue:0, commission:0, paid:0 };
+      if (!months[mk]) months[mk] = { revenue:0, commission:0, paid:0, transactions:[] };
       months[mk].paid += Number(t.amount);
     });
+
+    const customerMap = {};
+    inc.forEach(t => {
+      const key = t.description || t.id;
+      if (!customerMap[key]) customerMap[key] = { name:key, revenue:0, commission:0, transactions:[] };
+      customerMap[key].revenue    += Number(t.amount);
+      customerMap[key].commission += Number(t.amount) * rate;
+      customerMap[key].transactions.push(t);
+    });
+    const customers = Object.values(customerMap).sort((a,b) => b.commission - a.commission);
+
     const curRevenue = inc.filter(t => monthKey(t.date) === curMK).reduce((s,t) => s + Number(t.amount), 0);
-    return { ...ref, totalRevenue, totalCommission, totalPaid, totalOwed, months,
+    return { ...ref, totalRevenue, totalCommission, totalPaid, totalOwed, months, customers,
       curCommission: curRevenue * rate, activeBrokers: new Set(inc.map(t => t.description)).size };
   }).sort((a,b) => b.totalOwed - a.totalOwed);
 
@@ -549,7 +568,6 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
         </div>
       </div>
 
-      {/* Info box: cómo configurar Stripe */}
       {referrers.length > 0 && (
         <div style={{ background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:10, padding:"12px 16px", marginBottom:20, fontSize:12, color:"#166534", lineHeight:1.7 }}>
           Para que un broker quede asociado a un referidor, editá el customer en Stripe → Metadata → agregar:<br/>
@@ -557,7 +575,6 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
         </div>
       )}
 
-      {/* KPIs */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:20 }}>
         {[
           { label:"A pagar este mes", value:fmtDec(totalOwedNow), warn:totalOwedNow>0 },
@@ -571,7 +588,6 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
         ))}
       </div>
 
-      {/* Lista de socios */}
       <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
         {stats.length === 0 && (
           <div className="spicy-card" style={{ textAlign:"center", padding:"2rem" }}>
@@ -614,26 +630,7 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
 
             {expanded===ref.id&&(
               <div style={{ borderTop:"1px solid #F3F3F3", padding:"16px 20px" }}>
-                <div style={{ fontSize:12, fontWeight:600, color:"#555", marginBottom:12, textTransform:"uppercase", letterSpacing:0.5 }}>Detalle por mes</div>
-                {Object.entries(ref.months).sort(([a],[b])=>b.localeCompare(a)).map(([mk,m])=>{
-                  const owed = Math.max(0, m.commission - m.paid);
-                  return (
-                    <div key={mk} style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 0", borderBottom:"1px solid #F3F3F3" }}>
-                      <div style={{ flex:1, fontSize:13, fontWeight:500 }}>{monthLabel(mk)}</div>
-                      <div style={{ fontSize:12, color:"#888", minWidth:100, textAlign:"right" }}>Rev {fmtDec(m.revenue)}</div>
-                      <div style={{ fontSize:13, fontWeight:700, color:"#111", minWidth:90, textAlign:"right" }}>{fmtDec(m.commission)}</div>
-                      <div style={{ minWidth:110, textAlign:"right" }}>
-                        {owed < 0.01
-                          ? <span className="spicy-badge-green">pagado</span>
-                          : isAdmin && <button onClick={()=>markPaid(ref,mk,owed)} style={{ fontSize:11, padding:"3px 10px", borderRadius:6, cursor:"pointer", background:"#FEF3C7", color:"#92400E", border:"1px solid #FCD34D", fontWeight:600 }}>marcar pagado</button>
-                        }
-                      </div>
-                    </div>
-                  );
-                })}
-                {Object.keys(ref.months).length===0 && <div style={{ fontSize:13, color:"#bbb" }}>Sin transacciones aún. Sincronizá desde Stripe.</div>}
-
-                <div style={{ display:"flex", gap:10, marginTop:16 }}>
+                <div style={{ display:"flex", gap:10, marginBottom:20 }}>
                   {[
                     {label:"Generado",  value:fmtDec(ref.totalRevenue)},
                     {label:"Comisión",  value:fmtDec(ref.totalCommission)},
@@ -646,6 +643,56 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
                     </div>
                   ))}
                 </div>
+
+                <div style={{ fontSize:12, fontWeight:600, color:"#555", marginBottom:10, textTransform:"uppercase", letterSpacing:0.5 }}>Por mes</div>
+                {Object.keys(ref.months).length===0 && <div style={{ fontSize:13, color:"#bbb", marginBottom:16 }}>Sin transacciones. Sincronizá desde Stripe.</div>}
+                {Object.entries(ref.months).sort(([a],[b])=>b.localeCompare(a)).map(([mk,m])=>{
+                  const owed = Math.max(0, m.commission - m.paid);
+                  return (
+                    <div key={mk} style={{ marginBottom:8 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 12px", background:"#F9F9F9", borderRadius:8 }}>
+                        <div style={{ flex:1, fontSize:13, fontWeight:600 }}>{monthLabel(mk)}</div>
+                        <div style={{ fontSize:12, color:"#888" }}>Rev {fmtDec(m.revenue)}</div>
+                        <div style={{ fontSize:13, fontWeight:700 }}>{fmtDec(m.commission)}</div>
+                        <div>
+                          {owed < 0.01
+                            ? <span className="spicy-badge-green">pagado ✓</span>
+                            : isAdmin && <button onClick={()=>markPaid(ref,mk,owed)} style={{ fontSize:11, padding:"4px 12px", borderRadius:6, cursor:"pointer", background:"#FEF3C7", color:"#92400E", border:"1px solid #FCD34D", fontWeight:600 }}>marcar pagado {fmtDec(owed)}</button>
+                          }
+                        </div>
+                      </div>
+                      {m.transactions?.map(t=>(
+                        <div key={t.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"7px 12px 7px 24px", borderBottom:"1px solid #F3F3F3", fontSize:12 }}>
+                          <div style={{ width:6, height:6, borderRadius:"50%", background:"#1D9E75", flexShrink:0 }}/>
+                          <div style={{ flex:1, color:"#555" }}>{t.description||"—"}</div>
+                          <div style={{ color:"#888" }}>{t.date}</div>
+                          <div style={{ fontWeight:600, color:"#111" }}>{fmtDec(Number(t.amount))}</div>
+                          <div style={{ color:"#aaa", minWidth:70, textAlign:"right" }}>com: {fmtDec(Number(t.amount)*(ref.commission_rate||20)/100)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+
+                {ref.customers?.length > 0 && (
+                  <>
+                    <div style={{ fontSize:12, fontWeight:600, color:"#555", margin:"20px 0 10px", textTransform:"uppercase", letterSpacing:0.5 }}>Por cliente</div>
+                    {ref.customers.map(c=>(
+                      <div key={c.name} style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 12px", background:"#F9F9F9", borderRadius:8, marginBottom:6 }}>
+                        <div style={{ flex:1, fontSize:13, fontWeight:500, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{c.name}</div>
+                        <div style={{ fontSize:12, color:"#888" }}>{c.transactions.length} pago{c.transactions.length!==1?"s":""}</div>
+                        <div style={{ fontSize:12, color:"#555" }}>Rev {fmtDec(c.revenue)}</div>
+                        <div style={{ fontSize:13, fontWeight:700 }}>Com {fmtDec(c.commission)}</div>
+                        <div style={{ fontSize:11, padding:"3px 8px", borderRadius:5,
+                          background: c.commission <= ref.totalPaid ? "#EDFAF3" : "#FEF3C7",
+                          color: c.commission <= ref.totalPaid ? "#16A34A" : "#92400E",
+                          fontWeight:600 }}>
+                          {c.commission <= ref.totalPaid ? "cubierto" : `falta ${fmtDec(c.commission)}`}
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -684,14 +731,245 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
   );
 }
 
-// ── CSV Parser (sin Supabase, solo parsea rows) ────────────────────────────
-function autoCategory(desc,type){const d=(desc||"").toLowerCase();if(type==="income"){if(d.includes("subscription")||d.includes("mrr")||d.includes("plan"))return"SaaS MRR";if(d.includes("invest")||d.includes("capital"))return"Inversión";return"Otro ingreso";}if(d.includes("salary")||d.includes("deel")||d.includes("sueldo"))return"Salarios";if(d.includes("aws")||d.includes("vercel")||d.includes("notion")||d.includes("openai")||d.includes("stripe fee"))return"SaaS Tools";if(d.includes("meta")||d.includes("facebook")||d.includes("ads"))return"Marketing / Ads";return"Otro gasto";}
-function parseCSVRows(text,defaultAccountId){const lines=text.trim().split(/\r?\n/);if(lines.length<2)return[];const cols=lines[0].split(",").map(c=>c.trim().replace(/^"|"$/g,"").toLowerCase());const isMercury=cols.some(c=>c.includes("bank description"))||(cols.includes("amount")&&cols.includes("status"));const isStripe=cols.some(c=>c.includes("created (utc)"))||(cols.includes("net")&&cols.includes("fee"));if(!isMercury&&!isStripe)return[];const rows=[];for(let i=1;i<lines.length;i++){const line=lines[i].trim();if(!line)continue;const values=[];let cur="",inQ=false;for(const ch of line){if(ch==='"'){inQ=!inQ;}else if(ch===","&&!inQ){values.push(cur.trim());cur="";}else cur+=ch;}values.push(cur.trim());const get=(key)=>{const idx=cols.findIndex(c=>c.includes(key));return idx>=0?(values[idx]||"").replace(/^"|"$/g,"").trim():"";};if(isMercury){const rawDate=get("date"),rawAmount=parseFloat(get("amount").replace(/,/g,""))||0,desc=get("description")||get("bank description");if(get("status").toLowerCase()==="pending"||!rawDate||rawAmount===0)continue;const type=rawAmount>0?"income":"expense";rows.push({id:"imp_"+i+"_"+Date.now(),type,amount:Math.abs(rawAmount),description:desc,category:autoCategory(desc,type),date:rawDate.split("T")[0],source:"mercury",account_id:"mercury"});}else{const rawDate=get("created (utc)")||get("created"),rawNet=parseFloat(get("net").replace(/,/g,""))||0,txType=get("type").toLowerCase(),desc=get("description")||get("source");if(!rawDate||txType==="payout")continue;const type=rawNet<0?"expense":"income";rows.push({id:"imp_str_"+i+"_"+Date.now(),type,amount:Math.abs(rawNet),description:desc,category:autoCategory(desc,type),date:rawDate.split(" ")[0],source:"stripe",account_id:defaultAccountId||"mercury"});}}return rows;}
+// ── CSV Parser ─────────────────────────────────────────────────────────────
+const MOVIMIENTO_CUENTA = "Movimiento Cuenta";
+
+function isCuentaTransfer(desc, mercuryCat, category) {
+  const d  = (desc||"").toLowerCase();
+  const mc = (mercuryCat||"").toLowerCase();
+  const c  = (category||"").toLowerCase();
+  return mc === "transfer" || c === "transfer" ||
+    d.includes("transfer between your mercury") ||
+    d.includes("mercury savings") ||
+    d.includes("mercury checking");
+}
+
+function autoCategory(desc, type, mercuryCat="", mercuryManualCat="") {
+  const d  = (desc||"").toLowerCase();
+  const mc = (mercuryCat||"").toLowerCase();
+  const c  = (mercuryManualCat||"").toLowerCase();
+
+  if (type === "income") {
+    if (c === "revenue" || d.includes("stripe") || d.includes("spicy house") || d.includes("spicytool")) return "SaaS MRR";
+    if (d.includes("invest") || d.includes("capital") || d.includes("fund")) return "Inversión";
+    return "Otro ingreso";
+  }
+
+  if (mc === "payroll" || c === "payroll" || c === "employee benefits") return "Salarios";
+  if (["franco cabrera","lucas escobedo","marcela c borner","payoneer"].some(n => d.includes(n))) return "Salarios";
+
+  if (mc === "software" || c === "software & subscriptions") return "SaaS Tools";
+  if (["github","notion","openai","mongodb","google cloud","nango","make","n8n","mailersend","gupshup",
+       "brizy","asana","leomoves","paypro","cloudflare","vercel","aws","heroku","figma","linear",
+       "slack","anthropic","kapso"].some(t => d.includes(t))) return "SaaS Tools";
+
+  if (mc === "advertising" || ["facebook","meta","cf*tks"].some(t => d.includes(t))) return "Marketing / Ads";
+
+  if (mc === "financialinstitutionsandfees" || c === "bank fees" ||
+      d.includes("intl. transaction fee") || d.includes("casa manantial")) return "Legal / Admin";
+
+  if (["othertravel","groundtransportation","fuelandgas"].includes(mc) || c === "travel & transportation" ||
+      ["plataforma 10","axion","uber","lyft","airbnb","victorian govern"].some(t => d.includes(t))) return "Viajes";
+
+  return "Otro gasto";
+}
+
+function parseCSVRows(text, defaultAccountId) {
+  const lines = text.trim().split(/\r?\n/);
+  if (lines.length < 2) return [];
+  const rawCols = lines[0].split(",").map(c => c.trim().replace(/^"|"$/g,""));
+  const cols = rawCols.map(c => c.toLowerCase());
+  const isMercury = cols.some(c => c.includes("mercury category")) ||
+    (cols.includes("amount") && cols.includes("status") && cols.includes("description"));
+  const isStripe = cols.some(c => c.includes("created (utc)")) ||
+    (cols.includes("net") && cols.includes("fee"));
+  if (!isMercury && !isStripe) return [];
+
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const values = [];
+    let cur = "", inQ = false;
+    for (const ch of line) {
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === "," && !inQ) { values.push(cur.trim()); cur = ""; }
+      else cur += ch;
+    }
+    values.push(cur.trim());
+    const get = (key) => {
+      const idx = cols.findIndex(c => c.includes(key));
+      return idx >= 0 ? (values[idx]||"").replace(/^"|"$/g,"").trim() : "";
+    };
+
+    if (isMercury) {
+      const status = get("status").toLowerCase();
+      if (status === "pending" || status === "failed") continue;
+
+      const rawDate   = get("date");
+      const rawAmount = parseFloat(get("amount").replace(/,/g,"")) || 0;
+      if (!rawDate || rawAmount === 0) continue;
+
+      const desc       = get("description") || get("bank description");
+      const mercuryCat = get("mercury category");
+      const manualCat  = get("category");
+
+      if (isCuentaTransfer(desc, mercuryCat, manualCat)) continue;
+
+      const type = rawAmount > 0 ? "income" : "expense";
+      rows.push({
+        id: "imp_" + i + "_" + Date.now(),
+        type,
+        amount:      Math.abs(rawAmount),
+        description: desc,
+        category:    autoCategory(desc, type, mercuryCat, manualCat),
+        date:        rawDate.split("T")[0],
+        source:      "mercury",
+        account_id:  "mercury",
+      });
+    } else {
+      const rawDate = get("created (utc)") || get("created");
+      const rawNet  = parseFloat(get("net").replace(/,/g,"")) || 0;
+      const txType  = get("type").toLowerCase();
+      const desc    = get("description") || get("source");
+      if (!rawDate || txType === "payout") continue;
+      const type = rawNet < 0 ? "expense" : "income";
+      rows.push({
+        id: "imp_str_" + i + "_" + Date.now(),
+        type,
+        amount:      Math.abs(rawNet),
+        description: desc,
+        category:    autoCategory(desc, type),
+        date:        rawDate.split(" ")[0],
+        source:      "stripe",
+        account_id:  defaultAccountId || "mercury",
+      });
+    }
+  }
+  return rows;
+}
+
+// ── History View ───────────────────────────────────────────────────────────
+function HistoryView({ txns, accounts, catsIncome, catsExpense, filterType, setFilterType,
+  filterAcc, setFilterAcc, isAdmin, updateCategory, deleteTxn, deleteMany, sourceBadge }) {
+
+  const [selected, setSelected] = useState({});
+  const [deleting, setDeleting] = useState(false);
+  const [confirmBulk, setConfirmBulk] = useState(false);
+
+  const visibleTxns = txns
+    .filter(t => (filterType==="all"||t.type===filterType) && (filterAcc==="all"||t.account_id===filterAcc))
+    .slice(0, 60);
+
+  const selectedIds = Object.entries(selected).filter(([,v])=>v).map(([id])=>id);
+  const allSelected = visibleTxns.length > 0 && visibleTxns.every(t => selected[t.id]);
+
+  function toggleAll() {
+    if (allSelected) setSelected({});
+    else { const s={}; visibleTxns.forEach(t=>s[t.id]=true); setSelected(s); }
+  }
+
+  async function handleDeleteSelected() {
+    setDeleting(true);
+    await deleteMany(selectedIds);
+    setSelected({});
+    setConfirmBulk(false);
+    setDeleting(false);
+  }
+
+  useEffect(() => setSelected({}), [filterType, filterAcc]);
+
+  return (
+    <>
+      <div style={{ fontSize:20,fontWeight:700,color:"#111",marginBottom:20 }}>Historial</div>
+
+      <div style={{ display:"flex",gap:8,marginBottom:16,flexWrap:"wrap",alignItems:"center" }}>
+        {[["all","Todos"],["income","Ingresos"],["expense","Egresos"]].map(([f,l])=>(
+          <button key={f} onClick={()=>setFilterType(f)} style={{ fontSize:12,padding:"6px 14px",borderRadius:8,fontWeight:600,cursor:"pointer",border:"2px solid",borderColor:filterType===f?ST_RED:"#E0E0E0",background:filterType===f?ST_RED_BG:"white",color:filterType===f?ST_RED:"#888",transition:"all 0.15s" }}>{l}</button>
+        ))}
+        <select value={filterAcc} onChange={e=>setFilterAcc(e.target.value)} className="spicy-select">
+          <option value="all">Todas las cuentas</option>
+          {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+        <span style={{ marginLeft:"auto",fontSize:12,color:"#aaa",fontWeight:500 }}>{visibleTxns.length} registros</span>
+      </div>
+
+      {isAdmin && selectedIds.length > 0 && (
+        <div style={{ display:"flex",alignItems:"center",gap:12,padding:"10px 16px",background:"#FFF7ED",border:"1px solid #FED7AA",borderRadius:10,marginBottom:12 }}>
+          <span style={{ fontSize:13,fontWeight:600,color:"#92400E" }}>{selectedIds.length} seleccionada{selectedIds.length!==1?"s":""}</span>
+          <button onClick={()=>setSelected({})} style={{ fontSize:12,color:"#92400E",background:"none",border:"none",cursor:"pointer",textDecoration:"underline" }}>Deseleccionar</button>
+          <div style={{ marginLeft:"auto" }}>
+            {confirmBulk ? (
+              <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+                <span style={{ fontSize:12,color:"#92400E",fontWeight:500 }}>¿Eliminar {selectedIds.length} transacciones?</span>
+                <button onClick={handleDeleteSelected} disabled={deleting} style={{ fontSize:12,padding:"5px 14px",borderRadius:7,cursor:"pointer",background:ST_RED,color:"white",border:"none",fontWeight:600 }}>
+                  {deleting ? "Eliminando…" : "Sí, eliminar"}
+                </button>
+                <button onClick={()=>setConfirmBulk(false)} style={{ fontSize:12,padding:"5px 12px",borderRadius:7,cursor:"pointer",background:"white",color:"#555",border:"1px solid #E0E0E0" }}>Cancelar</button>
+              </div>
+            ) : (
+              <button onClick={()=>setConfirmBulk(true)} style={{ fontSize:12,padding:"6px 16px",borderRadius:7,cursor:"pointer",background:ST_RED,color:"white",border:"none",fontWeight:600 }}>
+                Eliminar seleccionadas
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="spicy-card" style={{ padding:0,overflow:"hidden" }}>
+        {isAdmin && visibleTxns.length > 0 && (
+          <div style={{ display:"flex",alignItems:"center",gap:12,padding:"10px 20px",borderBottom:"1px solid #F3F3F3",background:"#FAFAFA" }}>
+            <input type="checkbox" checked={allSelected} onChange={toggleAll}
+              style={{ cursor:"pointer",width:15,height:15,accentColor:ST_RED }}/>
+            <span style={{ fontSize:11,color:"#aaa",fontWeight:500 }}>
+              {allSelected ? "Deseleccionar todas" : "Seleccionar todas"}
+            </span>
+          </div>
+        )}
+
+        {visibleTxns.length===0 && <div style={{ padding:"2rem",textAlign:"center",fontSize:13,color:"#bbb" }}>Sin movimientos.</div>}
+
+        {visibleTxns.map((t,i)=>{
+          const acc  = accounts.find(a=>a.id===t.account_id);
+          const cats = t.type==="income" ? catsIncome : catsExpense;
+          const isChecked = !!selected[t.id];
+          return (
+            <div key={t.id} style={{ display:"flex",alignItems:"center",gap:12,padding:"12px 20px",borderBottom:i<visibleTxns.length-1?"1px solid #F3F3F3":"none",background:isChecked?"#FFF7ED":"transparent",transition:"background 0.1s" }}>
+              {isAdmin && (
+                <input type="checkbox" checked={isChecked}
+                  onChange={e=>setSelected(s=>({...s,[t.id]:e.target.checked}))}
+                  style={{ cursor:"pointer",width:15,height:15,accentColor:ST_RED,flexShrink:0 }}/>
+              )}
+              <div style={{ width:9,height:9,borderRadius:"50%",flexShrink:0,background:t.type==="income"?"#1D9E75":ST_RED }}/>
+              <div style={{ flex:1,minWidth:0 }}>
+                <div style={{ fontSize:13,fontWeight:600,color:"#111",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{t.description||t.category}{sourceBadge(t)}</div>
+                <div style={{ fontSize:11,color:"#aaa",marginTop:3,display:"flex",alignItems:"center",gap:6 }}>
+                  {isAdmin ? (
+                    <select value={t.category} onChange={e=>updateCategory(t.id,e.target.value)}
+                      style={{ fontSize:11,padding:"1px 6px",borderRadius:5,border:"1px solid #E0E0E0",background:"#F7F7F8",color:"#666",cursor:"pointer",fontFamily:"DM Sans,sans-serif" }}>
+                      {cats.map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+                    </select>
+                  ) : <span>{t.category}</span>}
+                  <span>· {t.date}</span>
+                  {acc&&<span>· <span style={{ color:acc.color,fontWeight:600 }}>{acc.name}</span></span>}
+                </div>
+              </div>
+              <div style={{ fontSize:14,fontWeight:700,color:t.type==="income"?"#16A34A":ST_RED,flexShrink:0 }}>{t.type==="income"?"+":"−"}{fmt(t.amount)}</div>
+              {isAdmin && (
+                <button onClick={()=>deleteTxn(t.id)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:18,color:"#ccc",padding:"0 4px",lineHeight:1 }}>×</button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
 
 // ── Main App ───────────────────────────────────────────────────────────────
 export default function SpicyFinanzas() {
   const [session,  setSession]  = useState(null);
-  const [role,     setRole]     = useState(null); // 'admin' | 'reader' | null
+  const [role,     setRole]     = useState(null);
   const [authReady,setAuthReady]= useState(false);
 
   const [txns,      setTxns]      = useState([]);
@@ -709,7 +987,6 @@ export default function SpicyFinanzas() {
   const [form, setForm] = useState({type:"income",category:"SaaS MRR",amount:"",description:"",date:new Date().toISOString().split("T")[0],account_id:"mercury"});
   const [saved, setSaved] = useState(false);
 
-  // ── Auth listener ────────────────────────────────────────────────────────
   useEffect(()=>{
     sb.auth.getSession().then(({data:{session}})=>{
       setSession(session); setAuthReady(true);
@@ -720,7 +997,6 @@ export default function SpicyFinanzas() {
     return ()=>subscription.unsubscribe();
   },[]);
 
-  // ── Load role + data when session available ──────────────────────────────
   useEffect(()=>{
     if (!session) return;
     loadAll();
@@ -781,24 +1057,51 @@ export default function SpicyFinanzas() {
     setSyncing(false);
   }
 
+  const [expCatMonth, setExpCatMonth] = useState("all");
+
   // ── Métricas ─────────────────────────────────────────────────────────────
   const now=new Date();
-  const income=txns.filter(t=>t.type==="income").reduce((s,t)=>s+Number(t.amount),0);
-  const expenses=txns.filter(t=>t.type==="expense").reduce((s,t)=>s+Number(t.amount),0);
-  const mrrTxns=txns.filter(t=>t.category==="SaaS MRR").sort((a,b)=>b.date.localeCompare(a.date));
-  const mrr=mrrTxns.length>0?Number(mrrTxns[0].amount):0;
+
+  const mercuryTxns = txns.filter(t =>
+    t.account_id === "mercury" && t.category !== MOVIMIENTO_CUENTA
+  );
+
   const last3months=[0,1,2].map(i=>{const d=new Date(now.getFullYear(),now.getMonth()-i,1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;});
-  const monthlyBurn=last3months.reduce((acc,mk)=>acc+txns.filter(t=>t.type==="expense"&&monthKey(t.date)===mk).reduce((a,t)=>a+Number(t.amount),0),0)/3;
-  const totalCash=accounts.reduce((s,a)=>s+Number(a.balance),0);
-  const runway=monthlyBurn>0?Math.round(totalCash/monthlyBurn):0;
   const months6=Array.from({length:6},(_,i)=>{const d=new Date(now.getFullYear(),now.getMonth()-(5-i),1);return{key:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`,label:MONTH_LABELS[d.getMonth()]};});
-  const chartData=months6.map(m=>({label:m.label,income:txns.filter(t=>t.type==="income"&&monthKey(t.date)===m.key).reduce((s,t)=>s+Number(t.amount),0),expense:txns.filter(t=>t.type==="expense"&&monthKey(t.date)===m.key).reduce((s,t)=>s+Number(t.amount),0),referralCost:txns.filter(t=>t.category==="Comisiones referidos"&&monthKey(t.date)===m.key).reduce((s,t)=>s+Number(t.amount),0)}));
-  const maxVal=Math.max(...chartData.map(d=>Math.max(d.income,d.expense)),1);
-  const expByCat=catsExpense.map(cat=>({cat:cat.name,total:txns.filter(t=>t.type==="expense"&&t.category===cat.name).reduce((s,t)=>s+Number(t.amount),0)})).filter(x=>x.total>0).sort((a,b)=>b.total-a.total);
-  const totalExpAll=expByCat.reduce((s,x)=>s+x.total,1);
+
+  const mrrTxns = mercuryTxns.filter(t=>t.category==="SaaS MRR").sort((a,b)=>b.date.localeCompare(a.date));
+  const mrrLastMonthKey = mrrTxns.length>0 ? monthKey(mrrTxns[0].date) : null;
+  const mrr = mrrLastMonthKey ? mrrTxns.filter(t=>monthKey(t.date)===mrrLastMonthKey).reduce((s,t)=>s+Number(t.amount),0) : 0;
+  const mrrMonthLabel = mrrLastMonthKey ? monthLabel(mrrLastMonthKey) : "—";
+
+  const monthlyBurn = last3months.reduce((acc,mk) =>
+    acc + mercuryTxns.filter(t=>t.type==="expense"&&monthKey(t.date)===mk).reduce((a,t)=>a+Number(t.amount),0), 0) / 3;
+  const totalCash = accounts.reduce((s,a)=>s+Number(a.balance),0);
+  const runway = monthlyBurn>0 ? Math.round(totalCash/monthlyBurn) : 0;
+
+  const chartData = months6.map(m => ({
+    label:        m.label,
+    income:       mercuryTxns.filter(t=>t.type==="income" &&monthKey(t.date)===m.key).reduce((s,t)=>s+Number(t.amount),0),
+    expense:      mercuryTxns.filter(t=>t.type==="expense"&&monthKey(t.date)===m.key).reduce((s,t)=>s+Number(t.amount),0),
+    referralCost: mercuryTxns.filter(t=>t.category==="Comisiones referidos"&&monthKey(t.date)===m.key).reduce((s,t)=>s+Number(t.amount),0),
+  }));
+  const maxVal = Math.max(...chartData.map(d=>Math.max(d.income,d.expense)),1);
+
+  const expByCat = catsExpense.map(cat => ({
+    cat: cat.name,
+    total: mercuryTxns.filter(t=>
+      t.type==="expense" && t.category===cat.name &&
+      (expCatMonth==="all" || monthKey(t.date)===expCatMonth)
+    ).reduce((s,t)=>s+Number(t.amount),0),
+  })).filter(x=>x.total>0).sort((a,b)=>b.total-a.total);
+  const totalExpAll = expByCat.reduce((s,x)=>s+x.total,1);
+
+  const expMonths = [...new Set(
+    mercuryTxns.filter(t=>t.type==="expense").map(t=>monthKey(t.date))
+  )].sort((a,b)=>b.localeCompare(a));
+
   const curMK=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
   const referralOwed=txns.filter(t=>t.type==="income"&&t.referrer_id&&monthKey(t.date)===curMK).reduce((s,t)=>s+Number(t.amount),0)*COMMISSION_RATE;
-  const visibleTxns=txns.filter(t=>(filterType==="all"||t.type===filterType)&&(filterAcc==="all"||t.account_id===filterAcc)).slice(0,60);
 
   const sourceBadge=(t)=>{
     if(t.source)return <span style={{ fontSize:10,padding:"1px 5px",borderRadius:4,marginLeft:5,background:t.source==="mercury"?"var(--color-background-info)":"var(--color-background-success)",color:t.source==="mercury"?"var(--color-text-info)":"var(--color-text-success)" }}>{t.source}</span>;
@@ -820,7 +1123,6 @@ export default function SpicyFinanzas() {
     <div className="spicy-root">
       <BrandStyles/>
 
-      {/* Sidebar */}
       <div className="spicy-sidebar">
         <div className="spicy-logo">
           <div className="spicy-logo-icon">S</div>
@@ -848,25 +1150,27 @@ export default function SpicyFinanzas() {
         </div>
       </div>
 
-      {/* Main content */}
       <div className="spicy-main">
         {syncError&&<div style={{ fontSize:13,color:ST_RED,marginBottom:16,padding:"10px 14px",background:ST_RED_BG,borderRadius:10,border:`1px solid ${ST_RED}22` }}>{syncError}</div>}
 
-      {/* DASHBOARD */}
       {view==="dashboard"&&(
         <>
           <div style={{ fontSize:20,fontWeight:700,color:"#111",marginBottom:20 }}>Resumen financiero</div>
           <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:20 }}>
-            {[{label:"MRR",value:fmt(mrr),sub:"último mes"},{label:"ARR",value:fmt(mrr*12),sub:"proyectado"},{label:"Cash total",value:fmt(totalCash),sub:`${accounts.filter(a=>a.balance>0).length} cuentas`},{label:"Runway",value:runway>0?`${runway} meses`:"—",sub:monthlyBurn>0?`burn ${fmt(monthlyBurn)}/mes`:"sin burn"}].map(k=>(
-              <div key={k.label} className="spicy-kpi">
-                <div className="spicy-kpi-label">{k.label}</div>
+            {[
+              { label:"MRR", value:fmt(mrr), sub:mrrMonthLabel, tooltip:`Suma de SaaS MRR en ${mrrMonthLabel}` },
+              { label:"ARR", value:fmt(mrr*12), sub:"proyectado" },
+              { label:"Cash total", value:fmt(totalCash), sub:`${accounts.filter(a=>a.balance>0).length} cuentas` },
+              { label:"Runway", value:runway>0?`${runway} meses`:"—", sub:monthlyBurn>0?`burn ${fmt(monthlyBurn)}/mes`:"sin burn" },
+            ].map(k=>(
+              <div key={k.label} className="spicy-kpi" style={{ position:"relative" }} title={k.tooltip||""}>
+                <div className="spicy-kpi-label">{k.label}{k.tooltip&&<span style={{ marginLeft:4,fontSize:10,color:"#ccc",cursor:"help" }}>ⓘ</span>}</div>
                 <div className="spicy-kpi-value">{k.value}</div>
                 <div className="spicy-kpi-sub">{k.sub}</div>
               </div>
             ))}
           </div>
 
-          {/* Saldos por banco */}
           <div className="spicy-card">
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
               <span style={{ fontSize:14,fontWeight:600,color:"#111" }}>Saldos por banco</span>
@@ -888,7 +1192,6 @@ export default function SpicyFinanzas() {
             <span style={{ fontSize:12,color:"#92400E",fontWeight:600 }}>Ver →</span>
           </div>}
 
-          {/* Chart */}
           <div className="spicy-card">
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
               <span style={{ fontSize:14,fontWeight:600,color:"#111" }}>Ingresos vs egresos — 6 meses</span>
@@ -903,9 +1206,15 @@ export default function SpicyFinanzas() {
             </div>
           </div>
 
-          {/* Egresos por cat */}
           <div className="spicy-card">
-            <div style={{ fontSize:14,fontWeight:600,color:"#111",marginBottom:16 }}>Egresos por categoría</div>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+              <div style={{ fontSize:14,fontWeight:600,color:"#111" }}>Egresos por categoría</div>
+              <select value={expCatMonth} onChange={e=>setExpCatMonth(e.target.value)} className="spicy-select" style={{ fontSize:12 }}>
+                <option value="all">Todo el período</option>
+                {expMonths.map(mk=><option key={mk} value={mk}>{monthLabel(mk)}</option>)}
+              </select>
+            </div>
+            {expByCat.length===0&&<div style={{ fontSize:13,color:"#bbb",textAlign:"center",padding:"1rem" }}>Sin egresos en este período.</div>}
             {expByCat.map(x=>(
               <div key={x.cat} style={{ marginBottom:14 }}>
                 <div style={{ display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6 }}>
@@ -925,7 +1234,6 @@ export default function SpicyFinanzas() {
       {view==="referrals"&&<ReferralDashboard txns={txns} referrers={referrers} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="categories"&&<CategoriesPanel catsIncome={catsIncome} catsExpense={catsExpense} isAdmin={isAdmin} onRefresh={loadAll}/>}
 
-      {/* ADD */}
       {view==="add"&&isAdmin&&(
         <div className="spicy-card" style={{ maxWidth:480 }}>
           <div style={{ fontSize:18,fontWeight:700,color:"#111",marginBottom:20 }}>Registrar movimiento</div>
@@ -960,51 +1268,18 @@ export default function SpicyFinanzas() {
         </div>
       )}
 
-      {/* HISTORY */}
       {view==="history"&&(
-        <>
-          <div style={{ fontSize:20,fontWeight:700,color:"#111",marginBottom:20 }}>Historial</div>
-          <div style={{ display:"flex",gap:8,marginBottom:16,flexWrap:"wrap" }}>
-            {[["all","Todos"],["income","Ingresos"],["expense","Egresos"]].map(([f,l])=>(
-              <button key={f} onClick={()=>setFilterType(f)} style={{ fontSize:12,padding:"6px 14px",borderRadius:8,fontWeight:600,cursor:"pointer",border:"2px solid",borderColor:filterType===f?ST_RED:"#E0E0E0",background:filterType===f?ST_RED_BG:"white",color:filterType===f?ST_RED:"#888",transition:"all 0.15s" }}>{l}</button>
-            ))}
-            <select value={filterAcc} onChange={e=>setFilterAcc(e.target.value)} className="spicy-select">
-              <option value="all">Todas las cuentas</option>
-              {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
-            <span style={{ marginLeft:"auto",fontSize:12,color:"#aaa",alignSelf:"center",fontWeight:500 }}>{visibleTxns.length} registros</span>
-          </div>
-          <div className="spicy-card" style={{ padding:0,overflow:"hidden" }}>
-            {visibleTxns.length===0&&<div style={{ padding:"2rem",textAlign:"center",fontSize:13,color:"#bbb" }}>Sin movimientos.</div>}
-            {visibleTxns.map((t,i)=>{
-              const acc=accounts.find(a=>a.id===t.account_id);
-              const cats=t.type==="income"?catsIncome:catsExpense;
-              return(
-                <div key={t.id} style={{ display:"flex",alignItems:"center",gap:12,padding:"13px 20px",borderBottom:i<visibleTxns.length-1?"1px solid #F3F3F3":"none" }}>
-                  <div style={{ width:9,height:9,borderRadius:"50%",flexShrink:0,background:t.type==="income"?"#1D9E75":ST_RED }}/>
-                  <div style={{ flex:1,minWidth:0 }}>
-                    <div style={{ fontSize:13,fontWeight:600,color:"#111",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{t.description||t.category}{sourceBadge(t)}</div>
-                    <div style={{ fontSize:11,color:"#aaa",marginTop:3,display:"flex",alignItems:"center",gap:6 }}>
-                      {isAdmin?(
-                        <select value={t.category} onChange={e=>updateCategory(t.id,e.target.value)}
-                          style={{ fontSize:11,padding:"1px 6px",borderRadius:5,border:"1px solid #E0E0E0",background:"#F7F7F8",color:"#666",cursor:"pointer",fontFamily:"DM Sans,sans-serif" }}>
-                          {cats.map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
-                        </select>
-                      ):<span>{t.category}</span>}
-                      <span>· {t.date}</span>
-                      {acc&&<span>· <span style={{ color:acc.color,fontWeight:600 }}>{acc.name}</span></span>}
-                    </div>
-                  </div>
-                  <div style={{ fontSize:14,fontWeight:700,color:t.type==="income"?"#16A34A":ST_RED,flexShrink:0 }}>{t.type==="income"?"+":"−"}{fmt(t.amount)}</div>
-                  {isAdmin&&<button onClick={()=>deleteTxn(t.id)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:18,color:"#ccc",padding:"0 4px",lineHeight:1 }}>×</button>}
-                </div>
-              );
-            })}
-          </div>
-        </>
+        <HistoryView
+          txns={txns} accounts={accounts} catsIncome={catsIncome} catsExpense={catsExpense}
+          filterType={filterType} setFilterType={setFilterType}
+          filterAcc={filterAcc} setFilterAcc={setFilterAcc}
+          isAdmin={isAdmin} updateCategory={updateCategory} deleteTxn={deleteTxn}
+          deleteMany={async (ids)=>{ await Promise.all(ids.map(id=>sb.from("transactions").delete().eq("id",id))); setTxns(prev=>prev.filter(t=>!ids.includes(t.id))); }}
+          sourceBadge={sourceBadge}
+        />
       )}
 
-      </div>{/* end spicy-main */}
+      </div>
     </div>
   );
 }
