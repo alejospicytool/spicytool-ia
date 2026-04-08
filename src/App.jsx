@@ -116,13 +116,39 @@ function BrandStyles() {
 
 // ── Nav icon map ───────────────────────────────────────────────────────────
 const NAV_ICONS = {
-  dashboard:"▦", accounts:"🏦", referrals:"🤝", runway:"📈",
-  add:"+", history:"☰", categories:"⊞"
+  dashboard:"▦", accounts:"🏦", add:"+", history:"☰", runway:"📈",
+  referrals:"🤝",
+  services:"⚡", categories:"⊞"
 };
 const NAV_LABELS = {
-  dashboard:"Resumen", accounts:"Cuentas", referrals:"Referidos", runway:"Runway",
-  add:"Registrar", history:"Historial", categories:"Categorías"
+  dashboard:"Resumen", accounts:"Cuentas", add:"Registrar", history:"Historial", runway:"Runway",
+  referrals:"Referidos",
+  services:"Servicios", categories:"Categorías"
 };
+
+const NAV_SECTIONS = [
+  {
+    label: "Finanzas",
+    views: ["dashboard","accounts","add","history","runway"],
+    adminOnly: false,
+  },
+  {
+    label: "Referidos",
+    views: ["referrals"],
+    adminOnly: false,
+    badge: { referrals: true },
+  },
+  {
+    label: "Dashboard Producto",
+    views: ["services"],
+    adminOnly: false,
+  },
+  {
+    label: "Configuración",
+    views: ["categories"],
+    adminOnly: false,
+  },
+];
 
 const WORKER_URL = "";
 const COMMISSION_RATE = 0.20;
@@ -215,6 +241,7 @@ function AccountsPanel({ accounts, txns, isAdmin, onRefresh }) {
   const fileRef = useRef();
 
   const total = accounts.reduce((s,a) => {
+    // Calculate balance from transactions
     const accTxns = txns.filter(t => t.account_id === a.id);
     const calc = accTxns.reduce((b,t) => b + (t.type==="income" ? Number(t.amount) : -Number(t.amount)), 0);
     return s + calc;
@@ -443,7 +470,7 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
   const [stripeData, setStripeData] = useState(null);
   const [syncing,    setSyncing]    = useState(false);
   const [syncMsg,    setSyncMsg]    = useState("");
-  const [addTxnFor,  setAddTxnFor]  = useState(null);
+  const [addTxnFor,  setAddTxnFor]  = useState(null); // referrer id for manual txn form
   const [txnForm,    setTxnForm]    = useState({amount:"", description:"", date:new Date().toISOString().split("T")[0]});
   const [savingTxn,  setSavingTxn]  = useState(false);
 
@@ -469,6 +496,7 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
 
   const now=new Date(), curMK=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
 
+  // Pull referral data from Stripe via Worker
   async function syncFromStripe() {
     if (!WORKER_URL) { setSyncMsg("Configurá WORKER_URL primero."); return; }
     setSyncing(true); setSyncMsg("");
@@ -477,6 +505,7 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
       if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
       setStripeData(data);
+      // Import new transactions into Supabase
       if (data.referrers?.length) {
         const allTxns = data.referrers.flatMap(r =>
           r.transactions.map(t => ({
@@ -502,6 +531,7 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
     setSyncing(false);
   }
 
+  // Calculate commissions using per-referrer rate from Supabase
   const paidCommissions = txns.filter(t => t.category === "Comisiones referidos" && t.referrer_id);
   const referredIncome  = txns.filter(t => t.type === "income" && t.referrer_id);
 
@@ -514,6 +544,7 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
     const totalPaid       = paid.reduce((s,t) => s + Number(t.amount), 0);
     const totalOwed       = Math.max(0, totalCommission - totalPaid);
 
+    // Per-month breakdown
     const months = {};
     inc.forEach(t => {
       const mk = monthKey(t.date);
@@ -528,6 +559,7 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
       months[mk].paid += Number(t.amount);
     });
 
+    // Per-customer breakdown
     const customerMap = {};
     inc.forEach(t => {
       const key = t.description || t.id;
@@ -581,6 +613,7 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
         </div>
       </div>
 
+      {/* Info box: cómo configurar Stripe */}
       {referrers.length > 0 && (
         <div style={{ background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:10, padding:"12px 16px", marginBottom:20, fontSize:12, color:"#166534", lineHeight:1.7 }}>
           Para que un broker quede asociado a un referidor, editá el customer en Stripe → Metadata → agregar:<br/>
@@ -588,6 +621,7 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
         </div>
       )}
 
+      {/* KPIs */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:20 }}>
         {[
           { label:"A pagar este mes", value:fmtDec(totalOwedNow), warn:totalOwedNow>0 },
@@ -601,6 +635,7 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
         ))}
       </div>
 
+      {/* Lista de socios */}
       <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
         {stats.length === 0 && (
           <div className="spicy-card" style={{ textAlign:"center", padding:"2rem" }}>
@@ -644,6 +679,7 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
             {expanded===ref.id&&(
               <div style={{ borderTop:"1px solid #F3F3F3", padding:"16px 20px" }}>
 
+                {/* Summary KPIs */}
                 <div style={{ display:"flex", gap:10, marginBottom:20 }}>
                   {[
                     {label:"Generado",  value:fmtDec(ref.totalRevenue)},
@@ -658,6 +694,7 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
                   ))}
                 </div>
 
+                {/* Por mes */}
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
                   <div style={{ fontSize:12, fontWeight:600, color:"#555", textTransform:"uppercase", letterSpacing:0.5 }}>Por mes</div>
                   {isAdmin && (
@@ -668,6 +705,7 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
                   )}
                 </div>
 
+                {/* Form para transacción manual */}
                 {isAdmin && addTxnFor===ref.id && (
                   <div style={{ background:"#F9F9F9", border:"1px solid #E8E8E8", borderRadius:10, padding:"14px 16px", marginBottom:16 }}>
                     <div style={{ fontSize:13, fontWeight:600, color:"#111", marginBottom:12 }}>Nueva transacción para {ref.name}</div>
@@ -716,6 +754,7 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
                           }
                         </div>
                       </div>
+                      {/* Individual transactions in this month */}
                       {m.transactions?.map(t=>(
                         <div key={t.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"7px 12px 7px 24px", borderBottom:"1px solid #F3F3F3", fontSize:12 }}>
                           <div style={{ width:6, height:6, borderRadius:"50%", background:"#1D9E75", flexShrink:0 }}/>
@@ -729,6 +768,7 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
                   );
                 })}
 
+                {/* Por cliente */}
                 {ref.customers?.length > 0 && (
                   <>
                     <div style={{ fontSize:12, fontWeight:600, color:"#555", margin:"20px 0 10px", textTransform:"uppercase", letterSpacing:0.5 }}>Por cliente</div>
@@ -786,9 +826,11 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
   );
 }
 
-// ── CSV Parser ─────────────────────────────────────────────────────────────
+// ── CSV Parser (sin Supabase, solo parsea rows) ────────────────────────────
+// ── Constante de movimiento de cuenta ─────────────────────────────────────
 const MOVIMIENTO_CUENTA = "Movimiento Cuenta";
 
+// Detecta si una fila de Mercury es un movimiento de cuenta (a omitir)
 function isCuentaTransfer(desc, mercuryCat, category) {
   const d  = (desc||"").toLowerCase();
   const mc = (mercuryCat||"").toLowerCase();
@@ -799,6 +841,7 @@ function isCuentaTransfer(desc, mercuryCat, category) {
     d.includes("mercury checking");
 }
 
+// Auto-categorización basada en datos reales del CSV de SpicyTool
 function autoCategory(desc, type, mercuryCat="", mercuryManualCat="") {
   const d  = (desc||"").toLowerCase();
   const mc = (mercuryCat||"").toLowerCase();
@@ -810,19 +853,24 @@ function autoCategory(desc, type, mercuryCat="", mercuryManualCat="") {
     return "Otro ingreso";
   }
 
+  // Salarios
   if (mc === "payroll" || c === "payroll" || c === "employee benefits") return "Salarios";
   if (["franco cabrera","lucas escobedo","marcela c borner","payoneer"].some(n => d.includes(n))) return "Salarios";
 
+  // SaaS Tools
   if (mc === "software" || c === "software & subscriptions") return "SaaS Tools";
   if (["github","notion","openai","mongodb","google cloud","nango","make","n8n","mailersend","gupshup",
        "brizy","asana","leomoves","paypro","cloudflare","vercel","aws","heroku","figma","linear",
        "slack","anthropic","kapso"].some(t => d.includes(t))) return "SaaS Tools";
 
+  // Marketing
   if (mc === "advertising" || ["facebook","meta","cf*tks"].some(t => d.includes(t))) return "Marketing / Ads";
 
+  // Legal / Admin
   if (mc === "financialinstitutionsandfees" || c === "bank fees" ||
       d.includes("intl. transaction fee") || d.includes("casa manantial")) return "Legal / Admin";
 
+  // Viajes
   if (["othertravel","groundtransportation","fuelandgas"].includes(mc) || c === "travel & transportation" ||
       ["plataforma 10","axion","uber","lyft","airbnb","victorian govern"].some(t => d.includes(t))) return "Viajes";
 
@@ -869,6 +917,7 @@ function parseCSVRows(text, defaultAccountId) {
       const mercuryCat = get("mercury category");
       const manualCat  = get("category");
 
+      // Omitir transferencias internas
       if (isCuentaTransfer(desc, mercuryCat, manualCat)) continue;
 
       const type = rawAmount > 0 ? "income" : "expense";
@@ -883,6 +932,7 @@ function parseCSVRows(text, defaultAccountId) {
         account_id:  "mercury",
       });
     } else {
+      // Stripe
       const rawDate = get("created (utc)") || get("created");
       const rawNet  = parseFloat(get("net").replace(/,/g,"")) || 0;
       const txType  = get("type").toLowerCase();
@@ -1028,6 +1078,7 @@ function HistoryView({ txns, accounts, catsIncome, catsExpense, filterType, setF
         })}
       </div>
 
+      {/* Pagination */}
       {totalPages > 1 && (
         <div style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginTop:16 }}>
           <button onClick={()=>setPage(1)} disabled={safePage===1} className="spicy-btn-secondary" style={{ padding:"5px 10px",fontSize:12 }}>«</button>
@@ -1049,6 +1100,7 @@ function RunwayView({ txns, accounts }) {
 
   const mercuryTxns = txns.filter(t => t.account_id === "mercury" && t.category !== MOVIMIENTO_CUENTA);
 
+  // Avg expense last 3 months (fixed — no growth assumption)
   const last3 = [1,2,3].map(i => {
     const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
@@ -1056,9 +1108,11 @@ function RunwayView({ txns, accounts }) {
   const avgExpense = last3.reduce((s,mk) =>
     s + mercuryTxns.filter(t=>t.type==="expense"&&monthKey(t.date)===mk).reduce((a,t)=>a+Number(t.amount),0), 0) / 3;
 
+  // Current MRR (prev month)
   const prevMK = (() => { const d=new Date(now.getFullYear(),now.getMonth()-1,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
   const currentMRR = mercuryTxns.filter(t=>t.category==="SaaS MRR"&&monthKey(t.date)===prevMK).reduce((s,t)=>s+Number(t.amount),0);
 
+  // Cash from all transactions
   const calcBalances = {};
   txns.forEach(t => {
     if (!calcBalances[t.account_id]) calcBalances[t.account_id] = 0;
@@ -1078,7 +1132,7 @@ function RunwayView({ txns, accounts }) {
     const months = [];
     let cash = currentCash;
     let mrr  = currentMRR;
-    const exp = avgExpense;
+    const exp = avgExpense; // fixed
 
     for (let i = 0; i < MONTHS; i++) {
       const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
@@ -1112,6 +1166,7 @@ function RunwayView({ txns, accounts }) {
     return range > 0 ? chartH - Math.round(((cash - minCash) / range) * chartH) : chartH / 2;
   }
 
+  // MRR needed to break even
   const breakEvenMRR = Math.round(avgExpense);
 
   return (
@@ -1119,6 +1174,7 @@ function RunwayView({ txns, accounts }) {
       <div style={{ fontSize:20,fontWeight:700,color:"#111",marginBottom:4 }}>Proyección de Runway</div>
       <div style={{ fontSize:13,color:"#888",marginBottom:24 }}>6 meses · egresos fijos (promedio real últimos 3 meses Mercury)</div>
 
+      {/* Current state */}
       <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:24 }}>
         {[
           { label:"Cash actual",     value:fmt(currentCash),         sub:"desde transacciones" },
@@ -1134,6 +1190,7 @@ function RunwayView({ txns, accounts }) {
         ))}
       </div>
 
+      {/* Controls */}
       <div className="spicy-card" style={{ marginBottom:16 }}>
         <div style={{ fontSize:14,fontWeight:600,color:"#111",marginBottom:16 }}>Parámetros de crecimiento MRR</div>
         <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:20,marginBottom:20 }}>
@@ -1161,6 +1218,7 @@ function RunwayView({ txns, accounts }) {
           Egresos fijos en <strong>{fmt(Math.round(avgExpense))}/mes</strong> — promedio de {last3.map(mk=>monthLabel(mk)).join(", ")}
         </div>
 
+        {/* Fundraise */}
         <div style={{ borderTop:"1px solid #F0F0F0",paddingTop:16 }}>
           <div style={{ fontSize:13,fontWeight:600,color:"#111",marginBottom:12 }}>💰 Inyección de capital (opcional)</div>
           <div style={{ display:"flex",gap:16,alignItems:"flex-end",flexWrap:"wrap" }}>
@@ -1185,6 +1243,7 @@ function RunwayView({ txns, accounts }) {
         </div>
       </div>
 
+      {/* Scenario cards */}
       <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:20 }}>
         {scenarios.map(s=>{
           const last = s.data[s.data.length-1];
@@ -1211,6 +1270,7 @@ function RunwayView({ txns, accounts }) {
         })}
       </div>
 
+      {/* Chart */}
       <div className="spicy-card" style={{ marginBottom:16 }}>
         <div style={{ fontSize:14,fontWeight:600,color:"#111",marginBottom:4 }}>Evolución de cash</div>
         <div style={{ fontSize:12,color:"#aaa",marginBottom:16 }}>Línea punteada = cero · Egresos fijos {fmt(Math.round(avgExpense))}/mes</div>
@@ -1252,6 +1312,7 @@ function RunwayView({ txns, accounts }) {
         </div>
       </div>
 
+      {/* Table */}
       <div className="spicy-card" style={{ padding:0,overflow:"hidden" }}>
         <div style={{ padding:"14px 20px",borderBottom:"1px solid #F3F3F3",fontSize:14,fontWeight:600,color:"#111" }}>Detalle mes a mes</div>
         <div style={{ overflowX:"auto" }}>
@@ -1296,10 +1357,141 @@ function RunwayView({ txns, accounts }) {
   );
 }
 
+// ── Services View (Dashboard Producto) ────────────────────────────────────
+function ServicesView() {
+  const [azureData,    setAzureData]    = useState(null);
+  const [azureLoading, setAzureLoading] = useState(false);
+  const [azureError,   setAzureError]   = useState("");
+  const [lastUpdated,  setLastUpdated]  = useState(null);
+
+  async function fetchAzure() {
+    if (!WORKER_URL) { setAzureError("Configurá WORKER_URL en el código."); return; }
+    setAzureLoading(true); setAzureError("");
+    try {
+      const res = await fetch(WORKER_URL + "/azure");
+      if (!res.ok) {
+        const d = await res.json().catch(()=>({}));
+        throw new Error(d.error || "HTTP " + res.status);
+      }
+      const data = await res.json();
+      setAzureData(data);
+      setLastUpdated(new Date().toLocaleTimeString("es-UY"));
+    } catch(e) { setAzureError(e.message); }
+    setAzureLoading(false);
+  }
+
+  useEffect(() => { fetchAzure(); }, []);
+
+  const alertCount = azureData?.services?.filter(s=>s.alert).length || 0;
+
+  return (
+    <div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:24 }}>
+        <div>
+          <div style={{ fontSize:20,fontWeight:700,color:"#111",marginBottom:4 }}>Dashboard Producto</div>
+          <div style={{ fontSize:13,color:"#888" }}>Costos Azure por servicio · Resource Group: Spicytool</div>
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          {lastUpdated&&<span style={{ fontSize:11,color:"#aaa" }}>Actualizado {lastUpdated}</span>}
+          <button onClick={fetchAzure} disabled={azureLoading} className="spicy-btn-secondary" style={{ fontSize:13, padding:"7px 16px" }}>
+            {azureLoading ? "Cargando…" : "⟳ Actualizar"}
+          </button>
+        </div>
+      </div>
+
+      {azureError&&(
+        <div style={{ background:"#FEF0F0",border:"1px solid #FECACA",borderRadius:10,padding:"12px 16px",marginBottom:20,fontSize:13,color:ST_RED }}>
+          {azureError}
+          {!WORKER_URL&&<div style={{ marginTop:6,fontSize:12,color:"#888" }}>Agregá la URL del Worker en el código: <code style={{ fontFamily:"monospace" }}>const WORKER_URL = "https://..."</code></div>}
+        </div>
+      )}
+
+      {/* Summary KPIs */}
+      {azureData&&(
+        <>
+          <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:20 }}>
+            {[
+              { label:"Azure este mes",     value:`$${azureData.totalCurrent.toFixed(2)}`,  sub:azureData.period?.current },
+              { label:"Azure mes anterior", value:`$${azureData.totalPrev.toFixed(2)}`,     sub:azureData.period?.prev },
+              { label:"Alertas",            value:alertCount,  sub:"servicios +20% vs mes anterior", warn:alertCount>0 },
+            ].map(k=>(
+              <div key={k.label} className="spicy-kpi">
+                <div className="spicy-kpi-label">{k.label}</div>
+                <div className="spicy-kpi-value" style={{ color:k.warn?ST_RED:"#111" }}>{k.value}</div>
+                <div className="spicy-kpi-sub">{k.sub}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Alerts */}
+          {alertCount>0&&(
+            <div style={{ background:"#FEF0F0",border:"1px solid #FECACA",borderRadius:10,padding:"12px 16px",marginBottom:20 }}>
+              <div style={{ fontSize:13,fontWeight:700,color:ST_RED,marginBottom:8 }}>⚠ {alertCount} servicio{alertCount!==1?"s":""} con aumento mayor al 20%</div>
+              {azureData.services.filter(s=>s.alert).map(s=>(
+                <div key={s.service} style={{ fontSize:12,color:ST_RED,marginBottom:4 }}>
+                  <strong>{s.service}</strong> — ${s.current.toFixed(2)} vs ${s.prev.toFixed(2)} anterior (+{s.change}%)
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Services table */}
+          <div className="spicy-card" style={{ padding:0,overflow:"hidden" }}>
+            <div style={{ padding:"14px 20px",borderBottom:"1px solid #F3F3F3",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+              <span style={{ fontSize:14,fontWeight:600,color:"#111" }}>Servicios Azure</span>
+              <span style={{ fontSize:12,color:"#aaa" }}>{azureData.services.length} servicios activos</span>
+            </div>
+            {azureData.services.length===0&&(
+              <div style={{ padding:"2rem",textAlign:"center",fontSize:13,color:"#bbb" }}>Sin costos en este período.</div>
+            )}
+            {azureData.services.map((s,i)=>(
+              <div key={s.service} style={{ display:"flex",alignItems:"center",gap:12,padding:"13px 20px",borderBottom:i<azureData.services.length-1?"1px solid #F5F5F5":"none",background:s.alert?"#FFFBEB":"white" }}>
+                <div style={{ width:9,height:9,borderRadius:"50%",flexShrink:0,background:s.alert?ST_RED:"#1D9E75" }}/>
+                <div style={{ flex:1,minWidth:0 }}>
+                  <div style={{ fontSize:13,fontWeight:600,color:"#111" }}>{s.service}</div>
+                  {s.prev>0&&<div style={{ fontSize:11,color:"#aaa",marginTop:2 }}>Mes anterior: ${s.prev.toFixed(2)}</div>}
+                </div>
+                {s.change!==null&&(
+                  <span style={{ fontSize:11,padding:"2px 8px",borderRadius:5,fontWeight:600,
+                    background:s.alert?"#FEF0F0":s.change<0?"#EDFAF3":"#F3F3F3",
+                    color:s.alert?ST_RED:s.change<0?"#16A34A":"#888" }}>
+                    {s.change>0?"+":""}{s.change}%
+                  </span>
+                )}
+                <div style={{ fontSize:15,fontWeight:700,color:s.alert?ST_RED:"#111",minWidth:80,textAlign:"right" }}>
+                  ${s.current.toFixed(2)}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* MongoDB placeholder */}
+          <div className="spicy-card" style={{ marginTop:16,opacity:0.7 }}>
+            <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:8 }}>
+              <span style={{ fontSize:20 }}>🍃</span>
+              <div style={{ fontSize:15,fontWeight:700,color:"#111" }}>MongoDB Atlas</div>
+              <span style={{ fontSize:10,padding:"2px 8px",borderRadius:5,background:"#FEF3C7",color:"#92400E",fontWeight:600,marginLeft:"auto" }}>Pendiente</span>
+            </div>
+            <div style={{ fontSize:12,color:"#aaa" }}>
+              Necesita Public Key + Private Key de MongoDB Atlas (Organization → Access Manager → API Keys → Organization Billing Viewer)
+            </div>
+          </div>
+        </>
+      )}
+
+      {azureLoading&&!azureData&&(
+        <div style={{ display:"flex",alignItems:"center",justifyContent:"center",padding:"4rem",color:"#aaa",fontSize:13 }}>
+          Consultando Azure Cost Management…
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main App ───────────────────────────────────────────────────────────────
 export default function SpicyFinanzas() {
   const [session,  setSession]  = useState(null);
-  const [role,     setRole]     = useState(null);
+  const [role,     setRole]     = useState(null); // 'admin' | 'reader' | null
   const [authReady,setAuthReady]= useState(false);
 
   const [txns,      setTxns]      = useState([]);
@@ -1317,6 +1509,7 @@ export default function SpicyFinanzas() {
   const [form, setForm] = useState({type:"income",category:"SaaS MRR",amount:"",description:"",date:new Date().toISOString().split("T")[0],account_id:"mercury"});
   const [saved, setSaved] = useState(false);
 
+  // ── Auth listener ────────────────────────────────────────────────────────
   useEffect(()=>{
     sb.auth.getSession().then(({data:{session}})=>{
       setSession(session); setAuthReady(true);
@@ -1327,6 +1520,7 @@ export default function SpicyFinanzas() {
     return ()=>subscription.unsubscribe();
   },[]);
 
+  // ── Load role + data when session available ──────────────────────────────
   useEffect(()=>{
     if (!session) return;
     loadAll();
@@ -1387,28 +1581,35 @@ export default function SpicyFinanzas() {
     setSyncing(false);
   }
 
-  const [expCatMonth, setExpCatMonth] = useState("all");
-  const [catDrilldown, setCatDrilldown] = useState(null);
+  const [expCatMonth, setExpCatMonth] = useState("all"); // month filter for egresos chart
+  const [catDrilldown, setCatDrilldown] = useState(null); // { cat, month } for popup
 
+  // ── Métricas ─────────────────────────────────────────────────────────────
   const now=new Date();
   const income=txns.filter(t=>t.type==="income").reduce((s,t)=>s+Number(t.amount),0);
   const expenses=txns.filter(t=>t.type==="expense").reduce((s,t)=>s+Number(t.amount),0);
 
+  // MRR: suma de SaaS MRR del último mes calendario con al menos una txn de ese tipo
+  // Solo Mercury, sin Movimiento Cuenta — para gráfico y métricas
   const mercuryTxns = txns.filter(t =>
     t.account_id === "mercury" && t.category !== MOVIMIENTO_CUENTA
   );
 
   const months6=Array.from({length:6},(_,i)=>{const d=new Date(now.getFullYear(),now.getMonth()-(5-i),1);return{key:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`,label:MONTH_LABELS[d.getMonth()]};});
 
+  // Mes anterior
   const prevMonth = (() => { const d=new Date(now.getFullYear(),now.getMonth()-1,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
 
+  // MRR = suma SaaS MRR del mes anterior
   const mrr = mercuryTxns.filter(t=>t.category==="SaaS MRR"&&monthKey(t.date)===prevMonth).reduce((s,t)=>s+Number(t.amount),0);
   const mrrMonthLabel = monthLabel(prevMonth);
 
+  // Burn = ingreso - egreso del mes anterior (Mercury, sin Movimiento Cuenta)
   const prevIncome  = mercuryTxns.filter(t=>t.type==="income" &&monthKey(t.date)===prevMonth).reduce((s,t)=>s+Number(t.amount),0);
   const prevExpense = mercuryTxns.filter(t=>t.type==="expense"&&monthKey(t.date)===prevMonth).reduce((s,t)=>s+Number(t.amount),0);
-  const monthlyBurn = prevIncome - prevExpense;
+  const monthlyBurn = prevIncome - prevExpense; // positivo = superávit, negativo = déficit
 
+  // Cash total = saldo calculado desde transacciones por cuenta (desde cero)
   const calcBalances = {};
   txns.forEach(t => {
     if (!calcBalances[t.account_id]) calcBalances[t.account_id] = 0;
@@ -1450,16 +1651,13 @@ export default function SpicyFinanzas() {
   if (!session)   return <LoginScreen/>;
   if (!dataLoaded)return <div style={{ display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"#F7F7F8",fontSize:14,color:"#888" }}>Cargando datos...</div>;
 
-  const navViews = isAdmin
-    ? ["dashboard","accounts","referrals","runway","add","history","categories"]
-    : ["dashboard","accounts","referrals","runway","history","categories"];
-
   const userInitials = session.user.email.slice(0,2).toUpperCase();
 
   return (
     <div className="spicy-root">
       <BrandStyles/>
 
+      {/* Sidebar */}
       <div className="spicy-sidebar">
         <div className="spicy-logo">
           <div className="spicy-logo-icon">S</div>
@@ -1467,14 +1665,26 @@ export default function SpicyFinanzas() {
         </div>
 
         <nav className="spicy-nav">
-          <div style={{ fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.3)",textTransform:"uppercase",letterSpacing:1,padding:"8px 12px 6px",marginTop:4 }}>Finanzas</div>
-          {navViews.map(v=>(
-            <button key={v} onClick={()=>setView(v)} className={`spicy-nav-btn${view===v?" active":""}`}>
-              <span style={{ fontSize:14 }}>{NAV_ICONS[v]}</span>
-              {NAV_LABELS[v]}
-              {v==="referrals"&&referralOwed>0&&<span className="spicy-nav-badge">{fmt(referralOwed)}</span>}
-            </button>
-          ))}
+          {NAV_SECTIONS.map(section=>{
+            const visibleViews = section.views.filter(v =>
+              v !== "add" || isAdmin
+            );
+            if (visibleViews.length === 0) return null;
+            return (
+              <div key={section.label} style={{ marginBottom:4 }}>
+                <div style={{ fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.3)",textTransform:"uppercase",letterSpacing:1,padding:"10px 12px 5px" }}>
+                  {section.label}
+                </div>
+                {visibleViews.map(v=>(
+                  <button key={v} onClick={()=>setView(v)} className={`spicy-nav-btn${view===v?" active":""}`}>
+                    <span style={{ fontSize:14 }}>{NAV_ICONS[v]}</span>
+                    {NAV_LABELS[v]}
+                    {v==="referrals"&&referralOwed>0&&<span className="spicy-nav-badge">{fmt(referralOwed)}</span>}
+                  </button>
+                ))}
+              </div>
+            );
+          })}
         </nav>
 
         <div className="spicy-user">
@@ -1487,9 +1697,11 @@ export default function SpicyFinanzas() {
         </div>
       </div>
 
+      {/* Main content */}
       <div className="spicy-main">
         {syncError&&<div style={{ fontSize:13,color:ST_RED,marginBottom:16,padding:"10px 14px",background:ST_RED_BG,borderRadius:10,border:`1px solid ${ST_RED}22` }}>{syncError}</div>}
 
+      {/* DASHBOARD */}
       {view==="dashboard"&&(
         <>
           <div style={{ fontSize:20,fontWeight:700,color:"#111",marginBottom:20 }}>Resumen financiero</div>
@@ -1513,6 +1725,7 @@ export default function SpicyFinanzas() {
             ))}
           </div>
 
+          {/* Saldos por banco */}
           <div className="spicy-card">
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
               <span style={{ fontSize:14,fontWeight:600,color:"#111" }}>Saldos por banco</span>
@@ -1534,6 +1747,7 @@ export default function SpicyFinanzas() {
             <span style={{ fontSize:12,color:"#92400E",fontWeight:600 }}>Ver →</span>
           </div>}
 
+          {/* Chart */}
           <div className="spicy-card">
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
               <span style={{ fontSize:14,fontWeight:600,color:"#111" }}>Ingresos vs egresos — 6 meses</span>
@@ -1548,6 +1762,7 @@ export default function SpicyFinanzas() {
             </div>
           </div>
 
+          {/* Egresos por cat */}
           <div className="spicy-card">
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
               <div style={{ fontSize:14,fontWeight:600,color:"#111" }}>Egresos por categoría <span style={{ fontSize:11,color:"#aaa",fontWeight:400 }}>— click para ver detalle</span></div>
@@ -1573,16 +1788,17 @@ export default function SpicyFinanzas() {
 
           {/* Drilldown popup */}
           {catDrilldown&&(()=>{
-            const allCats = [...catsIncome,...catsExpense];
             const drillTxns = mercuryTxns.filter(t =>
               t.type==="expense" &&
               t.category===catDrilldown.cat &&
               (catDrilldown.month==="all" || monthKey(t.date)===catDrilldown.month)
             ).sort((a,b)=>b.date.localeCompare(a.date));
             const total = drillTxns.reduce((s,t)=>s+Number(t.amount),0);
+            const allCats = [...catsIncome,...catsExpense];
             return (
               <div onClick={()=>setCatDrilldown(null)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}>
                 <div onClick={e=>e.stopPropagation()} style={{ background:"white",borderRadius:16,width:"100%",maxWidth:560,maxHeight:"80vh",display:"flex",flexDirection:"column",overflow:"hidden" }}>
+                  {/* Header */}
                   <div style={{ padding:"18px 20px",borderBottom:"1px solid #F0F0F0",display:"flex",alignItems:"center",justifyContent:"space-between" }}>
                     <div>
                       <div style={{ fontSize:16,fontWeight:700,color:"#111" }}>{catDrilldown.cat}</div>
@@ -1593,6 +1809,7 @@ export default function SpicyFinanzas() {
                     <button onClick={()=>setCatDrilldown(null)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#ccc",lineHeight:1,padding:"4px 8px" }}>×</button>
                   </div>
 
+                  {/* Transaction list */}
                   <div style={{ overflowY:"auto",flex:1 }}>
                     {drillTxns.length===0&&<div style={{ padding:"2rem",textAlign:"center",fontSize:13,color:"#bbb" }}>Sin transacciones.</div>}
                     {drillTxns.map((t,i)=>(
@@ -1601,11 +1818,12 @@ export default function SpicyFinanzas() {
                           <div style={{ fontSize:13,fontWeight:500,color:"#111",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{t.description||"—"}</div>
                           <div style={{ fontSize:11,color:"#aaa",marginTop:2 }}>{t.date}</div>
                         </div>
+                        {/* Inline category selector */}
                         {isAdmin ? (
                           <select value={t.category}
                             onChange={async e=>{
                               await updateCategory(t.id, e.target.value);
-                              setCatDrilldown(prev=>({...prev}));
+                              setCatDrilldown(prev=>({...prev})); // force re-render
                             }}
                             style={{ fontSize:11,padding:"3px 6px",borderRadius:6,border:"1px solid #E0E0E0",background:"#F7F7F8",color:"#555",cursor:"pointer",fontFamily:"DM Sans,sans-serif",maxWidth:150 }}>
                             {allCats.map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
@@ -1618,6 +1836,7 @@ export default function SpicyFinanzas() {
                     ))}
                   </div>
 
+                  {/* Footer total */}
                   <div style={{ padding:"14px 20px",borderTop:"1px solid #F0F0F0",display:"flex",justifyContent:"space-between",alignItems:"center",background:"#FAFAFA" }}>
                     <span style={{ fontSize:13,color:"#888" }}>Total {catDrilldown.cat}</span>
                     <span style={{ fontSize:16,fontWeight:700,color:ST_RED }}>{fmt(total)}</span>
@@ -1632,8 +1851,10 @@ export default function SpicyFinanzas() {
       {view==="accounts"&&<AccountsPanel accounts={accounts} txns={txns} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="referrals"&&<ReferralDashboard txns={txns} referrers={referrers} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="runway"&&<RunwayView txns={txns} accounts={accounts}/>}
+      {view==="services"&&<ServicesView/>}
       {view==="categories"&&<CategoriesPanel catsIncome={catsIncome} catsExpense={catsExpense} isAdmin={isAdmin} onRefresh={loadAll}/>}
 
+      {/* ADD */}
       {view==="add"&&isAdmin&&(
         <div className="spicy-card" style={{ maxWidth:480 }}>
           <div style={{ fontSize:18,fontWeight:700,color:"#111",marginBottom:20 }}>Registrar movimiento</div>
@@ -1668,6 +1889,7 @@ export default function SpicyFinanzas() {
         </div>
       )}
 
+      {/* HISTORY */}
       {view==="history"&&(
         <HistoryView
           txns={txns} accounts={accounts} catsIncome={catsIncome} catsExpense={catsExpense}
@@ -1679,7 +1901,7 @@ export default function SpicyFinanzas() {
         />
       )}
 
-      </div>
+      </div>{/* end spicy-main */}
     </div>
   );
 }
