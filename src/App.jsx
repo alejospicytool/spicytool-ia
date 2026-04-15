@@ -1603,6 +1603,7 @@ export default function SpicyFinanzas() {
     await sb.from("transactions").update({ category }).eq("id", id);
     setTxns(prev => prev.map(t => t.id === id ? { ...t, category } : t));
   }
+  async function deleteTxn(id) {
     await sb.from("transactions").delete().eq("id",id);
     setTxns(prev=>prev.filter(t=>t.id!==id));
   }
