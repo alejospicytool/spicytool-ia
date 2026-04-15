@@ -298,7 +298,7 @@ function AccountsPanel({ accounts, txns, isAdmin, onRefresh }) {
         {accounts.map((a,i)=>{
           const accTxns = txns.filter(t => t.account_id === a.id);
           const calcBalance = accTxns.reduce((b,t) => b + (t.type==="income" ? Number(t.amount) : -Number(t.amount)), 0);
-          <div key={a.id} style={{ display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<accounts.length-1?"0.5px solid var(--color-border-tertiary)":"none" }}>
+          return (<div key={a.id} style={{ display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<accounts.length-1?"0.5px solid var(--color-border-tertiary)":"none" }}>
             <div style={{ width:10,height:10,borderRadius:"50%",background:a.color,flexShrink:0 }}/>
             <div style={{ flex:1,minWidth:0 }}>
               <div style={{ display:"flex",alignItems:"center",gap:6 }}>
@@ -337,7 +337,8 @@ function AccountsPanel({ accounts, txns, isAdmin, onRefresh }) {
               <button onClick={()=>setConfirmDelete(a.id)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:16,color:"var(--color-text-tertiary)",padding:"0 2px",lineHeight:1,opacity:0.5 }}>×</button>
             ))}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {isAdmin&&(showAdd?(
