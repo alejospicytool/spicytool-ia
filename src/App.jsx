@@ -150,7 +150,7 @@ const NAV_SECTIONS = [
   },
 ];
 
-const WORKER_URL = "https://spicy-finance.alejo-459.workers.dev";
+const WORKER_URL = "";
 const COMMISSION_RATE = 0.20;
 const MONTH_LABELS = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
 const ACCOUNT_COLORS = ["#185FA5","#0F6E56","#533AB7","#3B6D11","#993C1D","#BA7517","#993556","#5F5E5A","#D85A30","#1D9E75"];
@@ -298,7 +298,6 @@ function AccountsPanel({ accounts, txns, isAdmin, onRefresh }) {
         {accounts.map((a,i)=>{
           const accTxns = txns.filter(t => t.account_id === a.id);
           const calcBalance = accTxns.reduce((b,t) => b + (t.type==="income" ? Number(t.amount) : -Number(t.amount)), 0);
-          return (
           <div key={a.id} style={{ display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<accounts.length-1?"0.5px solid var(--color-border-tertiary)":"none" }}>
             <div style={{ width:10,height:10,borderRadius:"50%",background:a.color,flexShrink:0 }}/>
             <div style={{ flex:1,minWidth:0 }}>
@@ -338,8 +337,7 @@ function AccountsPanel({ accounts, txns, isAdmin, onRefresh }) {
               <button onClick={()=>setConfirmDelete(a.id)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:16,color:"var(--color-text-tertiary)",padding:"0 2px",lineHeight:1,opacity:0.5 }}>×</button>
             ))}
           </div>
-          );
-        })}
+        ))}
       </div>
 
       {isAdmin&&(showAdd?(
@@ -1356,25 +1354,284 @@ function RunwayView({ txns, accounts }) {
     </div>
   );
 }
+  const last3 = [0,1,2].map(i => {
+    const d = new Date(now.getFullYear(), now.getMonth()-1-i, 1);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+  });
+  const avgExpense = last3.reduce((s,mk) =>
+    s + mercuryTxns.filter(t=>t.type==="expense"&&monthKey(t.date)===mk).reduce((a,t)=>a+Number(t.amount),0), 0) / 3;
+
+  // Current MRR (prev month)
+  const prevMK = (() => { const d=new Date(now.getFullYear(),now.getMonth()-1,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
+  const currentMRR = mercuryTxns.filter(t=>t.category==="SaaS MRR"&&monthKey(t.date)===prevMK).reduce((s,t)=>s+Number(t.amount),0);
+
+  // Current cash from transactions
+  const calcBalances = {};
+  txns.forEach(t => {
+    if (!calcBalances[t.account_id]) calcBalances[t.account_id] = 0;
+    calcBalances[t.account_id] += t.type==="income" ? Number(t.amount) : -Number(t.amount);
+  });
+  const currentCash = Object.values(calcBalances).reduce((s,v)=>s+v,0);
+
+  // Scenario controls
+  const [mrrGrowthBase,  setMrrGrowthBase]  = useState(10);  // % monthly
+  const [mrrGrowthOpt,   setMrrGrowthOpt]   = useState(20);
+  const [mrrGrowthPess,  setMrrGrowthPess]  = useState(3);
+  const [expenseGrowth,  setExpenseGrowth]  = useState(0);   // % monthly expense growth
+  const [fundraise,      setFundraise]      = useState(0);   // extra capital injection
+  const [fundraiseMonth, setFundraise_month]= useState(1);   // which month (1-6)
+
+  const MONTHS = 6;
+
+  function project(mrrGrowthPct) {
+    const months = [];
+    let cash = currentCash;
+    let mrr  = currentMRR;
+    let exp  = avgExpense;
+
+    for (let i = 0; i < MONTHS; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+      const label = MONTH_LABELS[d.getMonth()] + " " + d.getFullYear();
+      const mk = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+
+      // Add fundraise injection if applicable
+      const injection = (i + 1 === fundraiseMonth && fundraise > 0) ? fundraise : 0;
+
+      const netFlow = mrr - exp + injection;
+      cash += netFlow;
+
+      months.push({ label, mk, mrr: Math.round(mrr), expense: Math.round(exp), netFlow: Math.round(netFlow), cash: Math.round(cash), injection });
+
+      mrr  = mrr  * (1 + mrrGrowthPct / 100);
+      exp  = exp  * (1 + expenseGrowth / 100);
+    }
+    return months;
+  }
+
+  const scenarios = [
+    { key:"opt",  label:"Optimista",  color:"#16A34A", bg:"#EDFAF3", growth:mrrGrowthOpt,  data: project(mrrGrowthOpt)  },
+    { key:"base", label:"Base",       color:"#185FA5", bg:"#E6F1FB", growth:mrrGrowthBase, data: project(mrrGrowthBase) },
+    { key:"pess", label:"Pesimista",  color:ST_RED,    bg:ST_RED_BG, growth:mrrGrowthPess, data: project(mrrGrowthPess) },
+  ];
+
+  // Find when cash runs out per scenario
+  function runwayMonths(data) {
+    const idx = data.findIndex(m => m.cash <= 0);
+    return idx === -1 ? `+6 meses` : idx === 0 ? "Este mes" : `${idx} mes${idx!==1?"es":""}`;
+  }
+
+  const maxCash = Math.max(...scenarios.flatMap(s => s.data.map(m => m.cash)), currentCash, 1);
+  const minCash = Math.min(...scenarios.flatMap(s => s.data.map(m => m.cash)), 0);
+  const chartH  = 160;
+
+  function cashToY(cash) {
+    const range = maxCash - minCash;
+    return range > 0 ? chartH - Math.round(((cash - minCash) / range) * chartH) : chartH / 2;
+  }
+
+  return (
+    <div>
+      <div style={{ fontSize:20,fontWeight:700,color:"#111",marginBottom:4 }}>Proyección de Runway</div>
+      <div style={{ fontSize:13,color:"#888",marginBottom:24 }}>6 meses · basado en datos reales de Mercury</div>
+
+      {/* Current state */}
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:24 }}>
+        {[
+          { label:"Cash actual",    value:fmt(currentCash),   sub:"calculado desde txns" },
+          { label:"MRR base",       value:fmt(currentMRR),    sub:monthLabel(prevMK) },
+          { label:"Egreso promedio",value:fmt(Math.round(avgExpense)), sub:"prom. 3 meses Mercury" },
+        ].map(k=>(
+          <div key={k.label} className="spicy-kpi">
+            <div className="spicy-kpi-label">{k.label}</div>
+            <div className="spicy-kpi-value">{k.value}</div>
+            <div className="spicy-kpi-sub">{k.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Controls */}
+      <div className="spicy-card" style={{ marginBottom:16 }}>
+        <div style={{ fontSize:14,fontWeight:600,color:"#111",marginBottom:16 }}>Parámetros</div>
+        <div style={{ display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:20 }}>
+
+          {/* MRR growth per scenario */}
+          {[
+            { label:"Crecimiento MRR — Optimista", val:mrrGrowthOpt,  set:setMrrGrowthOpt,  color:"#16A34A" },
+            { label:"Crecimiento MRR — Base",      val:mrrGrowthBase, set:setMrrGrowthBase, color:"#185FA5" },
+            { label:"Crecimiento MRR — Pesimista", val:mrrGrowthPess, set:setMrrGrowthPess, color:ST_RED },
+            { label:"Crecimiento egresos (todos)", val:expenseGrowth, set:setExpenseGrowth, color:"#555" },
+          ].map(c=>(
+            <div key={c.label}>
+              <div style={{ display:"flex",justifyContent:"space-between",marginBottom:6 }}>
+                <span style={{ fontSize:12,fontWeight:500,color:c.color }}>{c.label}</span>
+                <span style={{ fontSize:13,fontWeight:700,color:c.color }}>{c.val}%/mes</span>
+              </div>
+              <input type="range" min="-10" max="50" step="1" value={c.val}
+                onChange={e=>c.set(Number(e.target.value))}
+                style={{ width:"100%",accentColor:c.color }}/>
+            </div>
+          ))}
+        </div>
+
+        {/* Fundraise injection */}
+        <div style={{ borderTop:"1px solid #F0F0F0",marginTop:20,paddingTop:16 }}>
+          <div style={{ fontSize:13,fontWeight:600,color:"#111",marginBottom:12 }}>💰 Inyección de capital (opcional)</div>
+          <div style={{ display:"flex",gap:16,alignItems:"flex-end",flexWrap:"wrap" }}>
+            <div style={{ flex:2,minWidth:140 }}>
+              <div style={{ fontSize:12,color:"#888",marginBottom:6 }}>Monto (USD)</div>
+              <input className="spicy-input" type="number" value={fundraise||""} placeholder="0"
+                onChange={e=>setFundraise(Number(e.target.value))} style={{ fontSize:13 }}/>
+            </div>
+            <div style={{ flex:1,minWidth:100 }}>
+              <div style={{ fontSize:12,color:"#888",marginBottom:6 }}>En el mes</div>
+              <select className="spicy-select" value={fundraiseMonth} onChange={e=>setFundraise_month(Number(e.target.value))} style={{ width:"100%",fontSize:13 }}>
+                {Array.from({length:6},(_,i)=>{
+                  const d=new Date(now.getFullYear(),now.getMonth()+i,1);
+                  return <option key={i+1} value={i+1}>{MONTH_LABELS[d.getMonth()]} {d.getFullYear()}</option>;
+                })}
+              </select>
+            </div>
+            {fundraise > 0 && (
+              <button onClick={()=>setFundraise(0)} style={{ fontSize:12,padding:"8px 14px",borderRadius:8,cursor:"pointer",border:"1px solid #E0E0E0",background:"white",color:"#888" }}>Quitar</button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Scenario summary cards */}
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:20 }}>
+        {scenarios.map(s=>{
+          const last = s.data[s.data.length-1];
+          const runway = runwayMonths(s.data);
+          const endsPositive = last.cash > 0;
+          return (
+            <div key={s.key} style={{ background:s.bg,borderRadius:12,padding:"16px",border:`1px solid ${s.color}33` }}>
+              <div style={{ fontSize:12,fontWeight:700,color:s.color,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8 }}>{s.label}</div>
+              <div style={{ fontSize:11,color:"#888",marginBottom:4 }}>Crecimiento MRR</div>
+              <div style={{ fontSize:20,fontWeight:700,color:s.color,marginBottom:8 }}>{s.growth}%/mes</div>
+              <div style={{ fontSize:11,color:"#888",marginBottom:4 }}>Cash en mes 6</div>
+              <div style={{ fontSize:16,fontWeight:700,color:endsPositive?"#111":ST_RED }}>{fmt(last.cash)}</div>
+              <div style={{ marginTop:8,fontSize:12,fontWeight:600,color:endsPositive?"#16A34A":ST_RED }}>
+                {endsPositive ? `✓ Runway: ${runway}` : `⚠ Se acaba en ${runway}`}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Chart — cash over time */}
+      <div className="spicy-card" style={{ marginBottom:16 }}>
+        <div style={{ fontSize:14,fontWeight:600,color:"#111",marginBottom:4 }}>Evolución de cash</div>
+        <div style={{ fontSize:12,color:"#aaa",marginBottom:16 }}>Línea punteada = cero</div>
+        <div style={{ position:"relative",height:chartH+40,overflowX:"auto" }}>
+          <svg width="100%" height={chartH+40} viewBox={`0 0 ${MONTHS*100} ${chartH+40}`} preserveAspectRatio="none">
+            {/* Zero line */}
+            <line x1="0" y1={cashToY(0)} x2={MONTHS*100} y2={cashToY(0)} stroke="#E0E0E0" strokeWidth="1.5" strokeDasharray="6,4"/>
+            {/* Lines per scenario */}
+            {scenarios.map(s=>{
+              const points = [[0, cashToY(currentCash)], ...s.data.map((m,i) => [(i+1)*100, cashToY(m.cash)])];
+              const d = points.map((p,i)=>(i===0?"M":"L")+p[0]+","+p[1]).join(" ");
+              return <path key={s.key} d={d} fill="none" stroke={s.color} strokeWidth="2.5" strokeLinejoin="round"/>;
+            })}
+            {/* Dots and labels */}
+            {scenarios.map(s=>
+              s.data.map((m,i)=>(
+                <g key={s.key+i}>
+                  <circle cx={(i+1)*100} cy={cashToY(m.cash)} r="4" fill={s.color}/>
+                  {i===MONTHS-1&&(
+                    <text x={(i+1)*100-2} y={cashToY(m.cash)-8} fontSize="10" fill={s.color} textAnchor="middle" fontWeight="600">
+                      {fmt(m.cash)}
+                    </text>
+                  )}
+                  {m.injection>0&&(
+                    <text x={(i+1)*100} y={cashToY(m.cash)-18} fontSize="10" fill="#059669" textAnchor="middle">+{fmt(m.injection)}</text>
+                  )}
+                </g>
+              ))
+            )}
+            {/* Month labels */}
+            {scenarios[0].data.map((m,i)=>(
+              <text key={i} x={(i+1)*100} y={chartH+32} fontSize="11" fill="#aaa" textAnchor="middle">{m.label.split(" ")[0]}</text>
+            ))}
+          </svg>
+        </div>
+        <div style={{ display:"flex",gap:16,marginTop:8,flexWrap:"wrap" }}>
+          {scenarios.map(s=>(
+            <span key={s.key} style={{ display:"flex",alignItems:"center",gap:5,fontSize:12,color:s.color,fontWeight:600 }}>
+              <span style={{ width:20,height:3,background:s.color,display:"inline-block",borderRadius:2 }}/>
+              {s.label}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Month-by-month table */}
+      <div className="spicy-card" style={{ padding:0,overflow:"hidden" }}>
+        <div style={{ padding:"14px 20px",borderBottom:"1px solid #F3F3F3",fontSize:14,fontWeight:600,color:"#111" }}>Detalle mes a mes</div>
+        <div style={{ overflowX:"auto" }}>
+          <table style={{ width:"100%",borderCollapse:"collapse",fontSize:12 }}>
+            <thead>
+              <tr style={{ background:"#FAFAFA" }}>
+                <th style={{ padding:"10px 16px",textAlign:"left",color:"#888",fontWeight:600,borderBottom:"1px solid #F3F3F3" }}>Mes</th>
+                {scenarios.map(s=>(
+                  <th key={s.key} colSpan={3} style={{ padding:"10px 8px",textAlign:"center",color:s.color,fontWeight:700,borderBottom:"1px solid #F3F3F3",borderLeft:"2px solid "+s.color+"33" }}>{s.label}</th>
+                ))}
+              </tr>
+              <tr style={{ background:"#FAFAFA" }}>
+                <th style={{ padding:"6px 16px",color:"#aaa",fontWeight:500,borderBottom:"1px solid #F0F0F0",fontSize:11 }}></th>
+                {scenarios.map(s=>["MRR","Egreso","Cash"].map(h=>(
+                  <th key={s.key+h} style={{ padding:"6px 8px",textAlign:"right",color:"#aaa",fontWeight:500,borderBottom:"1px solid #F0F0F0",fontSize:11,borderLeft:h==="MRR"?"2px solid "+s.color+"33":"none" }}>{h}</th>
+                )))}
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({length:MONTHS},(_,i)=>(
+                <tr key={i} style={{ borderBottom:"1px solid #F3F3F3",background:i%2===0?"white":"#FAFAFA" }}>
+                  <td style={{ padding:"10px 16px",fontWeight:600,color:"#111",fontSize:13 }}>{scenarios[0].data[i].label}</td>
+                  {scenarios.map(s=>{
+                    const m = s.data[i];
+                    return ["mrr","expense","cash"].map(k=>(
+                      <td key={s.key+k} style={{ padding:"10px 8px",textAlign:"right",fontWeight:k==="cash"?700:400,
+                        color:k==="cash"?(m.cash<0?ST_RED:"#111"):"#555",
+                        borderLeft:k==="mrr"?"2px solid "+s.color+"33":"none",
+                        fontSize:k==="cash"?13:12 }}>
+                        {k==="cash"&&m.injection>0&&<span style={{ fontSize:10,color:"#059669",marginRight:4 }}>+{fmt(m.injection)}</span>}
+                        {fmt(m[k])}
+                      </td>
+                    ));
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ── Services View (Dashboard Producto) ────────────────────────────────────
 function ServicesView() {
   const [azureData,    setAzureData]    = useState(null);
   const [mongoData,    setMongoData]    = useState(null);
+  const [k8sData,      setK8sData]      = useState(null);
   const [azureLoading, setAzureLoading] = useState(false);
   const [mongoLoading, setMongoLoading] = useState(false);
+  const [k8sLoading,   setK8sLoading]   = useState(false);
   const [azureError,   setAzureError]   = useState("");
   const [mongoError,   setMongoError]   = useState("");
+  const [k8sError,     setK8sError]     = useState("");
   const [lastUpdated,  setLastUpdated]  = useState(null);
 
   async function fetchAll() {
     if (!WORKER_URL) { setAzureError("Configurá WORKER_URL en el código."); return; }
-    setAzureLoading(true); setMongoLoading(true);
-    setAzureError(""); setMongoError("");
+    setAzureLoading(true); setMongoLoading(true); setK8sLoading(true);
+    setAzureError(""); setMongoError(""); setK8sError("");
 
-    const [azureRes, mongoRes] = await Promise.allSettled([
+    const [azureRes, mongoRes, k8sRes] = await Promise.allSettled([
       fetch(WORKER_URL + "/azure"),
       fetch(WORKER_URL + "/mongodb"),
+      fetch(WORKER_URL + "/k8s"),
     ]);
 
     if (azureRes.status === "fulfilled" && azureRes.value.ok) {
@@ -1391,56 +1648,86 @@ function ServicesView() {
       setMongoError(e.error || "Error conectando con MongoDB");
     }
 
-    setAzureLoading(false); setMongoLoading(false);
+    if (k8sRes.status === "fulfilled" && k8sRes.value.ok) {
+      setK8sData(await k8sRes.value.json());
+    } else {
+      const e = k8sRes.status === "fulfilled" ? await k8sRes.value.json().catch(()=>({})) : {};
+      setK8sError(e.error || "");
+    }
+
+    setAzureLoading(false); setMongoLoading(false); setK8sLoading(false);
     setLastUpdated(new Date().toLocaleTimeString("es-UY"));
   }
 
   useEffect(() => { fetchAll(); }, []);
 
-  const azureAlerts = azureData?.services?.filter(s=>s.alert).length || 0;
   const mongoAlerts = mongoData?.services?.filter(s=>s.alert).length || 0;
-  const totalAlerts = azureAlerts + mongoAlerts;
 
-  function ServiceTable({ data, error, loading, title, icon }) {
-    if (loading && !data) return (
-      <div className="spicy-card" style={{ textAlign:"center", padding:"2rem", color:"#aaa", fontSize:13 }}>
-        <div style={{ fontSize:20, marginBottom:8 }}>{icon}</div>
-        Consultando {title}…
-      </div>
-    );
+  // Mini sparkline component for CPU/memory history
+  function Sparkline({ values, color, height=32 }) {
+    if (!values || values.length < 2) return null;
+    const max = Math.max(...values, 1);
+    const w = 120, h = height;
+    const pts = values.map((v,i) => `${Math.round((i/(values.length-1))*w)},${Math.round(h - (v/max)*h)}`).join(" ");
     return (
-      <div className="spicy-card" style={{ padding:0, overflow:"hidden" }}>
-        <div style={{ padding:"14px 20px", borderBottom:"1px solid #F3F3F3", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-            <span style={{ fontSize:18 }}>{icon}</span>
-            <span style={{ fontSize:14, fontWeight:600, color:"#111" }}>{title}</span>
+      <svg width={w} height={h} style={{ display:"block" }}>
+        <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round"/>
+        <circle cx={Math.round(((values.length-1)/(values.length-1))*w)} cy={Math.round(h-(values[values.length-1]/max)*h)} r="3" fill={color}/>
+      </svg>
+    );
+  }
+
+  function ClusterCard({ cluster }) {
+    const cpuAlert  = cluster.cpuPercent > 80;
+    const memAlert  = cluster.memPercent > 85;
+    const hasAlert  = cpuAlert || memAlert;
+    return (
+      <div className="spicy-card" style={{ border: hasAlert ? `1px solid ${ST_RED}44` : undefined }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:14 }}>
+          <div>
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              <span style={{ fontSize:18 }}>☸️</span>
+              <span style={{ fontSize:14, fontWeight:700, color:"#111" }}>{cluster.name}</span>
+              {hasAlert && <span style={{ fontSize:10, padding:"2px 7px", borderRadius:5, background:ST_RED_BG, color:ST_RED, fontWeight:700 }}>⚠ ALERTA</span>}
+            </div>
+            <div style={{ fontSize:11, color:"#aaa", marginTop:3 }}>{cluster.resourceGroup} · {cluster.location}</div>
           </div>
-          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-            {data && <span style={{ fontSize:12, color:"#aaa" }}>{data.services.length} servicios</span>}
-            {data && <span style={{ fontSize:13, fontWeight:700, color:"#111" }}>${data.totalCurrent?.toFixed(2)} este mes</span>}
+          <span style={{ fontSize:11, padding:"3px 8px", borderRadius:5, background:"#EDFAF3", color:"#16A34A", fontWeight:600 }}>
+            {cluster.status}
+          </span>
+        </div>
+
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+          {/* CPU */}
+          <div style={{ background: cpuAlert?"#FEF0F0":"#F9F9F9", borderRadius:8, padding:"10px 12px" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+              <span style={{ fontSize:12, fontWeight:600, color: cpuAlert?ST_RED:"#555" }}>CPU</span>
+              <span style={{ fontSize:16, fontWeight:700, color: cpuAlert?ST_RED:"#111" }}>{cluster.cpuPercent?.toFixed(1)}%</span>
+            </div>
+            <div style={{ height:6, background:"#E0E0E0", borderRadius:3, overflow:"hidden", marginBottom:6 }}>
+              <div style={{ height:"100%", width:`${Math.min(cluster.cpuPercent||0,100)}%`, background: cpuAlert?ST_RED:"#1D9E75", borderRadius:3, transition:"width 0.3s" }}/>
+            </div>
+            <Sparkline values={cluster.cpuHistory} color={cpuAlert?ST_RED:"#1D9E75"}/>
+          </div>
+
+          {/* Memory */}
+          <div style={{ background: memAlert?"#FEF0F0":"#F9F9F9", borderRadius:8, padding:"10px 12px" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+              <span style={{ fontSize:12, fontWeight:600, color: memAlert?ST_RED:"#555" }}>Memoria</span>
+              <span style={{ fontSize:16, fontWeight:700, color: memAlert?ST_RED:"#111" }}>{cluster.memPercent?.toFixed(1)}%</span>
+            </div>
+            <div style={{ height:6, background:"#E0E0E0", borderRadius:3, overflow:"hidden", marginBottom:6 }}>
+              <div style={{ height:"100%", width:`${Math.min(cluster.memPercent||0,100)}%`, background: memAlert?"#F59E0B":"#185FA5", borderRadius:3, transition:"width 0.3s" }}/>
+            </div>
+            <Sparkline values={cluster.memHistory} color={memAlert?"#F59E0B":"#185FA5"}/>
           </div>
         </div>
-        {error && <div style={{ padding:"12px 20px", fontSize:12, color:ST_RED, background:"#FEF0F0" }}>{error}</div>}
-        {data?.services?.length === 0 && <div style={{ padding:"2rem", textAlign:"center", fontSize:13, color:"#bbb" }}>Sin costos en este período.</div>}
-        {data?.services?.map((s,i)=>(
-          <div key={s.service} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 20px", borderBottom:i<data.services.length-1?"1px solid #F5F5F5":"none", background:s.alert?"#FFFBEB":"white" }}>
-            <div style={{ width:8, height:8, borderRadius:"50%", flexShrink:0, background:s.alert?ST_RED:"#1D9E75" }}/>
-            <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontSize:13, fontWeight:600, color:"#111" }}>{s.service}</div>
-              {s.prev > 0 && <div style={{ fontSize:11, color:"#aaa", marginTop:2 }}>Mes anterior: ${s.prev.toFixed(2)}</div>}
-            </div>
-            {s.change !== null && (
-              <span style={{ fontSize:11, padding:"2px 8px", borderRadius:5, fontWeight:600,
-                background: s.alert?"#FEF0F0":s.change<0?"#EDFAF3":"#F3F3F3",
-                color: s.alert?ST_RED:s.change<0?"#16A34A":"#888" }}>
-                {s.change>0?"+":""}{s.change}%
-              </span>
-            )}
-            <div style={{ fontSize:15, fontWeight:700, color:s.alert?ST_RED:"#111", minWidth:80, textAlign:"right" }}>
-              ${s.current.toFixed(2)}
-            </div>
-          </div>
-        ))}
+
+        <div style={{ display:"flex", gap:16, marginTop:12, fontSize:12, color:"#888" }}>
+          <span>Nodes: <strong style={{ color:"#111" }}>{cluster.nodeCount}</strong></span>
+          <span>Pods: <strong style={{ color:"#111" }}>{cluster.podCount}</strong></span>
+          <span>Versión: <strong style={{ color:"#111" }}>{cluster.version}</strong></span>
+        </div>
       </div>
     );
   }
@@ -1450,51 +1737,52 @@ function ServicesView() {
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:24 }}>
         <div>
           <div style={{ fontSize:20, fontWeight:700, color:"#111", marginBottom:4 }}>Dashboard Producto</div>
-          <div style={{ fontSize:13, color:"#888" }}>Costos de infraestructura · Azure · MongoDB Atlas</div>
+          <div style={{ fontSize:13, color:"#888" }}>Infraestructura Azure · Kubernetes · MongoDB Atlas</div>
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
           {lastUpdated && <span style={{ fontSize:11, color:"#aaa" }}>Actualizado {lastUpdated}</span>}
-          <button onClick={fetchAll} disabled={azureLoading||mongoLoading} className="spicy-btn-secondary" style={{ fontSize:13, padding:"7px 16px" }}>
-            {(azureLoading||mongoLoading) ? "Cargando…" : "⟳ Actualizar"}
+          <button onClick={fetchAll} disabled={azureLoading||mongoLoading||k8sLoading} className="spicy-btn-secondary" style={{ fontSize:13, padding:"7px 16px" }}>
+            {(azureLoading||mongoLoading||k8sLoading) ? "Cargando…" : "⟳ Actualizar"}
           </button>
         </div>
       </div>
 
-      {/* Summary KPIs */}
-      {(azureData || mongoData) && (
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:20 }}>
-          {[
-            { label:"Azure este mes",   value:azureData?`$${azureData.totalCurrent.toFixed(2)}`:"—", sub:azureData?.period?.current||"" },
-            { label:"MongoDB este mes", value:mongoData?`$${mongoData.totalCurrent.toFixed(2)}`:"—", sub:mongoData?.period?.current||"" },
-            { label:"Alertas",          value:totalAlerts, sub:"servicios con +20% vs mes anterior", warn:totalAlerts>0 },
-          ].map(k=>(
-            <div key={k.label} className="spicy-kpi">
-              <div className="spicy-kpi-label">{k.label}</div>
-              <div className="spicy-kpi-value" style={{ color:k.warn?ST_RED:"#111" }}>{k.value}</div>
-              <div className="spicy-kpi-sub">{k.sub}</div>
+      {/* Kubernetes clusters */}
+      <div style={{ fontSize:14, fontWeight:600, color:"#111", marginBottom:12 }}>☸️ Kubernetes</div>
+      {k8sError && (
+        <div style={{ background:"#F9F9F9", border:"1px dashed #E0E0E0", borderRadius:10, padding:"14px 18px", marginBottom:16, fontSize:13, color:"#aaa" }}>
+          Pendiente configurar Monitoring Reader en Azure → los clusters aparecerán acá automáticamente.
+        </div>
+      )}
+      {k8sLoading && !k8sData && (
+        <div style={{ textAlign:"center", padding:"2rem", color:"#aaa", fontSize:13, marginBottom:16 }}>Consultando Azure Monitor…</div>
+      )}
+      {k8sData?.clusters?.map(c => <ClusterCard key={c.name} cluster={c}/>)}
+      {k8sData?.clusters?.length === 0 && <div style={{ fontSize:13, color:"#bbb", marginBottom:16 }}>Sin clusters encontrados.</div>}
+
+      {/* MongoDB */}
+      <div style={{ fontSize:14, fontWeight:600, color:"#111", margin:"20px 0 12px" }}>🍃 MongoDB Atlas</div>
+      {mongoError && <div style={{ background:"#FEF0F0", border:"1px solid #FECACA", borderRadius:10, padding:"12px 16px", marginBottom:12, fontSize:13, color:ST_RED }}>{mongoError}</div>}
+      {mongoLoading && !mongoData && <div style={{ textAlign:"center", padding:"2rem", color:"#aaa", fontSize:13 }}>Consultando MongoDB Atlas…</div>}
+      {mongoData && (
+        <div className="spicy-card" style={{ padding:0, overflow:"hidden" }}>
+          <div style={{ padding:"14px 20px", borderBottom:"1px solid #F3F3F3", display:"flex", justifyContent:"space-between" }}>
+            <span style={{ fontSize:13, fontWeight:600, color:"#111" }}>Facturación este mes</span>
+            <span style={{ fontSize:14, fontWeight:700, color:"#111" }}>${mongoData.totalCurrent?.toFixed(2)}</span>
+          </div>
+          {mongoData.services?.map((s,i)=>(
+            <div key={s.service} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 20px", borderBottom:i<mongoData.services.length-1?"1px solid #F5F5F5":"none", background:s.alert?"#FFFBEB":"white" }}>
+              <div style={{ width:8, height:8, borderRadius:"50%", background:s.alert?ST_RED:"#1D9E75", flexShrink:0 }}/>
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:13, fontWeight:600, color:"#111" }}>{s.service}</div>
+                {s.prev>0&&<div style={{ fontSize:11, color:"#aaa" }}>Mes anterior: ${s.prev.toFixed(2)}</div>}
+              </div>
+              {s.change!==null&&<span style={{ fontSize:11, padding:"2px 8px", borderRadius:5, fontWeight:600, background:s.alert?"#FEF0F0":s.change<0?"#EDFAF3":"#F3F3F3", color:s.alert?ST_RED:s.change<0?"#16A34A":"#888" }}>{s.change>0?"+":""}{s.change}%</span>}
+              <div style={{ fontSize:14, fontWeight:700, color:s.alert?ST_RED:"#111", minWidth:70, textAlign:"right" }}>${s.current.toFixed(2)}</div>
             </div>
           ))}
         </div>
       )}
-
-      {/* Global alerts */}
-      {totalAlerts > 0 && (
-        <div style={{ background:"#FEF0F0", border:"1px solid #FECACA", borderRadius:10, padding:"12px 16px", marginBottom:20 }}>
-          <div style={{ fontSize:13, fontWeight:700, color:ST_RED, marginBottom:8 }}>⚠ {totalAlerts} servicio{totalAlerts!==1?"s":""} con aumento mayor al 20%</div>
-          {[...(azureData?.services||[]).filter(s=>s.alert).map(s=>({...s,src:"Azure"})),
-             ...(mongoData?.services||[]).filter(s=>s.alert).map(s=>({...s,src:"MongoDB"}))
-          ].map(s=>(
-            <div key={s.src+s.service} style={{ fontSize:12, color:ST_RED, marginBottom:3 }}>
-              <strong>[{s.src}] {s.service}</strong> — ${s.current.toFixed(2)} vs ${s.prev.toFixed(2)} anterior (+{s.change}%)
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
-        <ServiceTable data={azureData} error={azureError} loading={azureLoading} title="Azure" icon="☁️"/>
-        <ServiceTable data={mongoData} error={mongoError} loading={mongoLoading} title="MongoDB Atlas" icon="🍃"/>
-      </div>
     </div>
   );
 }
@@ -1569,8 +1857,6 @@ export default function SpicyFinanzas() {
     await sb.from("transactions").update({ category }).eq("id", id);
     setTxns(prev => prev.map(t => t.id === id ? { ...t, category } : t));
   }
-
-  async function deleteTxn(id) {
     await sb.from("transactions").delete().eq("id",id);
     setTxns(prev=>prev.filter(t=>t.id!==id));
   }
