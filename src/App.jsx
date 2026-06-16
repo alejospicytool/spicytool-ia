@@ -921,7 +921,7 @@ function parseCSVRows(text, defaultAccountId) {
 
       const type = rawAmount > 0 ? "income" : "expense";
       rows.push({
-        id: "imp_" + i + "_" + Date.now(),
+        id: "merc_" + rawDate.split("T")[0] + "_" + Math.abs(rawAmount).toFixed(2) + "_" + desc.slice(0,30).toLowerCase().replace(/\s+/g,"_").replace(/[^a-z0-9_]/g,""),
         type,
         amount:      Math.abs(rawAmount),
         description: desc,
@@ -939,7 +939,7 @@ function parseCSVRows(text, defaultAccountId) {
       if (!rawDate || txType === "payout") continue;
       const type = rawNet < 0 ? "expense" : "income";
       rows.push({
-        id: "imp_str_" + i + "_" + Date.now(),
+        id: "str_" + rawDate.split(" ")[0] + "_" + Math.abs(rawNet).toFixed(2) + "_" + desc.slice(0,30).toLowerCase().replace(/\s+/g,"_").replace(/[^a-z0-9_]/g,""),
         type,
         amount:      Math.abs(rawNet),
         description: desc,
