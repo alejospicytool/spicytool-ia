@@ -462,7 +462,7 @@ function CategoriesPanel({ catsIncome, catsExpense, isAdmin, onRefresh }) {
 }
 
 // ── Referral Dashboard ─────────────────────────────────────────────────────
-function ReferralDashboard({ txns, referrers, referredClients, isAdmin, onRefresh }) {
+function ReferralDashboard({ txns, referrers, referredClients, payments, isAdmin, onRefresh }) {
   const [expanded,   setExpanded]   = useState(null);
   const [showAdd,    setShowAdd]    = useState(false);
   const [newRef,     setNewRef]     = useState({id:"",name:"",email:"",commission_rate:20});
@@ -495,6 +495,16 @@ function ReferralDashboard({ txns, referrers, referredClients, isAdmin, onRefres
     onRefresh();
   }
 
+  async function togglePaymentPaid(payment) {
+    await sb.from("referred_client_payments").update({ paid: !payment.paid }).eq("id", payment.id);
+    onRefresh();
+  }
+
+  async function deletePayment(id) {
+    await sb.from("referred_client_payments").delete().eq("id", id);
+    onRefresh();
+  }
+
   async function saveManualTxn(ref) {
     if (!txnForm.amount || isNaN(Number(txnForm.amount)) || Number(txnForm.amount) <= 0) return;
     setSavingTxn(true);
@@ -517,54 +527,77 @@ function ReferralDashboard({ txns, referrers, referredClients, isAdmin, onRefres
 
   const now=new Date(), curMK=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
 
-  // Pull income from Stripe via Worker. Trae TODOS los ingresos (no solo los que
-  // ya tienen referrer_id en la metadata de Stripe), para que el matching por
-  // email contra clientes registrados funcione aunque esa metadata no esté cargada.
+  // Trae los pagos de Stripe de los clientes ya registrados y los guarda en
+  // referred_client_payments — completamente separado de la tabla financiera
+  // (transactions). Esto es solo para calcular comisiones a pagar a los
+  // referidores, no debe sumar a los números de la empresa.
   async function syncFromStripe() {
     if (!WORKER_URL) { setSyncMsg("Configurá WORKER_URL primero."); return; }
+    if (referredClients.length === 0) { setSyncMsg("Registrá al menos un cliente referido primero."); return; }
     setSyncing(true); setSyncMsg("");
     try {
       const res = await fetch(WORKER_URL + "/stripe");
       if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
-      const incoming = (data.transactions || []).filter(t => t.type === "income");
-      const existingIds = new Set(txns.map(t => t.id));
-      const newTxns = incoming.filter(t => !existingIds.has(t.id)).map(t => ({
-        id: t.id, type: t.type, category: "SaaS MRR", amount: t.amount,
-        description: t.description, date: t.date, account_id: "mercury",
-        source: t.source, referrer_id: t.referrer_id || null, referrer_name: t.referrer_name || null,
-        customer_email: t.customer_email || null,
+
+      const clientIdByEmail = {};
+      referredClients.forEach(c => { clientIdByEmail[c.email.toLowerCase()] = c.id; });
+
+      const incoming = (data.transactions || []).filter(t =>
+        t.type === "income" && t.customer_email && clientIdByEmail[t.customer_email]
+      );
+      const existingIds = new Set(payments.map(p => p.id));
+      const newPayments = incoming.filter(t => !existingIds.has(t.id)).map(t => ({
+        id: t.id,
+        referred_client_id: clientIdByEmail[t.customer_email],
+        amount: t.amount,
+        date: t.date,
+        description: t.description,
       }));
-      if (newTxns.length) {
-        await sb.from("transactions").insert(newTxns);
+      if (newPayments.length) {
+        await sb.from("referred_client_payments").insert(newPayments);
         onRefresh();
-        setSyncMsg(`${newTxns.length} transacciones importadas desde Stripe.`);
+        setSyncMsg(`${newPayments.length} pagos importados desde Stripe.`);
       } else {
-        setSyncMsg("Todo al día — sin transacciones nuevas.");
+        setSyncMsg("Todo al día — sin pagos nuevos.");
       }
     } catch(e) { setSyncMsg("Error: " + e.message); }
     setSyncing(false);
   }
 
-  // Calculate commissions using per-referrer rate from Supabase
+  // Comisiones ya pagadas al referidor (registro manual vía "marcar pagado")
   const paidCommissions = txns.filter(t => t.category === "Comisiones referidos" && t.referrer_id);
-  const referredIncome  = txns.filter(t => t.type === "income" && t.referrer_id);
-  // Ingresos con email de customer, para matchear clientes registrados sin depender
-  // de que el customer tenga referrer_id cargado en la metadata de Stripe
-  const incomeByEmail = txns.filter(t => t.type === "income" && t.customer_email);
 
   const stats = referrers.map(ref => {
     const rate = (ref.commission_rate || 20) / 100;
-    const inc  = referredIncome.filter(t => t.referrer_id === ref.id);
     const paid = paidCommissions.filter(t => t.referrer_id === ref.id);
-    const totalRevenue    = inc.reduce((s,t) => s + Number(t.amount), 0);
+    const totalPaid = paid.reduce((s,t) => s + Number(t.amount), 0);
+
+    // Clientes registrados con sus pagos de Stripe (tabla separada
+    // referred_client_payments, no la tabla financiera) — fuente real de los
+    // totales del referidor, ya que no depende de la metadata de Stripe.
+    const registeredClients = referredClients.filter(c => c.referrer_id === ref.id).map(c => {
+      const clientTxns = payments.filter(p => p.referred_client_id === c.id).map(p => ({ ...p, clientName: c.name }));
+      const total        = clientTxns.reduce((s,t) => s + Number(t.amount), 0);
+      const clientPaid   = clientTxns.filter(t => t.paid).reduce((s,t) => s + Number(t.amount), 0);
+      const totalPending = total - clientPaid;
+      return {
+        ...c,
+        transactions: clientTxns.slice().sort((a,b) => b.date.localeCompare(a.date)),
+        revenue: total,
+        total, totalPaid: clientPaid, totalPending,
+        commission: total * rate,
+      };
+    });
+
+    const allClientPayments = registeredClients.flatMap(c => c.transactions);
+    const totalRevenue    = allClientPayments.reduce((s,t) => s + Number(t.amount), 0);
     const totalCommission = totalRevenue * rate;
-    const totalPaid       = paid.reduce((s,t) => s + Number(t.amount), 0);
     const totalOwed       = Math.max(0, totalCommission - totalPaid);
 
-    // Per-month breakdown
+    // Per-month breakdown, a partir de los pagos de los clientes registrados
     const months = {};
-    inc.forEach(t => {
+    allClientPayments.forEach(t => {
       const mk = monthKey(t.date);
       if (!months[mk]) months[mk] = { revenue:0, commission:0, paid:0, transactions:[] };
       months[mk].revenue    += Number(t.amount);
@@ -577,30 +610,9 @@ function ReferralDashboard({ txns, referrers, referredClients, isAdmin, onRefres
       months[mk].paid += Number(t.amount);
     });
 
-    // Per-customer breakdown
-    const customerMap = {};
-    inc.forEach(t => {
-      const key = t.description || t.id;
-      if (!customerMap[key]) customerMap[key] = { name:key, revenue:0, commission:0, transactions:[] };
-      customerMap[key].revenue    += Number(t.amount);
-      customerMap[key].commission += Number(t.amount) * rate;
-      customerMap[key].transactions.push(t);
-    });
-    const customers = Object.values(customerMap).sort((a,b) => b.commission - a.commission);
-
-    // Clientes registrados manualmente, matcheados por email contra las transacciones de Stripe
-    const registeredClients = referredClients.filter(c => c.referrer_id === ref.id).map(c => {
-      const clientTxns = incomeByEmail.filter(t => (t.customer_email||"").toLowerCase() === c.email.toLowerCase());
-      return {
-        ...c,
-        transactions: clientTxns.sort((a,b) => b.date.localeCompare(a.date)),
-        revenue: clientTxns.reduce((s,t) => s + Number(t.amount), 0),
-      };
-    });
-
-    const curRevenue = inc.filter(t => monthKey(t.date) === curMK).reduce((s,t) => s + Number(t.amount), 0);
-    return { ...ref, totalRevenue, totalCommission, totalPaid, totalOwed, months, customers, registeredClients,
-      curCommission: curRevenue * rate, activeBrokers: new Set(inc.map(t => t.description)).size };
+    const curRevenue = allClientPayments.filter(t => monthKey(t.date) === curMK).reduce((s,t) => s + Number(t.amount), 0);
+    return { ...ref, totalRevenue, totalCommission, totalPaid, totalOwed, months, registeredClients,
+      curCommission: curRevenue * rate, activeBrokers: registeredClients.length };
   }).sort((a,b) => b.totalOwed - a.totalOwed);
 
   const totalOwedNow = stats.reduce((s,r) => s + r.curCommission, 0);
@@ -786,7 +798,7 @@ function ReferralDashboard({ txns, referrers, referredClients, isAdmin, onRefres
                       {m.transactions?.map(t=>(
                         <div key={t.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"7px 12px 7px 24px", borderBottom:"1px solid #F3F3F3", fontSize:12 }}>
                           <div style={{ width:6, height:6, borderRadius:"50%", background:"#1D9E75", flexShrink:0 }}/>
-                          <div style={{ flex:1, color:"#555" }}>{t.description||"—"}</div>
+                          <div style={{ flex:1, color:"#555" }}>{t.description||"—"}{t.clientName&&<span style={{ color:"#aaa" }}> ({t.clientName})</span>}</div>
                           <div style={{ color:"#888" }}>{t.date}</div>
                           <div style={{ fontWeight:600, color:"#111" }}>{fmtDec(Number(t.amount))}</div>
                           <div style={{ color:"#aaa", minWidth:70, textAlign:"right" }}>com: {fmtDec(Number(t.amount)*(ref.commission_rate||20)/100)}</div>
@@ -795,27 +807,6 @@ function ReferralDashboard({ txns, referrers, referredClients, isAdmin, onRefres
                     </div>
                   );
                 })}
-
-                {/* Por cliente */}
-                {ref.customers?.length > 0 && (
-                  <>
-                    <div style={{ fontSize:12, fontWeight:600, color:"#555", margin:"20px 0 10px", textTransform:"uppercase", letterSpacing:0.5 }}>Por cliente</div>
-                    {ref.customers.map(c=>(
-                      <div key={c.name} style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 12px", background:"#F9F9F9", borderRadius:8, marginBottom:6 }}>
-                        <div style={{ flex:1, fontSize:13, fontWeight:500, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{c.name}</div>
-                        <div style={{ fontSize:12, color:"#888" }}>{c.transactions.length} pago{c.transactions.length!==1?"s":""}</div>
-                        <div style={{ fontSize:12, color:"#555" }}>Rev {fmtDec(c.revenue)}</div>
-                        <div style={{ fontSize:13, fontWeight:700 }}>Com {fmtDec(c.commission)}</div>
-                        <div style={{ fontSize:11, padding:"3px 8px", borderRadius:5,
-                          background: c.commission <= ref.totalPaid ? "#EDFAF3" : "#FEF3C7",
-                          color: c.commission <= ref.totalPaid ? "#16A34A" : "#92400E",
-                          fontWeight:600 }}>
-                          {c.commission <= ref.totalPaid ? "cubierto" : `falta ${fmtDec(c.commission)}`}
-                        </div>
-                      </div>
-                    ))}
-                  </>
-                )}
 
                 {/* Clientes referidos (registrados a mano, matcheados por email con Stripe) */}
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", margin:"20px 0 10px" }}>
@@ -864,17 +855,44 @@ function ReferralDashboard({ txns, referrers, referredClients, isAdmin, onRefres
                         <div style={{ fontSize:11, color:"#aaa" }}>{c.email}</div>
                       </div>
                       <div style={{ fontSize:12, color:"#888" }}>{c.transactions.length} pago{c.transactions.length!==1?"s":""}</div>
-                      <div style={{ fontSize:13, fontWeight:700 }}>{fmtDec(c.revenue)}</div>
                       {isAdmin && (
                         <button onClick={()=>deleteClient(c.id)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:16,color:"#ccc",padding:"0 2px",lineHeight:1 }}>×</button>
                       )}
                     </div>
+
+                    <div style={{ display:"flex", gap:8, padding:"0 12px 10px" }}>
+                      {[
+                        { label:"Total",    value:c.total },
+                        { label:"Pagado",   value:c.totalPaid },
+                        { label:"A pagar",  value:c.totalPending, warn:c.totalPending>0 },
+                        { label:`Comisión ${ref.commission_rate||20}%`, value:c.commission },
+                      ].map(s=>(
+                        <div key={s.label} style={{ flex:1, background:"white", border:"1px solid #F0F0F0", borderRadius:6, padding:"6px 8px" }}>
+                          <div style={{ fontSize:10, color:"#aaa", textTransform:"uppercase", letterSpacing:0.3 }}>{s.label}</div>
+                          <div style={{ fontSize:13, fontWeight:700, color:s.warn?"#D97706":"#111" }}>{fmtDec(s.value)}</div>
+                        </div>
+                      ))}
+                    </div>
+
                     {c.transactions.map(t=>(
                       <div key={t.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"7px 12px 7px 24px", borderTop:"1px solid #F0F0F0", fontSize:12 }}>
                         <div style={{ flex:1, color:"#555" }}>{t.description||"—"}</div>
                         <div style={{ color:"#888" }}>{t.date}</div>
                         <div style={{ fontWeight:600, color:"#111" }}>{fmtDec(Number(t.amount))}</div>
-                        <span className="spicy-badge-green">pagada ✓</span>
+                        {isAdmin ? (
+                          <button onClick={()=>togglePaymentPaid(t)}
+                            className={t.paid ? "spicy-badge-green" : ""}
+                            style={t.paid ? { border:"none",cursor:"pointer" } : { fontSize:10,padding:"2px 7px",borderRadius:5,fontWeight:600,cursor:"pointer",background:"#FEF3C7",color:"#92400E",border:"1px solid #FCD34D" }}>
+                            {t.paid ? "pagada ✓" : "pendiente"}
+                          </button>
+                        ) : (
+                          <span className={t.paid ? "spicy-badge-green" : ""} style={t.paid ? {} : { fontSize:10,padding:"2px 7px",borderRadius:5,fontWeight:600,background:"#FEF3C7",color:"#92400E" }}>
+                            {t.paid ? "pagada ✓" : "pendiente"}
+                          </span>
+                        )}
+                        {isAdmin && (
+                          <button onClick={()=>deletePayment(t.id)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:15,color:"#ccc",padding:"0 2px",lineHeight:1 }}>×</button>
+                        )}
                       </div>
                     ))}
                     {c.transactions.length === 0 && (
@@ -1663,6 +1681,7 @@ export default function SpicyFinanzas() {
   const [accounts,  setAccounts]  = useState([]);
   const [referrers, setReferrers] = useState([]);
   const [referredClients, setReferredClients] = useState([]);
+  const [referredClientPayments, setReferredClientPayments] = useState([]);
   const [catsIncome,  setCatsIncome]  = useState([]);
   const [catsExpense, setCatsExpense] = useState([]);
   const [dataLoaded, setDataLoaded]   = useState(false);
@@ -1694,19 +1713,21 @@ export default function SpicyFinanzas() {
 
   async function loadAll() {
     setDataLoaded(false);
-    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes]=await Promise.all([
+    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes]=await Promise.all([
       sb.from("user_roles").select("role").eq("user_id",session.user.id).single(),
       sb.from("transactions").select("*").order("date",{ascending:false}),
       sb.from("accounts").select("*").order("created_at"),
       sb.from("referrers").select("*").order("name"),
       sb.from("categories").select("*").order("position"),
       sb.from("referred_clients").select("*").order("name"),
+      sb.from("referred_client_payments").select("*").order("date",{ascending:false}),
     ]);
     setRole(roleRes.data?.role||"reader");
     setTxns(txRes.data||[]);
     setAccounts(accRes.data||[]);
     setReferrers(refRes.data||[]);
     setReferredClients(refClientsRes.data||[]);
+    setReferredClientPayments(paymentsRes.data||[]);
     setCatsIncome((catRes.data||[]).filter(c=>c.type==="income"));
     setCatsExpense((catRes.data||[]).filter(c=>c.type==="expense"));
     setDataLoaded(true);
@@ -1757,7 +1778,6 @@ export default function SpicyFinanzas() {
           id:t.id, type:t.type, category:t.category||(t.type==="income"?"SaaS MRR":"Otro gasto"),
           amount:t.amount, description:t.description, date:t.date, account_id:"mercury",
           source:t.source, referrer_id:t.referrer_id||null, referrer_name:t.referrer_name||null,
-          customer_email:t.customer_email||null,
         }));
         if(newTxns.length)await sb.from("transactions").insert(newTxns);
       }
@@ -2040,7 +2060,7 @@ export default function SpicyFinanzas() {
       )}
 
       {view==="accounts"&&<AccountsPanel accounts={accounts} txns={txns} isAdmin={isAdmin} onRefresh={loadAll}/>}
-      {view==="referrals"&&<ReferralDashboard txns={txns} referrers={referrers} referredClients={referredClients} isAdmin={isAdmin} onRefresh={loadAll}/>}
+      {view==="referrals"&&<ReferralDashboard txns={txns} referrers={referrers} referredClients={referredClients} payments={referredClientPayments} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="runway"&&<RunwayView txns={txns} accounts={accounts}/>}
       {view==="services"&&<ServicesView/>}
       {view==="categories"&&<CategoriesPanel catsIncome={catsIncome} catsExpense={catsExpense} isAdmin={isAdmin} onRefresh={loadAll}/>}

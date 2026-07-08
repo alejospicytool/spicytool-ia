@@ -69,6 +69,113 @@ async function stripeGetAll(url, key) {
   return results;
 }
 
+// Lógica compartida de Mercury/Stripe/referidos, en funciones planas (no rutas HTTP)
+// para que /sync, /referrals, etc. las llamen directo en el mismo proceso. Cloudflare
+// bloquea que un Worker en *.workers.dev se haga fetch a sí mismo (error 1042), así
+// que un self-fetch a "/stripe" desde "/referrals" siempre iba a fallar.
+async function getMercuryTransactions(env, url) {
+  if (!env.MERCURY_TOKEN) return { error: "MERCURY_TOKEN no configurado" };
+  const accountsRes = await fetch("https://api.mercury.com/api/v1/accounts", {
+    headers: { Authorization: `Bearer ${env.MERCURY_TOKEN}`, Accept: "application/json" },
+  });
+  if (!accountsRes.ok) return { error: "Mercury error " + accountsRes.status };
+  const { accounts = [] } = await accountsRes.json();
+  const allTxns = [];
+  for (const account of accounts) {
+    const params = new URLSearchParams({ limit: "500", status: "sent" });
+    const start = url.searchParams.get("start");
+    if (start) params.set("start", start);
+    const res = await fetch(`https://api.mercury.com/api/v1/account/${account.id}/transactions?${params}`, {
+      headers: { Authorization: `Bearer ${env.MERCURY_TOKEN}`, Accept: "application/json" },
+    });
+    if (!res.ok) continue;
+    const { transactions = [] } = await res.json();
+    transactions.forEach(t => {
+      allTxns.push({
+        id: "mercury_" + t.id,
+        source: "mercury",
+        date: (t.postedAt || t.createdAt).split("T")[0],
+        description: t.counterpartyName || t.bankDescription || t.note || "",
+        amount: Math.abs(t.amount),
+        type: t.amount > 0 ? "income" : "expense",
+        account: account.name || account.id,
+      });
+    });
+  }
+  return { transactions: allTxns };
+}
+
+async function getStripeTransactions(env, url) {
+  if (!env.STRIPE_KEY) return { error: "STRIPE_KEY no configurado" };
+
+  // Traer balance transactions con el customer del charge ya expandido en la
+  // misma llamada (expand[]=data.source.customer). Antes se traía la lista
+  // completa de customers + un fetch por cada charge para resolver el
+  // customer_id, lo que hacía cientos de subrequests y tiraba "Too many
+  // subrequests by single Worker invocation" apenas había volumen real.
+  const baseUrl = "https://api.stripe.com/v1/balance_transactions";
+  const startTs = url.searchParams.get("start");
+  const btUrl = new URL(baseUrl);
+  if (startTs) btUrl.searchParams.set("created[gte]", Math.floor(new Date(startTs).getTime() / 1000));
+  btUrl.searchParams.set("expand[]", "data.source.customer");
+  const balanceTxns = await stripeGetAll(btUrl.toString(), env.STRIPE_KEY);
+
+  const txns = balanceTxns
+    .filter(t => t.type !== "payout")
+    .map(t => {
+      const customer = (t.source && typeof t.source === "object") ? t.source.customer : null;
+      const customerObj = (customer && typeof customer === "object") ? customer : null;
+      const customerId = customerObj?.id || (typeof customer === "string" ? customer : null);
+      const meta = customerObj?.metadata || {};
+      return {
+        id: "stripe_" + t.id,
+        source: "stripe",
+        date: new Date(t.created * 1000).toISOString().split("T")[0],
+        description: t.description || t.type || "",
+        amount: Math.abs(t.net) / 100,
+        type: t.net > 0 ? "income" : "expense",
+        rawType: t.type,
+        fee: Math.abs(t.fee) / 100,
+        customer_id: customerId,
+        customer_email: customerObj?.email ? customerObj.email.toLowerCase().trim() : null,
+        referrer_id: meta.referrer_id || null,
+        referrer_name: meta.referrer_name || meta.referrer_id || null,
+      };
+    });
+
+  return { transactions: txns };
+}
+
+// Agrupa transacciones de ingreso con referrer_id (metadata de Stripe) por referidor/mes
+function buildReferrals(transactions) {
+  const referred = transactions.filter(t => t.type === "income" && t.referrer_id);
+
+  const byReferrer = {};
+  for (const t of referred) {
+    const mk = t.date.slice(0, 7);
+    const key = t.referrer_id;
+    if (!byReferrer[key]) byReferrer[key] = {
+      id: key, name: t.referrer_name || key,
+      months: {}, totalRevenue: 0, transactions: [],
+    };
+    if (!byReferrer[key].months[mk]) byReferrer[key].months[mk] = { revenue: 0, txCount: 0 };
+    byReferrer[key].months[mk].revenue += t.amount;
+    byReferrer[key].months[mk].txCount++;
+    byReferrer[key].totalRevenue += t.amount;
+    byReferrer[key].transactions.push({ id: t.id, date: t.date, amount: t.amount, description: t.description, customer_email: t.customer_email || null });
+  }
+
+  const referrers = Object.values(byReferrer).map(r => ({
+    ...r,
+    months: Object.entries(r.months).sort(([a],[b]) => b.localeCompare(a)).map(([month, data]) => ({ month, ...data })),
+  })).sort((a, b) => b.totalRevenue - a.totalRevenue);
+
+  return {
+    referrers,
+    totalReferredRevenue: referrers.reduce((s, r) => s + r.totalRevenue, 0),
+  };
+}
+
 export default {
   async fetch(request, env) {
     const origin = request.headers.get("Origin") || "*";
@@ -100,143 +207,45 @@ export default {
 
       // ── /mercury ─────────────────────────────────────────────────
       if (path === "/mercury") {
-        if (!env.MERCURY_TOKEN) return err("MERCURY_TOKEN no configurado", origin);
-        const accountsRes = await fetch("https://api.mercury.com/api/v1/accounts", {
-          headers: { Authorization: `Bearer ${env.MERCURY_TOKEN}`, Accept: "application/json" },
-        });
-        if (!accountsRes.ok) return err("Mercury error " + accountsRes.status, origin);
-        const { accounts = [] } = await accountsRes.json();
-        const allTxns = [];
-        for (const account of accounts) {
-          const params = new URLSearchParams({ limit: "500", status: "sent" });
-          const start = url.searchParams.get("start");
-          if (start) params.set("start", start);
-          const res = await fetch(`https://api.mercury.com/api/v1/account/${account.id}/transactions?${params}`, {
-            headers: { Authorization: `Bearer ${env.MERCURY_TOKEN}`, Accept: "application/json" },
-          });
-          if (!res.ok) continue;
-          const { transactions = [] } = await res.json();
-          transactions.forEach(t => {
-            allTxns.push({
-              id: "mercury_" + t.id,
-              source: "mercury",
-              date: (t.postedAt || t.createdAt).split("T")[0],
-              description: t.counterpartyName || t.bankDescription || t.note || "",
-              amount: Math.abs(t.amount),
-              type: t.amount > 0 ? "income" : "expense",
-              account: account.name || account.id,
-            });
-          });
-        }
-        return new Response(JSON.stringify({ transactions: allTxns, count: allTxns.length }), { headers: CORS(origin) });
+        const result = await getMercuryTransactions(env, url);
+        if (result.error) return err(result.error, origin);
+        return new Response(JSON.stringify({ transactions: result.transactions, count: result.transactions.length }), { headers: CORS(origin) });
       }
 
       // ── /stripe ──────────────────────────────────────────────────
       // Enriquece cada transacción con el referidor del customer
       if (path === "/stripe") {
-        if (!env.STRIPE_KEY) return err("STRIPE_KEY no configurado", origin);
-
-        // Traer balance transactions con el customer del charge ya expandido en la
-        // misma llamada (expand[]=data.source.customer). Antes se traía la lista
-        // completa de customers + un fetch por cada charge para resolver el
-        // customer_id, lo que hacía cientos de subrequests y tiraba "Too many
-        // subrequests by single Worker invocation" apenas había volumen real.
-        const baseUrl = "https://api.stripe.com/v1/balance_transactions";
-        const startTs = url.searchParams.get("start");
-        const btUrl = new URL(baseUrl);
-        if (startTs) btUrl.searchParams.set("created[gte]", Math.floor(new Date(startTs).getTime() / 1000));
-        btUrl.searchParams.set("expand[]", "data.source.customer");
-        const balanceTxns = await stripeGetAll(btUrl.toString(), env.STRIPE_KEY);
-
-        // Mapear balance transactions → formato SpicyTool
-        const txns = balanceTxns
-          .filter(t => t.type !== "payout")
-          .map(t => {
-            const customer = (t.source && typeof t.source === "object") ? t.source.customer : null;
-            const customerObj = (customer && typeof customer === "object") ? customer : null;
-            const customerId = customerObj?.id || (typeof customer === "string" ? customer : null);
-            const meta = customerObj?.metadata || {};
-            return {
-              id: "stripe_" + t.id,
-              source: "stripe",
-              date: new Date(t.created * 1000).toISOString().split("T")[0],
-              description: t.description || t.type || "",
-              amount: Math.abs(t.net) / 100,
-              type: t.net > 0 ? "income" : "expense",
-              rawType: t.type,
-              fee: Math.abs(t.fee) / 100,
-              customer_id: customerId,
-              customer_email: customerObj?.email ? customerObj.email.toLowerCase().trim() : null,
-              referrer_id: meta.referrer_id || null,
-              referrer_name: meta.referrer_name || meta.referrer_id || null,
-            };
-          });
-
-        return new Response(JSON.stringify({ transactions: txns, count: txns.length }), { headers: CORS(origin) });
+        const result = await getStripeTransactions(env, url);
+        if (result.error) return err(result.error, origin);
+        return new Response(JSON.stringify({ transactions: result.transactions, count: result.transactions.length }), { headers: CORS(origin) });
       }
 
       // ── /referrals ─────────────────────────────────────────────
       // Devuelve transacciones Stripe agrupadas por referidor.
       // SIN aplicar tasa — la app calcula con tasa variable por socio.
       if (path === "/referrals") {
-        if (!env.STRIPE_KEY) return err("STRIPE_KEY no configurado", origin);
-
-        const stripeReq = new Request(new URL("/stripe" + url.search, url.origin), request);
-        const stripeRes = await fetch(stripeReq);
-        const { transactions = [] } = await stripeRes.json();
-
-        // Solo ingresos con referidor en metadata
-        const referred = transactions.filter(t => t.type === "income" && t.referrer_id);
-
-        const byReferrer = {};
-        for (const t of referred) {
-          const mk = t.date.slice(0, 7);
-          const key = t.referrer_id;
-          if (!byReferrer[key]) byReferrer[key] = {
-            id: key, name: t.referrer_name || key,
-            months: {}, totalRevenue: 0, transactions: [],
-          };
-          if (!byReferrer[key].months[mk]) byReferrer[key].months[mk] = { revenue: 0, txCount: 0 };
-          byReferrer[key].months[mk].revenue += t.amount;
-          byReferrer[key].months[mk].txCount++;
-          byReferrer[key].totalRevenue += t.amount;
-          byReferrer[key].transactions.push({ id: t.id, date: t.date, amount: t.amount, description: t.description, customer_email: t.customer_email || null });
-        }
-
-        const referrers = Object.values(byReferrer).map(r => ({
-          ...r,
-          months: Object.entries(r.months).sort(([a],[b]) => b.localeCompare(a)).map(([month, data]) => ({ month, ...data })),
-        })).sort((a, b) => b.totalRevenue - a.totalRevenue);
-
-        return new Response(JSON.stringify({
-          referrers,
-          totalReferredRevenue: referrers.reduce((s, r) => s + r.totalRevenue, 0),
-        }), { headers: CORS(origin) });
+        const result = await getStripeTransactions(env, url);
+        if (result.error) return err(result.error, origin);
+        return new Response(JSON.stringify(buildReferrals(result.transactions)), { headers: CORS(origin) });
       }
 
-      // ── /sync       // ── /sync ────────────────────────────────────────────────────
+      // ── /sync ────────────────────────────────────────────────────
       if (path === "/sync") {
         const results = { transactions: [], referrals: null, errors: [] };
 
         if (env.MERCURY_TOKEN) {
-          try {
-            const r = await fetch(new URL("/mercury" + url.search, url.origin));
-            const d = await r.json();
-            results.transactions.push(...(d.transactions || []));
-          } catch (e) { results.errors.push("mercury: " + e.message); }
+          const m = await getMercuryTransactions(env, url);
+          if (m.error) results.errors.push("mercury: " + m.error);
+          else results.transactions.push(...m.transactions);
         }
 
         if (env.STRIPE_KEY) {
-          try {
-            const r = await fetch(new URL("/stripe" + url.search, url.origin));
-            const d = await r.json();
-            results.transactions.push(...(d.transactions || []));
-          } catch (e) { results.errors.push("stripe: " + e.message); }
-
-          try {
-            const r = await fetch(new URL("/referrals" + url.search, url.origin));
-            results.referrals = await r.json();
-          } catch (e) { results.errors.push("referrals: " + e.message); }
+          const s = await getStripeTransactions(env, url);
+          if (s.error) results.errors.push("stripe: " + s.error);
+          else {
+            results.transactions.push(...s.transactions);
+            results.referrals = buildReferrals(s.transactions);
+          }
         }
 
         results.transactions.sort((a, b) => b.date.localeCompare(a.date));
