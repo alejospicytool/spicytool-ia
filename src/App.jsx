@@ -565,22 +565,39 @@ function ReferralDashboard({ txns, referrers, referredClients, payments, isAdmin
     setSyncing(false);
   }
 
-  // Calculate commissions using per-referrer rate from Supabase
+  // Comisiones ya pagadas al referidor (registro manual vía "marcar pagado")
   const paidCommissions = txns.filter(t => t.category === "Comisiones referidos" && t.referrer_id);
-  const referredIncome  = txns.filter(t => t.type === "income" && t.referrer_id);
 
   const stats = referrers.map(ref => {
     const rate = (ref.commission_rate || 20) / 100;
-    const inc  = referredIncome.filter(t => t.referrer_id === ref.id);
     const paid = paidCommissions.filter(t => t.referrer_id === ref.id);
-    const totalRevenue    = inc.reduce((s,t) => s + Number(t.amount), 0);
+    const totalPaid = paid.reduce((s,t) => s + Number(t.amount), 0);
+
+    // Clientes registrados con sus pagos de Stripe (tabla separada
+    // referred_client_payments, no la tabla financiera) — fuente real de los
+    // totales del referidor, ya que no depende de la metadata de Stripe.
+    const registeredClients = referredClients.filter(c => c.referrer_id === ref.id).map(c => {
+      const clientTxns = payments.filter(p => p.referred_client_id === c.id).map(p => ({ ...p, clientName: c.name }));
+      const total        = clientTxns.reduce((s,t) => s + Number(t.amount), 0);
+      const clientPaid   = clientTxns.filter(t => t.paid).reduce((s,t) => s + Number(t.amount), 0);
+      const totalPending = total - clientPaid;
+      return {
+        ...c,
+        transactions: clientTxns.slice().sort((a,b) => b.date.localeCompare(a.date)),
+        revenue: total,
+        total, totalPaid: clientPaid, totalPending,
+        commission: total * rate,
+      };
+    });
+
+    const allClientPayments = registeredClients.flatMap(c => c.transactions);
+    const totalRevenue    = allClientPayments.reduce((s,t) => s + Number(t.amount), 0);
     const totalCommission = totalRevenue * rate;
-    const totalPaid       = paid.reduce((s,t) => s + Number(t.amount), 0);
     const totalOwed       = Math.max(0, totalCommission - totalPaid);
 
-    // Per-month breakdown
+    // Per-month breakdown, a partir de los pagos de los clientes registrados
     const months = {};
-    inc.forEach(t => {
+    allClientPayments.forEach(t => {
       const mk = monthKey(t.date);
       if (!months[mk]) months[mk] = { revenue:0, commission:0, paid:0, transactions:[] };
       months[mk].revenue    += Number(t.amount);
@@ -593,36 +610,9 @@ function ReferralDashboard({ txns, referrers, referredClients, payments, isAdmin
       months[mk].paid += Number(t.amount);
     });
 
-    // Per-customer breakdown
-    const customerMap = {};
-    inc.forEach(t => {
-      const key = t.description || t.id;
-      if (!customerMap[key]) customerMap[key] = { name:key, revenue:0, commission:0, transactions:[] };
-      customerMap[key].revenue    += Number(t.amount);
-      customerMap[key].commission += Number(t.amount) * rate;
-      customerMap[key].transactions.push(t);
-    });
-    const customers = Object.values(customerMap).sort((a,b) => b.commission - a.commission);
-
-    // Clientes registrados manualmente, con sus pagos de Stripe (tabla separada
-    // referred_client_payments, no la tabla financiera)
-    const registeredClients = referredClients.filter(c => c.referrer_id === ref.id).map(c => {
-      const clientTxns = payments.filter(p => p.referred_client_id === c.id);
-      const total        = clientTxns.reduce((s,t) => s + Number(t.amount), 0);
-      const totalPaid    = clientTxns.filter(t => t.paid).reduce((s,t) => s + Number(t.amount), 0);
-      const totalPending = total - totalPaid;
-      return {
-        ...c,
-        transactions: clientTxns.slice().sort((a,b) => b.date.localeCompare(a.date)),
-        revenue: total,
-        total, totalPaid, totalPending,
-        commission: total * rate,
-      };
-    });
-
-    const curRevenue = inc.filter(t => monthKey(t.date) === curMK).reduce((s,t) => s + Number(t.amount), 0);
-    return { ...ref, totalRevenue, totalCommission, totalPaid, totalOwed, months, customers, registeredClients,
-      curCommission: curRevenue * rate, activeBrokers: new Set(inc.map(t => t.description)).size };
+    const curRevenue = allClientPayments.filter(t => monthKey(t.date) === curMK).reduce((s,t) => s + Number(t.amount), 0);
+    return { ...ref, totalRevenue, totalCommission, totalPaid, totalOwed, months, registeredClients,
+      curCommission: curRevenue * rate, activeBrokers: registeredClients.length };
   }).sort((a,b) => b.totalOwed - a.totalOwed);
 
   const totalOwedNow = stats.reduce((s,r) => s + r.curCommission, 0);
@@ -808,7 +798,7 @@ function ReferralDashboard({ txns, referrers, referredClients, payments, isAdmin
                       {m.transactions?.map(t=>(
                         <div key={t.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"7px 12px 7px 24px", borderBottom:"1px solid #F3F3F3", fontSize:12 }}>
                           <div style={{ width:6, height:6, borderRadius:"50%", background:"#1D9E75", flexShrink:0 }}/>
-                          <div style={{ flex:1, color:"#555" }}>{t.description||"—"}</div>
+                          <div style={{ flex:1, color:"#555" }}>{t.description||"—"}{t.clientName&&<span style={{ color:"#aaa" }}> ({t.clientName})</span>}</div>
                           <div style={{ color:"#888" }}>{t.date}</div>
                           <div style={{ fontWeight:600, color:"#111" }}>{fmtDec(Number(t.amount))}</div>
                           <div style={{ color:"#aaa", minWidth:70, textAlign:"right" }}>com: {fmtDec(Number(t.amount)*(ref.commission_rate||20)/100)}</div>
@@ -817,27 +807,6 @@ function ReferralDashboard({ txns, referrers, referredClients, payments, isAdmin
                     </div>
                   );
                 })}
-
-                {/* Por cliente */}
-                {ref.customers?.length > 0 && (
-                  <>
-                    <div style={{ fontSize:12, fontWeight:600, color:"#555", margin:"20px 0 10px", textTransform:"uppercase", letterSpacing:0.5 }}>Por cliente</div>
-                    {ref.customers.map(c=>(
-                      <div key={c.name} style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 12px", background:"#F9F9F9", borderRadius:8, marginBottom:6 }}>
-                        <div style={{ flex:1, fontSize:13, fontWeight:500, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{c.name}</div>
-                        <div style={{ fontSize:12, color:"#888" }}>{c.transactions.length} pago{c.transactions.length!==1?"s":""}</div>
-                        <div style={{ fontSize:12, color:"#555" }}>Rev {fmtDec(c.revenue)}</div>
-                        <div style={{ fontSize:13, fontWeight:700 }}>Com {fmtDec(c.commission)}</div>
-                        <div style={{ fontSize:11, padding:"3px 8px", borderRadius:5,
-                          background: c.commission <= ref.totalPaid ? "#EDFAF3" : "#FEF3C7",
-                          color: c.commission <= ref.totalPaid ? "#16A34A" : "#92400E",
-                          fontWeight:600 }}>
-                          {c.commission <= ref.totalPaid ? "cubierto" : `falta ${fmtDec(c.commission)}`}
-                        </div>
-                      </div>
-                    ))}
-                  </>
-                )}
 
                 {/* Clientes referidos (registrados a mano, matcheados por email con Stripe) */}
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", margin:"20px 0 10px" }}>
