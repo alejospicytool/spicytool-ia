@@ -955,7 +955,8 @@ function parseCSVRows(text, defaultAccountId) {
 
 // ── History View ───────────────────────────────────────────────────────────
 function HistoryView({ txns, accounts, catsIncome, catsExpense, filterType, setFilterType,
-  filterAcc, setFilterAcc, isAdmin, updateCategory, deleteTxn, deleteMany, sourceBadge }) {
+  filterAcc, setFilterAcc, isAdmin, updateCategory, deleteTxn, deleteMany, sourceBadge,
+  invoiceBadge, uploadInvoice, viewInvoice }) {
 
   const [selected,    setSelected]    = useState({});
   const [deleting,    setDeleting]    = useState(false);
@@ -963,7 +964,21 @@ function HistoryView({ txns, accounts, catsIncome, catsExpense, filterType, setF
   const [filterMonth, setFilterMonth] = useState("all");
   const [filterCat,   setFilterCat]   = useState("all");
   const [page,        setPage]        = useState(1);
+  const [uploadingId, setUploadingId] = useState(null);
+  const invoiceInputRef = useRef(null);
+  const uploadTargetId  = useRef(null);
   const PAGE_SIZE = 25;
+
+  async function handleInvoiceFile(e) {
+    const file = e.target.files[0];
+    const txnId = uploadTargetId.current;
+    e.target.value = "";
+    if (!file || !txnId) return;
+    if (file.type !== "application/pdf") { alert("Solo se permiten archivos PDF."); return; }
+    setUploadingId(txnId);
+    await uploadInvoice(txnId, file);
+    setUploadingId(null);
+  }
 
   const allCats = [...catsIncome, ...catsExpense];
   const availableMonths = [...new Set(txns.map(t => monthKey(t.date)))].sort((a,b) => b.localeCompare(a));
@@ -1056,7 +1071,7 @@ function HistoryView({ txns, accounts, catsIncome, catsExpense, filterType, setF
               )}
               <div style={{ width:9,height:9,borderRadius:"50%",flexShrink:0,background:t.type==="income"?"#1D9E75":ST_RED }}/>
               <div style={{ flex:1,minWidth:0 }}>
-                <div style={{ fontSize:13,fontWeight:600,color:"#111",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{t.description||t.category}{sourceBadge(t)}</div>
+                <div style={{ fontSize:13,fontWeight:600,color:"#111",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{t.description||t.category}{sourceBadge(t)}{invoiceBadge(t)}</div>
                 <div style={{ fontSize:11,color:"#aaa",marginTop:3,display:"flex",alignItems:"center",gap:6 }}>
                   {isAdmin ? (
                     <select value={t.category} onChange={e=>updateCategory(t.id,e.target.value)}
@@ -1069,6 +1084,13 @@ function HistoryView({ txns, accounts, catsIncome, catsExpense, filterType, setF
                 </div>
               </div>
               <div style={{ fontSize:14,fontWeight:700,color:t.type==="income"?"#16A34A":ST_RED,flexShrink:0 }}>{t.type==="income"?"+":"−"}{fmt(t.amount)}</div>
+              {t.invoice_path && (
+                <button onClick={()=>viewInvoice(t.invoice_path)} title="Ver / descargar factura" style={{ background:"none",border:"none",cursor:"pointer",fontSize:15,color:"#888",padding:"0 4px",lineHeight:1,flexShrink:0 }}>⬇</button>
+              )}
+              {isAdmin && (
+                <button onClick={()=>{ uploadTargetId.current=t.id; invoiceInputRef.current.click(); }} disabled={uploadingId===t.id}
+                  title={t.invoice_path?"Reemplazar factura":"Subir factura"} style={{ background:"none",border:"none",cursor:"pointer",fontSize:14,color:"#ccc",padding:"0 4px",lineHeight:1,flexShrink:0 }}>{uploadingId===t.id?"…":"📎"}</button>
+              )}
               {isAdmin && (
                 <button onClick={()=>deleteTxn(t.id)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:18,color:"#ccc",padding:"0 4px",lineHeight:1 }}>×</button>
               )}
@@ -1076,6 +1098,9 @@ function HistoryView({ txns, accounts, catsIncome, catsExpense, filterType, setF
           );
         })}
       </div>
+      {isAdmin && (
+        <input type="file" accept="application/pdf" ref={invoiceInputRef} style={{ display:"none" }} onChange={handleInvoiceFile}/>
+      )}
 
       {/* Pagination */}
       {totalPages > 1 && (
@@ -1608,6 +1633,20 @@ export default function SpicyFinanzas() {
     setTxns(prev=>prev.filter(t=>t.id!==id));
   }
 
+  async function uploadInvoice(txnId, file) {
+    const path = `${txnId}-${Date.now()}.pdf`;
+    const { error: upErr } = await sb.storage.from("invoices").upload(path, file, { upsert: true, contentType: "application/pdf" });
+    if (upErr) { alert("Error subiendo la factura: " + upErr.message); return; }
+    await sb.from("transactions").update({ invoice_path: path }).eq("id", txnId);
+    setTxns(prev => prev.map(t => t.id === txnId ? { ...t, invoice_path: path } : t));
+  }
+
+  async function viewInvoice(path) {
+    const { data, error } = await sb.storage.from("invoices").createSignedUrl(path, 60);
+    if (error) { alert("Error obteniendo la factura: " + error.message); return; }
+    window.open(data.signedUrl, "_blank");
+  }
+
   async function handleSync() {
     if (!WORKER_URL){setSyncError("Configurá WORKER_URL.");return;}
     setSyncing(true); setSyncError("");
@@ -1689,6 +1728,11 @@ export default function SpicyFinanzas() {
     if(t.source)return <span style={{ fontSize:10,padding:"1px 5px",borderRadius:4,marginLeft:5,background:t.source==="mercury"?"var(--color-background-info)":"var(--color-background-success)",color:t.source==="mercury"?"var(--color-text-info)":"var(--color-text-success)" }}>{t.source}</span>;
     if(t.referrer_id)return <span style={{ fontSize:10,padding:"1px 5px",borderRadius:4,marginLeft:5,background:"var(--color-background-warning)",color:"var(--color-text-warning)" }}>ref</span>;
     return null;
+  };
+
+  const invoiceBadge=(t)=>{
+    if(!t.invoice_path)return null;
+    return <span style={{ fontSize:10,padding:"1px 5px",borderRadius:4,marginLeft:5,background:"var(--color-background-success)",color:"var(--color-text-success)" }}>📎 factura</span>;
   };
 
   if (!authReady) return <div style={{ display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"#F7F7F8",fontSize:14,color:"#888" }}>Cargando...</div>;
@@ -1941,7 +1985,8 @@ export default function SpicyFinanzas() {
           filterAcc={filterAcc} setFilterAcc={setFilterAcc}
           isAdmin={isAdmin} updateCategory={updateCategory} deleteTxn={deleteTxn}
           deleteMany={async (ids)=>{ await Promise.all(ids.map(id=>sb.from("transactions").delete().eq("id",id))); setTxns(prev=>prev.filter(t=>!ids.includes(t.id))); }}
-          sourceBadge={sourceBadge}
+          sourceBadge={sourceBadge} invoiceBadge={invoiceBadge}
+          uploadInvoice={uploadInvoice} viewInvoice={viewInvoice}
         />
       )}
 
