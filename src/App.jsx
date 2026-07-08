@@ -462,16 +462,38 @@ function CategoriesPanel({ catsIncome, catsExpense, isAdmin, onRefresh }) {
 }
 
 // ── Referral Dashboard ─────────────────────────────────────────────────────
-function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
+function ReferralDashboard({ txns, referrers, referredClients, isAdmin, onRefresh }) {
   const [expanded,   setExpanded]   = useState(null);
   const [showAdd,    setShowAdd]    = useState(false);
   const [newRef,     setNewRef]     = useState({id:"",name:"",email:"",commission_rate:20});
-  const [stripeData, setStripeData] = useState(null);
   const [syncing,    setSyncing]    = useState(false);
   const [syncMsg,    setSyncMsg]    = useState("");
   const [addTxnFor,  setAddTxnFor]  = useState(null); // referrer id for manual txn form
   const [txnForm,    setTxnForm]    = useState({amount:"", description:"", date:new Date().toISOString().split("T")[0]});
   const [savingTxn,  setSavingTxn]  = useState(false);
+  const [addClientFor, setAddClientFor] = useState(null); // referrer id for new client form
+  const [clientForm,   setClientForm]   = useState({name:"", email:""});
+  const [savingClient, setSavingClient] = useState(false);
+
+  async function saveClient(ref) {
+    if (!clientForm.name.trim() || !clientForm.email.trim()) return;
+    setSavingClient(true);
+    await sb.from("referred_clients").insert({
+      id: "client_" + Date.now(),
+      referrer_id: ref.id,
+      name: clientForm.name.trim(),
+      email: clientForm.email.trim().toLowerCase(),
+    });
+    setClientForm({name:"", email:""});
+    setAddClientFor(null);
+    setSavingClient(false);
+    onRefresh();
+  }
+
+  async function deleteClient(id) {
+    await sb.from("referred_clients").delete().eq("id", id);
+    onRefresh();
+  }
 
   async function saveManualTxn(ref) {
     if (!txnForm.amount || isNaN(Number(txnForm.amount)) || Number(txnForm.amount) <= 0) return;
@@ -495,36 +517,30 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
 
   const now=new Date(), curMK=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
 
-  // Pull referral data from Stripe via Worker
+  // Pull income from Stripe via Worker. Trae TODOS los ingresos (no solo los que
+  // ya tienen referrer_id en la metadata de Stripe), para que el matching por
+  // email contra clientes registrados funcione aunque esa metadata no esté cargada.
   async function syncFromStripe() {
     if (!WORKER_URL) { setSyncMsg("Configurá WORKER_URL primero."); return; }
     setSyncing(true); setSyncMsg("");
     try {
-      const res = await fetch(WORKER_URL + "/referrals");
+      const res = await fetch(WORKER_URL + "/stripe");
       if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
-      setStripeData(data);
-      // Import new transactions into Supabase
-      if (data.referrers?.length) {
-        const allTxns = data.referrers.flatMap(r =>
-          r.transactions.map(t => ({
-            ...t,
-            type: "income",
-            category: "SaaS MRR",
-            account_id: "mercury",
-            referrer_id: r.id,
-            referrer_name: r.name,
-          }))
-        );
-        const existingIds = new Set(txns.map(t => t.id));
-        const newTxns = allTxns.filter(t => !existingIds.has(t.id));
-        if (newTxns.length) {
-          await sb.from("transactions").insert(newTxns);
-          onRefresh();
-          setSyncMsg(`${newTxns.length} transacciones importadas desde Stripe.`);
-        } else {
-          setSyncMsg("Todo al día — sin transacciones nuevas.");
-        }
+      const incoming = (data.transactions || []).filter(t => t.type === "income");
+      const existingIds = new Set(txns.map(t => t.id));
+      const newTxns = incoming.filter(t => !existingIds.has(t.id)).map(t => ({
+        id: t.id, type: t.type, category: "SaaS MRR", amount: t.amount,
+        description: t.description, date: t.date, account_id: "mercury",
+        source: t.source, referrer_id: t.referrer_id || null, referrer_name: t.referrer_name || null,
+        customer_email: t.customer_email || null,
+      }));
+      if (newTxns.length) {
+        await sb.from("transactions").insert(newTxns);
+        onRefresh();
+        setSyncMsg(`${newTxns.length} transacciones importadas desde Stripe.`);
+      } else {
+        setSyncMsg("Todo al día — sin transacciones nuevas.");
       }
     } catch(e) { setSyncMsg("Error: " + e.message); }
     setSyncing(false);
@@ -533,6 +549,9 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
   // Calculate commissions using per-referrer rate from Supabase
   const paidCommissions = txns.filter(t => t.category === "Comisiones referidos" && t.referrer_id);
   const referredIncome  = txns.filter(t => t.type === "income" && t.referrer_id);
+  // Ingresos con email de customer, para matchear clientes registrados sin depender
+  // de que el customer tenga referrer_id cargado en la metadata de Stripe
+  const incomeByEmail = txns.filter(t => t.type === "income" && t.customer_email);
 
   const stats = referrers.map(ref => {
     const rate = (ref.commission_rate || 20) / 100;
@@ -569,8 +588,18 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
     });
     const customers = Object.values(customerMap).sort((a,b) => b.commission - a.commission);
 
+    // Clientes registrados manualmente, matcheados por email contra las transacciones de Stripe
+    const registeredClients = referredClients.filter(c => c.referrer_id === ref.id).map(c => {
+      const clientTxns = incomeByEmail.filter(t => (t.customer_email||"").toLowerCase() === c.email.toLowerCase());
+      return {
+        ...c,
+        transactions: clientTxns.sort((a,b) => b.date.localeCompare(a.date)),
+        revenue: clientTxns.reduce((s,t) => s + Number(t.amount), 0),
+      };
+    });
+
     const curRevenue = inc.filter(t => monthKey(t.date) === curMK).reduce((s,t) => s + Number(t.amount), 0);
-    return { ...ref, totalRevenue, totalCommission, totalPaid, totalOwed, months, customers,
+    return { ...ref, totalRevenue, totalCommission, totalPaid, totalOwed, months, customers, registeredClients,
       curCommission: curRevenue * rate, activeBrokers: new Set(inc.map(t => t.description)).size };
   }).sort((a,b) => b.totalOwed - a.totalOwed);
 
@@ -787,6 +816,72 @@ function ReferralDashboard({ txns, referrers, isAdmin, onRefresh }) {
                     ))}
                   </>
                 )}
+
+                {/* Clientes referidos (registrados a mano, matcheados por email con Stripe) */}
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", margin:"20px 0 10px" }}>
+                  <div style={{ fontSize:12, fontWeight:600, color:"#555", textTransform:"uppercase", letterSpacing:0.5 }}>Clientes referidos</div>
+                  {isAdmin && (
+                    <button onClick={e=>{e.stopPropagation(); setAddClientFor(addClientFor===ref.id?null:ref.id); setClientForm({name:"",email:""});}}
+                      style={{ fontSize:12, padding:"4px 12px", borderRadius:7, cursor:"pointer", background:addClientFor===ref.id?ST_RED_BG:"white", color:addClientFor===ref.id?ST_RED:"#555", border:`1px solid ${addClientFor===ref.id?ST_RED:"#E0E0E0"}`, fontWeight:600 }}>
+                      {addClientFor===ref.id ? "Cancelar" : "+ Agregar cliente"}
+                    </button>
+                  )}
+                </div>
+
+                {isAdmin && addClientFor===ref.id && (
+                  <div style={{ background:"#F9F9F9", border:"1px solid #E8E8E8", borderRadius:10, padding:"14px 16px", marginBottom:16 }}>
+                    <div style={{ fontSize:13, fontWeight:600, color:"#111", marginBottom:12 }}>Nuevo cliente referido por {ref.name}</div>
+                    <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+                      <div style={{ flex:1, minWidth:140 }}>
+                        <div style={{ fontSize:11, fontWeight:600, color:"#555", marginBottom:5, textTransform:"uppercase", letterSpacing:0.5 }}>Nombre</div>
+                        <input className="spicy-input" value={clientForm.name} placeholder="Nombre del cliente"
+                          onChange={e=>setClientForm(f=>({...f,name:e.target.value}))} style={{ fontSize:13 }}/>
+                      </div>
+                      <div style={{ flex:1, minWidth:160 }}>
+                        <div style={{ fontSize:11, fontWeight:600, color:"#555", marginBottom:5, textTransform:"uppercase", letterSpacing:0.5 }}>Email (el que usa en Stripe)</div>
+                        <input className="spicy-input" type="email" value={clientForm.email} placeholder="cliente@empresa.com"
+                          onChange={e=>setClientForm(f=>({...f,email:e.target.value}))} style={{ fontSize:13 }}/>
+                      </div>
+                      <div style={{ display:"flex", alignItems:"flex-end" }}>
+                        <button onClick={()=>saveClient(ref)} disabled={!clientForm.name||!clientForm.email||savingClient} className="spicy-btn-primary"
+                          style={{ padding:"9px 18px", fontSize:13, whiteSpace:"nowrap" }}>
+                          {savingClient ? "Guardando…" : "Guardar"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {ref.registeredClients?.length === 0 && !addClientFor && (
+                  <div style={{ fontSize:13, color:"#bbb", marginBottom:8 }}>Sin clientes registrados todavía.</div>
+                )}
+
+                {ref.registeredClients?.map(c=>(
+                  <div key={c.id} style={{ background:"#F9F9F9", border:"1px solid #F0F0F0", borderRadius:8, marginBottom:8, overflow:"hidden" }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 12px" }}>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontSize:13, fontWeight:600, color:"#111" }}>{c.name}</div>
+                        <div style={{ fontSize:11, color:"#aaa" }}>{c.email}</div>
+                      </div>
+                      <div style={{ fontSize:12, color:"#888" }}>{c.transactions.length} pago{c.transactions.length!==1?"s":""}</div>
+                      <div style={{ fontSize:13, fontWeight:700 }}>{fmtDec(c.revenue)}</div>
+                      {isAdmin && (
+                        <button onClick={()=>deleteClient(c.id)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:16,color:"#ccc",padding:"0 2px",lineHeight:1 }}>×</button>
+                      )}
+                    </div>
+                    {c.transactions.map(t=>(
+                      <div key={t.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"7px 12px 7px 24px", borderTop:"1px solid #F0F0F0", fontSize:12 }}>
+                        <div style={{ flex:1, color:"#555" }}>{t.description||"—"}</div>
+                        <div style={{ color:"#888" }}>{t.date}</div>
+                        <div style={{ fontWeight:600, color:"#111" }}>{fmtDec(Number(t.amount))}</div>
+                        <span className="spicy-badge-green">pagada ✓</span>
+                      </div>
+                    ))}
+                    {c.transactions.length === 0 && (
+                      <div style={{ padding:"7px 12px 7px 24px", fontSize:12, color:"#bbb", borderTop:"1px solid #F0F0F0" }}>Sin pagos todavía.</div>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -1567,6 +1662,7 @@ export default function SpicyFinanzas() {
   const [txns,      setTxns]      = useState([]);
   const [accounts,  setAccounts]  = useState([]);
   const [referrers, setReferrers] = useState([]);
+  const [referredClients, setReferredClients] = useState([]);
   const [catsIncome,  setCatsIncome]  = useState([]);
   const [catsExpense, setCatsExpense] = useState([]);
   const [dataLoaded, setDataLoaded]   = useState(false);
@@ -1598,17 +1694,19 @@ export default function SpicyFinanzas() {
 
   async function loadAll() {
     setDataLoaded(false);
-    const [roleRes,txRes,accRes,refRes,catRes]=await Promise.all([
+    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes]=await Promise.all([
       sb.from("user_roles").select("role").eq("user_id",session.user.id).single(),
       sb.from("transactions").select("*").order("date",{ascending:false}),
       sb.from("accounts").select("*").order("created_at"),
       sb.from("referrers").select("*").order("name"),
       sb.from("categories").select("*").order("position"),
+      sb.from("referred_clients").select("*").order("name"),
     ]);
     setRole(roleRes.data?.role||"reader");
     setTxns(txRes.data||[]);
     setAccounts(accRes.data||[]);
     setReferrers(refRes.data||[]);
+    setReferredClients(refClientsRes.data||[]);
     setCatsIncome((catRes.data||[]).filter(c=>c.type==="income"));
     setCatsExpense((catRes.data||[]).filter(c=>c.type==="expense"));
     setDataLoaded(true);
@@ -1655,7 +1753,12 @@ export default function SpicyFinanzas() {
       const data=await res.json();
       if(data.transactions?.length){
         const existingIds=new Set(txns.map(t=>t.id));
-        const newTxns=data.transactions.filter(t=>!existingIds.has(t.id));
+        const newTxns=data.transactions.filter(t=>!existingIds.has(t.id)).map(t=>({
+          id:t.id, type:t.type, category:t.category||(t.type==="income"?"SaaS MRR":"Otro gasto"),
+          amount:t.amount, description:t.description, date:t.date, account_id:"mercury",
+          source:t.source, referrer_id:t.referrer_id||null, referrer_name:t.referrer_name||null,
+          customer_email:t.customer_email||null,
+        }));
         if(newTxns.length)await sb.from("transactions").insert(newTxns);
       }
       if(data.errors?.length)setSyncError("Advertencias: "+data.errors.join(", "));
@@ -1937,7 +2040,7 @@ export default function SpicyFinanzas() {
       )}
 
       {view==="accounts"&&<AccountsPanel accounts={accounts} txns={txns} isAdmin={isAdmin} onRefresh={loadAll}/>}
-      {view==="referrals"&&<ReferralDashboard txns={txns} referrers={referrers} isAdmin={isAdmin} onRefresh={loadAll}/>}
+      {view==="referrals"&&<ReferralDashboard txns={txns} referrers={referrers} referredClients={referredClients} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="runway"&&<RunwayView txns={txns} accounts={accounts}/>}
       {view==="services"&&<ServicesView/>}
       {view==="categories"&&<CategoriesPanel catsIncome={catsIncome} catsExpense={catsExpense} isAdmin={isAdmin} onRefresh={loadAll}/>}
