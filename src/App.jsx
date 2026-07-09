@@ -619,14 +619,18 @@ function ReferralDashboard({ txns, referrers, referredClients, payments, isAdmin
   const totalOwedAll = stats.reduce((s,r) => s + r.totalOwed, 0);
   const totalPaidAll = stats.reduce((s,r) => s + r.totalPaid, 0);
 
-  async function markPaid(ref, mk, amount) {
+  async function markPaid(ref, mk, amount, paymentIds) {
     await sb.from("transactions").insert({
       id: "pay_"+ref.id+"_"+mk+"_"+Date.now(), type:"expense",
       category:"Comisiones referidos", amount: Math.round(amount*100)/100,
       description: `Comisión ${ref.name} — ${monthLabel(mk)}`,
-      date: new Date().toISOString().split("T")[0],
+      date: mk+"-01", // fecha dentro del mes que se marca, no la de hoy —
+      // si no, el pago se contaba en el mes de hoy en vez del mes elegido
       account_id:"mercury", referrer_id:ref.id, referrer_name:ref.name, paid:true,
     });
+    if (paymentIds?.length) {
+      await sb.from("referred_client_payments").update({ paid: true }).in("id", paymentIds);
+    }
     onRefresh();
   }
 
@@ -780,7 +784,10 @@ function ReferralDashboard({ txns, referrers, referredClients, payments, isAdmin
 
                 {Object.keys(ref.months).length===0 && !addTxnFor && <div style={{ fontSize:13, color:"#bbb", marginBottom:16 }}>Sin transacciones. Sincronizá desde Stripe o agregá manualmente.</div>}
                 {Object.entries(ref.months).sort(([a],[b])=>b.localeCompare(a)).map(([mk,m])=>{
-                  const owed = Math.max(0, m.commission - m.paid);
+                  const rate = (ref.commission_rate || 20) / 100;
+                  const pendingTxns = (m.transactions||[]).filter(t => !t.paid);
+                  const pendingAmount = pendingTxns.reduce((s,t) => s + Number(t.amount), 0) * rate;
+                  const isMonthPaid = pendingTxns.length === 0;
                   return (
                     <div key={mk} style={{ marginBottom:8 }}>
                       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 12px", background:"#F9F9F9", borderRadius:8 }}>
@@ -788,9 +795,9 @@ function ReferralDashboard({ txns, referrers, referredClients, payments, isAdmin
                         <div style={{ fontSize:12, color:"#888" }}>Rev {fmtDec(m.revenue)}</div>
                         <div style={{ fontSize:13, fontWeight:700 }}>{fmtDec(m.commission)}</div>
                         <div>
-                          {owed < 0.01
+                          {isMonthPaid
                             ? <span className="spicy-badge-green">pagado ✓</span>
-                            : isAdmin && <button onClick={()=>markPaid(ref,mk,owed)} style={{ fontSize:11, padding:"4px 12px", borderRadius:6, cursor:"pointer", background:"#FEF3C7", color:"#92400E", border:"1px solid #FCD34D", fontWeight:600 }}>marcar pagado {fmtDec(owed)}</button>
+                            : isAdmin && <button onClick={()=>markPaid(ref,mk,pendingAmount,pendingTxns.map(t=>t.id))} style={{ fontSize:11, padding:"4px 12px", borderRadius:6, cursor:"pointer", background:"#FEF3C7", color:"#92400E", border:"1px solid #FCD34D", fontWeight:600 }}>marcar pagado {fmtDec(pendingAmount)}</button>
                           }
                         </div>
                       </div>
@@ -802,6 +809,9 @@ function ReferralDashboard({ txns, referrers, referredClients, payments, isAdmin
                           <div style={{ color:"#888" }}>{t.date}</div>
                           <div style={{ fontWeight:600, color:"#111" }}>{fmtDec(Number(t.amount))}</div>
                           <div style={{ color:"#aaa", minWidth:70, textAlign:"right" }}>com: {fmtDec(Number(t.amount)*(ref.commission_rate||20)/100)}</div>
+                          {t.paid
+                            ? <span className="spicy-badge-green">pagada ✓</span>
+                            : <span style={{ fontSize:10,padding:"2px 7px",borderRadius:5,fontWeight:600,background:"#FEF3C7",color:"#92400E" }}>pendiente</span>}
                         </div>
                       ))}
                     </div>
