@@ -116,12 +116,12 @@ function BrandStyles() {
 
 // ── Nav icon map ───────────────────────────────────────────────────────────
 const NAV_ICONS = {
-  dashboard:"▦", accounts:"🏦", add:"+", history:"☰", runway:"📈",
+  dashboard:"▦", accounts:"🏦", add:"+", history:"☰", runway:"📈", pnl:"📊",
   referrals:"🤝",
   services:"⚡", categories:"⊞"
 };
 const NAV_LABELS = {
-  dashboard:"Resumen", accounts:"Cuentas", add:"Registrar", history:"Historial", runway:"Runway",
+  dashboard:"Resumen", accounts:"Cuentas", add:"Registrar", history:"Historial", runway:"Runway", pnl:"P&L",
   referrals:"Referidos",
   services:"Servicios", categories:"Categorías"
 };
@@ -129,7 +129,7 @@ const NAV_LABELS = {
 const NAV_SECTIONS = [
   {
     label: "Finanzas",
-    views: ["dashboard","accounts","add","history","runway"],
+    views: ["dashboard","accounts","add","history","runway","pnl"],
     adminOnly: false,
   },
   {
@@ -1242,6 +1242,116 @@ function HistoryView({ txns, accounts, catsIncome, catsExpense, filterType, setF
 }
 
 // ── Runway Projection ─────────────────────────────────────────────────────
+function PnLView({ txns }) {
+  const ST_ORANGE = "#FF6B35";
+  const now = new Date();
+
+  // Solo Mercury, sin movimientos entre cuentas — consistente con el resto del back office
+  const mercuryTxns = txns.filter(t => t.account_id === "mercury" && t.category !== MOVIMIENTO_CUENTA);
+
+  // Últimos 6 meses como columnas
+  const months = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+    return { key: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`, label: MONTH_LABELS[d.getMonth()], year: d.getFullYear() };
+  });
+
+  // Suma de un conjunto de categorías (gasto) para un mes
+  const sumCats = (mk, cats) => mercuryTxns
+    .filter(t => t.type === "expense" && cats.includes(t.category) && monthKey(t.date) === mk)
+    .reduce((s, t) => s + Number(t.amount), 0);
+
+  // Suma de ingresos de una categoría para un mes
+  const sumIncome = (mk, cat) => mercuryTxns
+    .filter(t => t.type === "income" && t.category === cat && monthKey(t.date) === mk)
+    .reduce((s, t) => s + Number(t.amount), 0);
+
+  // Definición de filas de gasto
+  const expenseRows = [
+    { label: "Personnel expenses",  cats: ["Salarios"] },
+    { label: "Technical & platform", cats: ["SaaS Tools", "Infraestructura"] },
+    { label: "Comercial",           cats: ["Marketing / Ads"] },
+    { label: "Comisiones",          cats: ["Comisiones referidos", "Comisiones"] },
+    { label: "Créditos",            cats: ["Créditos"] },
+    { label: "Others",              cats: ["Legal / Admin", "Viajes", "Otro gasto"] },
+  ];
+
+  // Cálculo por mes
+  const cols = months.map(m => {
+    const revenue = sumIncome(m.key, "SaaS MRR");
+    const expenses = expenseRows.map(r => sumCats(m.key, r.cats));
+    const totalExpenses = expenses.reduce((s, v) => s + v, 0);
+    const ebitda = revenue - totalExpenses;
+    return { ...m, revenue, expenses, totalExpenses, ebitda };
+  });
+
+  const cell = { padding: "10px 14px", textAlign: "right", fontSize: 13, borderBottom: "1px solid #F0F0F0", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" };
+  const labelCell = { padding: "10px 16px", textAlign: "left", fontSize: 13, borderBottom: "1px solid #F0F0F0", color: "#333", position: "sticky", left: 0, background: "white" };
+  const headCell = { padding: "12px 14px", textAlign: "right", fontSize: 12, fontWeight: 700, color: "white", whiteSpace: "nowrap" };
+
+  return (
+    <>
+      <div style={{ fontSize:20,fontWeight:700,color:"#111",marginBottom:6 }}>P&amp;L mensual</div>
+      <div style={{ fontSize:13,color:"#888",marginBottom:20 }}>
+        Últimos 6 meses · calculado desde transacciones (solo Mercury, sin movimientos entre cuentas)
+      </div>
+
+      <div style={{ background:"white",borderRadius:12,border:"1px solid #EBEBEB",overflow:"hidden" }}>
+        <div style={{ overflowX:"auto" }}>
+          <table style={{ borderCollapse:"collapse",width:"100%",minWidth:640 }}>
+            <thead>
+              <tr style={{ background:ST_ORANGE }}>
+                <th style={{ ...headCell,textAlign:"left",position:"sticky",left:0,background:ST_ORANGE }}>Concepto</th>
+                {cols.map(c => (
+                  <th key={c.key} style={headCell}>{c.label} {String(c.year).slice(2)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {/* Recurring revenue */}
+              <tr style={{ background:"#FFF7F3" }}>
+                <td style={{ ...labelCell,fontWeight:700,color:"#111",background:"#FFF7F3" }}>Recurring revenue</td>
+                {cols.map(c => <td key={c.key} style={{ ...cell,fontWeight:700,color:"#0F6E56" }}>{fmt(c.revenue)}</td>)}
+              </tr>
+
+              {/* Gastos */}
+              {expenseRows.map((r, ri) => (
+                <tr key={r.label}>
+                  <td style={labelCell}>{r.label}</td>
+                  {cols.map(c => (
+                    <td key={c.key} style={{ ...cell,color:c.expenses[ri]?"#993C1D":"#BBB" }}>
+                      {c.expenses[ri] ? "-"+fmt(c.expenses[ri]) : "—"}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+
+              {/* Total expenses */}
+              <tr style={{ background:"#FAFAFA" }}>
+                <td style={{ ...labelCell,fontWeight:700,color:"#111",background:"#FAFAFA" }}>Total expenses</td>
+                {cols.map(c => <td key={c.key} style={{ ...cell,fontWeight:700,color:"#993C1D" }}>-{fmt(c.totalExpenses)}</td>)}
+              </tr>
+
+              {/* EBITDA */}
+              <tr style={{ background:ST_ORANGE+"14",borderTop:`2px solid ${ST_ORANGE}` }}>
+                <td style={{ ...labelCell,fontWeight:800,color:"#111",background:"transparent",borderBottom:"none" }}>EBITDA</td>
+                {cols.map(c => (
+                  <td key={c.key} style={{ ...cell,fontWeight:800,borderBottom:"none",color:c.ebitda>=0?"#0F6E56":ST_RED }}>
+                    {c.ebitda<0?"-"+fmt(Math.abs(c.ebitda)):fmt(c.ebitda)}
+                  </td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style={{ fontSize:11,color:"#AAA",marginTop:12 }}>
+        Recurring revenue = SaaS MRR · Technical &amp; platform = SaaS Tools + Infraestructura · Comisiones = Comisiones referidos + Comisiones · Others = Legal / Admin + Viajes + Otro gasto · EBITDA = Recurring revenue − Total expenses
+      </div>
+    </>
+  );
+}
+
 function RunwayView({ txns, accounts }) {
   const now = new Date();
 
@@ -2072,6 +2182,7 @@ export default function SpicyFinanzas() {
       {view==="accounts"&&<AccountsPanel accounts={accounts} txns={txns} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="referrals"&&<ReferralDashboard txns={txns} referrers={referrers} referredClients={referredClients} payments={referredClientPayments} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="runway"&&<RunwayView txns={txns} accounts={accounts}/>}
+      {view==="pnl"&&<PnLView txns={txns}/>}
       {view==="services"&&<ServicesView/>}
       {view==="categories"&&<CategoriesPanel catsIncome={catsIncome} catsExpense={catsExpense} isAdmin={isAdmin} onRefresh={loadAll}/>}
 
