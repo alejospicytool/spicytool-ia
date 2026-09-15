@@ -118,12 +118,14 @@ function BrandStyles() {
 const NAV_ICONS = {
   dashboard:"▦", accounts:"🏦", add:"+", history:"☰", runway:"📈", pnl:"📊",
   referrals:"🤝",
-  services:"⚡", categories:"⊞"
+  services:"⚡", categories:"⊞",
+  tickets:"🎫"
 };
 const NAV_LABELS = {
   dashboard:"Resumen", accounts:"Cuentas", add:"Registrar", history:"Historial", runway:"Runway", pnl:"P&L",
   referrals:"Referidos",
-  services:"Servicios", categories:"Categorías"
+  services:"Servicios", categories:"Categorías",
+  tickets:"Tickets"
 };
 
 const NAV_SECTIONS = [
@@ -139,6 +141,11 @@ const NAV_SECTIONS = [
     badge: { referrals: true },
   },
   {
+    label: "Operaciones",
+    views: ["tickets"],
+    adminOnly: false,
+  },
+  {
     label: "Dashboard Producto",
     views: ["services"],
     adminOnly: false,
@@ -149,6 +156,19 @@ const NAV_SECTIONS = [
     adminOnly: false,
   },
 ];
+
+// ── Tickets (Operaciones) ───────────────────────────────────────────────────
+const TICKET_CATEGORIES = [
+  { key: "Error bloqueante", emoji: "🔴" },
+  { key: "Error funcional",  emoji: "🟠" },
+  { key: "Duda de uso",      emoji: "🔵" },
+  { key: "Mejora",           emoji: "🟢" },
+  { key: "Administrativo",   emoji: "⚪" },
+];
+const TICKET_PRIORITIES = ["Alta","Media","Baja"];
+const TICKET_CHANNELS   = ["WhatsApp","Email"];
+const TICKET_STATUSES   = ["Inicio por OPS","🚨 Urgente","En espera","Escalado","En DEV","Solucionado","Archivado"];
+const TICKET_TEAM       = ["Nico","Ticiana","Lucas"];
 
 const WORKER_URL = "";
 const COMMISSION_RATE = 0.20;
@@ -1791,6 +1811,259 @@ function ServicesView() {
   );
 }
 
+// ── Tickets View (Kanban) ───────────────────────────────────────────────────
+function TicketsView({ tickets, clients, onRefresh }) {
+  const [showNew, setShowNew] = useState(false);
+  const [detail,  setDetail]  = useState(null);
+  const [dragOverStatus, setDragOverStatus] = useState(null);
+  const [form, setForm] = useState({ client_id:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigned_to:"" });
+  const [addingClient, setAddingClient] = useState(false);
+  const [newClientName, setNewClientName] = useState("");
+  const [savingClient, setSavingClient] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const clientName = (id) => clients.find(c=>c.id===id)?.name || "—";
+  const catInfo    = (key) => TICKET_CATEGORIES.find(c=>c.key===key);
+
+  async function addClient() {
+    if (!newClientName.trim()) return;
+    setSavingClient(true);
+    const id = "cli_"+Date.now();
+    await sb.from("clients").insert({ id, name:newClientName.trim() });
+    setSavingClient(false); setNewClientName(""); setAddingClient(false);
+    setForm(f=>({ ...f, client_id:id }));
+    onRefresh();
+  }
+
+  async function createTicket(e) {
+    e.preventDefault();
+    if (!form.client_id || !form.category || !form.channel) return;
+    setSaving(true);
+    await sb.from("tickets").insert({
+      id: "tk_"+Date.now(),
+      client_id: form.client_id,
+      category: form.category,
+      priority: form.priority,
+      channel: form.channel,
+      message: form.message.trim() || null,
+      assigned_to: form.assigned_to || null,
+      status: "Inicio por OPS",
+    });
+    setSaving(false);
+    setForm({ client_id:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigned_to:"" });
+    setShowNew(false);
+    onRefresh();
+  }
+
+  async function updateTicket(ticket, patch) {
+    await sb.from("tickets").update(patch).eq("id", ticket.id);
+    setDetail(d => d && d.id===ticket.id ? { ...d, ...patch } : d);
+    onRefresh();
+  }
+
+  async function moveStatus(ticket, newStatus) {
+    const patch = { status: newStatus };
+    if (!ticket.first_response_at && newStatus !== "Inicio por OPS") patch.first_response_at = new Date().toISOString();
+    if (newStatus === "Solucionado") { if (!ticket.resolved_at) patch.resolved_at = new Date().toISOString(); }
+    else if (ticket.resolved_at) patch.resolved_at = null;
+    await updateTicket(ticket, patch);
+  }
+
+  async function deleteTicket(ticket) {
+    await sb.from("tickets").delete().eq("id", ticket.id);
+    setDetail(null);
+    onRefresh();
+  }
+
+  const prioClass = (p) => p==="Alta" ? "spicy-badge-red" : p==="Media" ? "spicy-badge-amber" : "spicy-badge-gray";
+
+  return (
+    <>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
+        <div>
+          <div style={{ fontSize:20,fontWeight:700,color:"#111" }}>Tickets</div>
+          <div style={{ fontSize:13,color:"#888",marginTop:4 }}>{tickets.length} tickets · Operaciones</div>
+        </div>
+        <button className="spicy-btn-primary" onClick={()=>setShowNew(true)}>+ Nuevo ticket</button>
+      </div>
+
+      {/* Kanban board */}
+      <div style={{ overflowX:"auto", paddingBottom:8 }}>
+        <div style={{ display:"flex", gap:14, minWidth: TICKET_STATUSES.length * 250 }}>
+          {TICKET_STATUSES.map(status => {
+            const col = tickets.filter(t => t.status === status);
+            return (
+              <div key={status}
+                onDragOver={e=>{ e.preventDefault(); setDragOverStatus(status); }}
+                onDragLeave={()=>setDragOverStatus(s=>s===status?null:s)}
+                onDrop={e=>{
+                  e.preventDefault();
+                  const id = e.dataTransfer.getData("text/ticket-id");
+                  const t = tickets.find(x=>x.id===id);
+                  setDragOverStatus(null);
+                  if (t && t.status!==status) moveStatus(t, status);
+                }}
+                style={{
+                  width:236, flexShrink:0, background: dragOverStatus===status?"#FFF3EE":"#F7F7F8",
+                  border:"1px solid #EBEBEB", borderRadius:12, padding:10, minHeight:120,
+                }}>
+                <div style={{ fontSize:12,fontWeight:700,color:"#555",marginBottom:10,display:"flex",justifyContent:"space-between" }}>
+                  <span>{status}</span>
+                  <span style={{ color:"#bbb" }}>{col.length}</span>
+                </div>
+                {col.map(t => {
+                  const c = catInfo(t.category);
+                  return (
+                    <div key={t.id} draggable
+                      onDragStart={e=>e.dataTransfer.setData("text/ticket-id", t.id)}
+                      onClick={()=>setDetail(t)}
+                      style={{ background:"white",border:"1px solid #EBEBEB",borderRadius:10,padding:"10px 12px",marginBottom:8,cursor:"grab",boxShadow:"0 1px 2px rgba(0,0,0,0.03)" }}>
+                      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6 }}>
+                        <span style={{ fontSize:12 }}>{c?.emoji} {t.category}</span>
+                        <span className={prioClass(t.priority)}>{t.priority}</span>
+                      </div>
+                      <div style={{ fontSize:13,fontWeight:600,color:"#111",marginBottom:4 }}>{clientName(t.client_id)}</div>
+                      {t.message && <div style={{ fontSize:12,color:"#888",overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical" }}>{t.message}</div>}
+                      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8,fontSize:11,color:"#aaa" }}>
+                        <span>{t.channel==="WhatsApp"?"📱":"📧"} {t.assigned_to||"Sin asignar"}</span>
+                        <span>{new Date(t.created_at).toLocaleDateString("es-UY",{day:"2-digit",month:"2-digit"})}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+                {col.length===0 && <div style={{ fontSize:11,color:"#ccc",textAlign:"center",padding:"12px 0" }}>Sin tickets</div>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* New ticket modal */}
+      {showNew && (
+        <div onClick={()=>setShowNew(false)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}>
+          <form onClick={e=>e.stopPropagation()} onSubmit={createTicket} style={{ background:"white",borderRadius:16,width:"100%",maxWidth:480,padding:24,display:"flex",flexDirection:"column",gap:14,maxHeight:"85vh",overflowY:"auto" }}>
+            <div style={{ fontSize:16,fontWeight:700,color:"#111" }}>Nuevo ticket</div>
+
+            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Cliente / Empresa
+              {!addingClient ? (
+                <div style={{ display:"flex",gap:8,marginTop:4 }}>
+                  <select required value={form.client_id} onChange={e=>setForm(f=>({...f,client_id:e.target.value}))} className="spicy-select" style={{ flex:1 }}>
+                    <option value="">Seleccionar cliente...</option>
+                    {clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                  <button type="button" className="spicy-btn-secondary" onClick={()=>setAddingClient(true)}>+ Nuevo</button>
+                </div>
+              ) : (
+                <div style={{ display:"flex",gap:8,marginTop:4 }}>
+                  <input autoFocus className="spicy-input" placeholder="Nombre del cliente/empresa" value={newClientName} onChange={e=>setNewClientName(e.target.value)}/>
+                  <button type="button" className="spicy-btn-primary" disabled={savingClient||!newClientName.trim()} onClick={addClient}>Agregar</button>
+                  <button type="button" className="spicy-btn-secondary" onClick={()=>{setAddingClient(false);setNewClientName("");}}>×</button>
+                </div>
+              )}
+            </label>
+
+            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Categoría
+              <select required value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))} className="spicy-select" style={{ width:"100%",marginTop:4 }}>
+                <option value="" disabled>Seleccionar categoría...</option>
+                {TICKET_CATEGORIES.map(c=><option key={c.key} value={c.key}>{c.emoji} {c.key}</option>)}
+              </select>
+            </label>
+
+            <div style={{ display:"flex",gap:12 }}>
+              <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Prioridad
+                <select value={form.priority} onChange={e=>setForm(f=>({...f,priority:e.target.value}))} className="spicy-select" style={{ width:"100%",marginTop:4 }}>
+                  {TICKET_PRIORITIES.map(p=><option key={p} value={p}>{p}</option>)}
+                </select>
+              </label>
+              <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Canal
+                <select required value={form.channel} onChange={e=>setForm(f=>({...f,channel:e.target.value}))} className="spicy-select" style={{ width:"100%",marginTop:4 }}>
+                  {TICKET_CHANNELS.map(ch=><option key={ch} value={ch}>{ch}</option>)}
+                </select>
+              </label>
+            </div>
+
+            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Responsable
+              <select value={form.assigned_to} onChange={e=>setForm(f=>({...f,assigned_to:e.target.value}))} className="spicy-select" style={{ width:"100%",marginTop:4 }}>
+                <option value="">Sin asignar</option>
+                {TICKET_TEAM.map(n=><option key={n} value={n}>{n}</option>)}
+              </select>
+            </label>
+
+            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Mensaje original / descripción
+              <textarea value={form.message} onChange={e=>setForm(f=>({...f,message:e.target.value}))} className="spicy-input" rows={3} style={{ width:"100%",marginTop:4,resize:"vertical" }}/>
+            </label>
+
+            <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:4 }}>
+              <button type="button" className="spicy-btn-secondary" onClick={()=>setShowNew(false)}>Cancelar</button>
+              <button type="submit" className="spicy-btn-primary" disabled={saving||!form.client_id||!form.category}>Crear ticket</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Ticket detail modal */}
+      {detail && (()=>{
+        return (
+          <div onClick={()=>setDetail(null)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}>
+            <div onClick={e=>e.stopPropagation()} style={{ background:"white",borderRadius:16,width:"100%",maxWidth:520,maxHeight:"85vh",overflowY:"auto",padding:24,display:"flex",flexDirection:"column",gap:12 }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
+                <div>
+                  <div style={{ fontSize:16,fontWeight:700,color:"#111" }}>{clientName(detail.client_id)}</div>
+                  <div style={{ fontSize:12,color:"#aaa",marginTop:3 }}>creado {new Date(detail.created_at).toLocaleDateString("es-UY")}</div>
+                </div>
+                <button onClick={()=>setDetail(null)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#ccc",lineHeight:1 }}>×</button>
+              </div>
+
+              {detail.message && <div style={{ fontSize:13,color:"#444",background:"#F7F7F8",borderRadius:10,padding:12 }}>{detail.message}</div>}
+
+              <div style={{ display:"flex",gap:12 }}>
+                <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Categoría
+                  <select value={detail.category} onChange={e=>updateTicket(detail,{category:e.target.value})} className="spicy-select" style={{ width:"100%",marginTop:4 }}>
+                    {TICKET_CATEGORIES.map(c=><option key={c.key} value={c.key}>{c.emoji} {c.key}</option>)}
+                  </select>
+                </label>
+                <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Prioridad
+                  <select value={detail.priority} onChange={e=>updateTicket(detail,{priority:e.target.value})} className="spicy-select" style={{ width:"100%",marginTop:4 }}>
+                    {TICKET_PRIORITIES.map(p=><option key={p} value={p}>{p}</option>)}
+                  </select>
+                </label>
+              </div>
+
+              <div style={{ display:"flex",gap:12 }}>
+                <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Estado
+                  <select value={detail.status} onChange={e=>moveStatus(detail, e.target.value)} className="spicy-select" style={{ width:"100%",marginTop:4 }}>
+                    {TICKET_STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
+                  </select>
+                </label>
+                <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Responsable
+                  <select value={detail.assigned_to||""} onChange={e=>updateTicket(detail,{assigned_to:e.target.value||null})} className="spicy-select" style={{ width:"100%",marginTop:4 }}>
+                    <option value="">Sin asignar</option>
+                    {TICKET_TEAM.map(n=><option key={n} value={n}>{n}</option>)}
+                  </select>
+                </label>
+              </div>
+
+              <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Nota de resolución
+                <textarea key={detail.id} defaultValue={detail.resolution_note||""} onBlur={e=>updateTicket(detail,{resolution_note:e.target.value||null})} className="spicy-input" rows={2} style={{ width:"100%",marginTop:4,resize:"vertical" }}/>
+              </label>
+
+              <div style={{ fontSize:11,color:"#aaa",display:"flex",flexDirection:"column",gap:2 }}>
+                {detail.first_response_at && <span>Primera respuesta: {new Date(detail.first_response_at).toLocaleString("es-UY")}</span>}
+                {detail.resolved_at && <span>Resuelto: {new Date(detail.resolved_at).toLocaleString("es-UY")}</span>}
+              </div>
+
+              <div style={{ display:"flex",justifyContent:"space-between",marginTop:8 }}>
+                <button className="spicy-btn-secondary" style={{ color:ST_RED,borderColor:ST_RED_BG }} onClick={()=>deleteTicket(detail)}>Eliminar ticket</button>
+                <button className="spicy-btn-primary" onClick={()=>setDetail(null)}>Listo</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+    </>
+  );
+}
+
 // ── Main App ───────────────────────────────────────────────────────────────
 export default function SpicyFinanzas() {
   const [session,  setSession]  = useState(null);
@@ -1804,6 +2077,8 @@ export default function SpicyFinanzas() {
   const [referredClientPayments, setReferredClientPayments] = useState([]);
   const [catsIncome,  setCatsIncome]  = useState([]);
   const [catsExpense, setCatsExpense] = useState([]);
+  const [tickets,     setTickets]     = useState([]);
+  const [clients,     setClients]     = useState([]);
   const [dataLoaded, setDataLoaded]   = useState(false);
 
   const [view,      setView]      = useState("dashboard");
@@ -1833,7 +2108,7 @@ export default function SpicyFinanzas() {
 
   async function loadAll() {
     setDataLoaded(false);
-    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes]=await Promise.all([
+    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,clientsRes]=await Promise.all([
       sb.from("user_roles").select("role").eq("user_id",session.user.id).single(),
       sb.from("transactions").select("*").order("date",{ascending:false}),
       sb.from("accounts").select("*").order("created_at"),
@@ -1841,6 +2116,8 @@ export default function SpicyFinanzas() {
       sb.from("categories").select("*").order("position"),
       sb.from("referred_clients").select("*").order("name"),
       sb.from("referred_client_payments").select("*").order("date",{ascending:false}),
+      sb.from("tickets").select("*").order("created_at",{ascending:false}),
+      sb.from("clients").select("*").order("name"),
     ]);
     setRole(roleRes.data?.role||"reader");
     setTxns(txRes.data||[]);
@@ -1850,6 +2127,8 @@ export default function SpicyFinanzas() {
     setReferredClientPayments(paymentsRes.data||[]);
     setCatsIncome((catRes.data||[]).filter(c=>c.type==="income"));
     setCatsExpense((catRes.data||[]).filter(c=>c.type==="expense"));
+    setTickets(ticketsRes.data||[]);
+    setClients(clientsRes.data||[]);
     setDataLoaded(true);
   }
 
@@ -2183,6 +2462,7 @@ export default function SpicyFinanzas() {
       {view==="referrals"&&<ReferralDashboard txns={txns} referrers={referrers} referredClients={referredClients} payments={referredClientPayments} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="runway"&&<RunwayView txns={txns} accounts={accounts}/>}
       {view==="pnl"&&<PnLView txns={txns}/>}
+      {view==="tickets"&&<TicketsView tickets={tickets} clients={clients} onRefresh={loadAll}/>}
       {view==="services"&&<ServicesView/>}
       {view==="categories"&&<CategoriesPanel catsIncome={catsIncome} catsExpense={catsExpense} isAdmin={isAdmin} onRefresh={loadAll}/>}
 
