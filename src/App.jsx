@@ -497,8 +497,15 @@ function CategoriesPanel({ catsIncome, catsExpense, isAdmin, onRefresh }) {
 // ── User Permissions Panel ───────────────────────────────────────────────────
 function UserPermissionsPanel({ users, hiddenSections, onRefresh }) {
   const sections = NAV_SECTIONS.map(s=>s.label);
+  const emptyForm = () => ({ email:"", first_name:"", last_name:"", role:"reader" });
+
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState(emptyForm());
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   const isHidden = (userId, section) => hiddenSections.some(h=>h.user_id===userId && h.section===section);
+  const displayName = (u) => (u.first_name||u.last_name) ? `${u.first_name||""} ${u.last_name||""}`.trim() : u.email;
 
   async function toggle(userId, section, hide) {
     if (hide) await sb.from("hidden_sections").insert({ user_id:userId, section });
@@ -506,10 +513,38 @@ function UserPermissionsPanel({ users, hiddenSections, onRefresh }) {
     onRefresh();
   }
 
+  async function addUser(e) {
+    e.preventDefault();
+    setError(""); setSaving(true);
+    const email = form.email.trim().toLowerCase();
+    const { data: userId, error: rpcErr } = await sb.rpc("get_user_id_by_email", { lookup_email: email });
+    if (rpcErr || !userId) {
+      setSaving(false);
+      setError("No se encontró ningún usuario con ese email. Primero creá el login en el dashboard de Supabase (Authentication → Users → Add user).");
+      return;
+    }
+    await sb.from("user_roles").upsert({
+      user_id: userId,
+      email,
+      first_name: form.first_name.trim() || null,
+      last_name: form.last_name.trim() || null,
+      role: form.role,
+    }, { onConflict: "user_id" });
+    setSaving(false);
+    setForm(emptyForm());
+    setShowAdd(false);
+    onRefresh();
+  }
+
   return (
     <div className="spicy-card">
-      <div style={{ fontSize:16,fontWeight:700,color:"#111",marginBottom:4 }}>Usuarios y permisos</div>
-      <div style={{ fontSize:13,color:"#888",marginBottom:20 }}>Elegí qué secciones puede ver cada usuario. Los admins siempre ven todo.</div>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20 }}>
+        <div>
+          <div style={{ fontSize:16,fontWeight:700,color:"#111",marginBottom:4 }}>Usuarios y permisos</div>
+          <div style={{ fontSize:13,color:"#888" }}>Elegí qué secciones puede ver cada usuario. Los admins siempre ven todo.</div>
+        </div>
+        <button className="spicy-btn-primary" onClick={()=>{setError("");setForm(emptyForm());setShowAdd(true);}}>+ Agregar usuario</button>
+      </div>
 
       <div style={{ overflowX:"auto" }}>
         <table style={{ borderCollapse:"collapse", width:"100%", minWidth:560 }}>
@@ -523,7 +558,8 @@ function UserPermissionsPanel({ users, hiddenSections, onRefresh }) {
             {users.map(u=>(
               <tr key={u.user_id}>
                 <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5" }}>
-                  <div style={{ fontSize:13,color:"#111",fontWeight:500 }}>{u.email}</div>
+                  <div style={{ fontSize:13,color:"#111",fontWeight:500 }}>{displayName(u)}</div>
+                  {(u.first_name||u.last_name)&&<div style={{ fontSize:11,color:"#aaa" }}>{u.email}</div>}
                   <span className={u.role==="admin"?"spicy-badge-green":"spicy-badge-gray"}>{u.role}</span>
                 </td>
                 {sections.map(s=>(
@@ -543,6 +579,42 @@ function UserPermissionsPanel({ users, hiddenSections, onRefresh }) {
           </tbody>
         </table>
       </div>
+
+      {showAdd && (
+        <div onClick={()=>setShowAdd(false)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}>
+          <form onClick={e=>e.stopPropagation()} onSubmit={addUser} style={{ background:"white",borderRadius:16,width:"100%",maxWidth:420,padding:24,display:"flex",flexDirection:"column",gap:14 }}>
+            <div style={{ fontSize:16,fontWeight:700,color:"#111" }}>Agregar usuario</div>
+            <div style={{ fontSize:12,color:"#888",marginTop:-8 }}>El login ya tiene que existir en Supabase (Authentication → Users). Acá solo cargás sus datos y rol dentro de la app.</div>
+
+            <div style={{ display:"flex",gap:12 }}>
+              <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Nombre
+                <input className="spicy-input" value={form.first_name} onChange={e=>setForm(f=>({...f,first_name:e.target.value}))} style={{ width:"100%",marginTop:4 }}/>
+              </label>
+              <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Apellido
+                <input className="spicy-input" value={form.last_name} onChange={e=>setForm(f=>({...f,last_name:e.target.value}))} style={{ width:"100%",marginTop:4 }}/>
+              </label>
+            </div>
+
+            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Email
+              <input required type="email" autoFocus className="spicy-input" placeholder="nombre@spicytool.net" value={form.email} onChange={e=>setForm(f=>({...f,email:e.target.value}))} style={{ width:"100%",marginTop:4 }}/>
+            </label>
+
+            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Rol
+              <select className="spicy-select" value={form.role} onChange={e=>setForm(f=>({...f,role:e.target.value}))} style={{ width:"100%",marginTop:4 }}>
+                <option value="reader">reader</option>
+                <option value="admin">admin</option>
+              </select>
+            </label>
+
+            {error && <div style={{ fontSize:12,color:ST_RED,background:ST_RED_BG,borderRadius:8,padding:"8px 10px" }}>{error}</div>}
+
+            <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:4 }}>
+              <button type="button" className="spicy-btn-secondary" onClick={()=>setShowAdd(false)}>Cancelar</button>
+              <button type="submit" className="spicy-btn-primary" disabled={saving||!form.email.trim()}>Agregar</button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }
@@ -2505,7 +2577,7 @@ export default function SpicyFinanzas() {
       sb.from("tickets").select("*").order("created_at",{ascending:false}),
       sb.from("tasks").select("*").order("start_date"),
       sb.from("task_comments").select("*").order("created_at"),
-      sb.from("user_roles").select("user_id,email,role").order("email"),
+      sb.from("user_roles").select("user_id,email,role,first_name,last_name").order("email"),
       sb.from("hidden_sections").select("*"),
     ]);
     setRole(roleRes.data?.role||"reader");
