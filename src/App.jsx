@@ -119,14 +119,15 @@ const NAV_ICONS = {
   dashboard:"▦", accounts:"🏦", add:"+", history:"☰", runway:"📈", pnl:"📊",
   referrals:"🤝",
   services:"⚡", categories:"⊞",
-  tickets:"🎫", tasks:"📋"
+  tickets:"🎫", tasks:"📋", usuarios:"👥"
 };
 const NAV_LABELS = {
   dashboard:"Resumen", accounts:"Cuentas", add:"Registrar", history:"Historial", runway:"Runway", pnl:"P&L",
   referrals:"Referidos",
   services:"Servicios", categories:"Categorías",
-  tickets:"Tickets", tasks:"Tareas"
+  tickets:"Tickets", tasks:"Tareas", usuarios:"Usuarios"
 };
+const ADMIN_ONLY_VIEWS = ["add","usuarios"];
 
 const NAV_SECTIONS = [
   {
@@ -152,7 +153,7 @@ const NAV_SECTIONS = [
   },
   {
     label: "Configuración",
-    views: ["categories"],
+    views: ["categories","usuarios"],
     adminOnly: false,
   },
 ];
@@ -489,6 +490,59 @@ function CategoriesPanel({ catsIncome, catsExpense, isAdmin, onRefresh }) {
       <Section type="income"  cats={catsIncome}  label="Categorías de ingreso" color="#1D9E75"/>
       <Section type="expense" cats={catsExpense} label="Categorías de egreso"  color="#D85A30"/>
       {!isAdmin&&<div style={{ fontSize:12,color:"var(--color-text-tertiary)",marginTop:8 }}>Solo los admins pueden editar categorías.</div>}
+    </div>
+  );
+}
+
+// ── User Permissions Panel ───────────────────────────────────────────────────
+function UserPermissionsPanel({ users, hiddenSections, onRefresh }) {
+  const sections = NAV_SECTIONS.map(s=>s.label);
+
+  const isHidden = (userId, section) => hiddenSections.some(h=>h.user_id===userId && h.section===section);
+
+  async function toggle(userId, section, hide) {
+    if (hide) await sb.from("hidden_sections").insert({ user_id:userId, section });
+    else await sb.from("hidden_sections").delete().eq("user_id",userId).eq("section",section);
+    onRefresh();
+  }
+
+  return (
+    <div className="spicy-card">
+      <div style={{ fontSize:16,fontWeight:700,color:"#111",marginBottom:4 }}>Usuarios y permisos</div>
+      <div style={{ fontSize:13,color:"#888",marginBottom:20 }}>Elegí qué secciones puede ver cada usuario. Los admins siempre ven todo.</div>
+
+      <div style={{ overflowX:"auto" }}>
+        <table style={{ borderCollapse:"collapse", width:"100%", minWidth:560 }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign:"left",fontSize:12,color:"#888",fontWeight:600,padding:"8px 12px",borderBottom:"1px solid #EBEBEB" }}>Usuario</th>
+              {sections.map(s=><th key={s} style={{ textAlign:"center",fontSize:11,color:"#888",fontWeight:600,padding:"8px 8px",borderBottom:"1px solid #EBEBEB" }}>{s}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {users.map(u=>(
+              <tr key={u.user_id}>
+                <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5" }}>
+                  <div style={{ fontSize:13,color:"#111",fontWeight:500 }}>{u.email}</div>
+                  <span className={u.role==="admin"?"spicy-badge-green":"spicy-badge-gray"}>{u.role}</span>
+                </td>
+                {sections.map(s=>(
+                  <td key={s} style={{ textAlign:"center",padding:"10px 8px",borderBottom:"1px solid #F5F5F5" }}>
+                    {u.role==="admin" ? (
+                      <span style={{ fontSize:11,color:"#ccc" }}>—</span>
+                    ) : (
+                      <input type="checkbox" checked={!isHidden(u.user_id,s)} onChange={e=>toggle(u.user_id,s,!e.target.checked)}/>
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))}
+            {users.length===0 && (
+              <tr><td colSpan={sections.length+1} style={{ padding:"20px",textAlign:"center",color:"#ccc",fontSize:13 }}>No hay usuarios.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -2409,6 +2463,8 @@ export default function SpicyFinanzas() {
   const [tickets,     setTickets]     = useState([]);
   const [tasks,       setTasks]       = useState([]);
   const [taskComments,setTaskComments]= useState([]);
+  const [allUsers,       setAllUsers]       = useState([]);
+  const [hiddenSections, setHiddenSections] = useState([]);
   const [dataLoaded, setDataLoaded]   = useState(false);
 
   const [view,      setView]      = useState("dashboard");
@@ -2438,7 +2494,7 @@ export default function SpicyFinanzas() {
 
   async function loadAll() {
     setDataLoaded(false);
-    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,tasksRes,taskCommentsRes]=await Promise.all([
+    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,tasksRes,taskCommentsRes,usersRes,hiddenRes]=await Promise.all([
       sb.from("user_roles").select("role").eq("user_id",session.user.id).single(),
       sb.from("transactions").select("*").order("date",{ascending:false}),
       sb.from("accounts").select("*").order("created_at"),
@@ -2449,6 +2505,8 @@ export default function SpicyFinanzas() {
       sb.from("tickets").select("*").order("created_at",{ascending:false}),
       sb.from("tasks").select("*").order("start_date"),
       sb.from("task_comments").select("*").order("created_at"),
+      sb.from("user_roles").select("user_id,email,role").order("email"),
+      sb.from("hidden_sections").select("*"),
     ]);
     setRole(roleRes.data?.role||"reader");
     setTxns(txRes.data||[]);
@@ -2461,10 +2519,27 @@ export default function SpicyFinanzas() {
     setTickets(ticketsRes.data||[]);
     setTasks(tasksRes.data||[]);
     setTaskComments(taskCommentsRes.data||[]);
+    setAllUsers(usersRes.data||[]);
+    setHiddenSections(hiddenRes.data||[]);
     setDataLoaded(true);
   }
 
   const isAdmin = role==="admin";
+  const myHiddenSections = new Set(session ? hiddenSections.filter(h=>h.user_id===session.user.id).map(h=>h.section) : []);
+
+  // ── Si la vista actual quedó oculta (sección restringida, o dejó de ser admin), redirigir ──
+  useEffect(()=>{
+    if (!session || !dataLoaded) return;
+    const section = NAV_SECTIONS.find(s=>s.views.includes(view));
+    const sectionHidden = section && !isAdmin && myHiddenSections.has(section.label);
+    const viewBlocked = ADMIN_ONLY_VIEWS.includes(view) && !isAdmin;
+    if (sectionHidden || viewBlocked) {
+      const fallback = NAV_SECTIONS
+        .filter(s => isAdmin || !myHiddenSections.has(s.label))
+        .flatMap(s => s.views.filter(v => !ADMIN_ONLY_VIEWS.includes(v) || isAdmin))[0];
+      setView(fallback || "dashboard");
+    }
+  },[session, dataLoaded, isAdmin, view, hiddenSections]);
 
   async function handleAdd(e) {
     e.preventDefault();
@@ -2578,6 +2653,10 @@ export default function SpicyFinanzas() {
   const curMK=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
   const referralOwed=txns.filter(t=>t.type==="income"&&t.referrer_id&&monthKey(t.date)===curMK).reduce((s,t)=>s+Number(t.amount),0)*COMMISSION_RATE;
 
+  const urgentTicketsCount = tickets.filter(t=>t.status==="🚨 Urgente").length;
+  const todayISOForTasks = new Date().toISOString().split("T")[0];
+  const overdueTasksCount = tasks.filter(t=>t.end_date<todayISOForTasks && !["Finalizado","Archivado"].includes(t.stage)).length;
+
   const sourceBadge=(t)=>{
     if(t.source)return <span style={{ fontSize:10,padding:"1px 5px",borderRadius:4,marginLeft:5,background:t.source==="mercury"?"var(--color-background-info)":"var(--color-background-success)",color:t.source==="mercury"?"var(--color-text-info)":"var(--color-text-success)" }}>{t.source}</span>;
     if(t.referrer_id)return <span style={{ fontSize:10,padding:"1px 5px",borderRadius:4,marginLeft:5,background:"var(--color-background-warning)",color:"var(--color-text-warning)" }}>ref</span>;
@@ -2607,9 +2686,9 @@ export default function SpicyFinanzas() {
         </div>
 
         <nav className="spicy-nav">
-          {NAV_SECTIONS.map(section=>{
+          {NAV_SECTIONS.filter(section => isAdmin || !myHiddenSections.has(section.label)).map(section=>{
             const visibleViews = section.views.filter(v =>
-              v !== "add" || isAdmin
+              !ADMIN_ONLY_VIEWS.includes(v) || isAdmin
             );
             if (visibleViews.length === 0) return null;
             return (
@@ -2622,6 +2701,8 @@ export default function SpicyFinanzas() {
                     <span style={{ fontSize:14 }}>{NAV_ICONS[v]}</span>
                     {NAV_LABELS[v]}
                     {v==="referrals"&&referralOwed>0&&<span className="spicy-nav-badge">{fmt(referralOwed)}</span>}
+                    {v==="tickets"&&urgentTicketsCount>0&&<span className="spicy-nav-badge">{urgentTicketsCount}</span>}
+                    {v==="tasks"&&overdueTasksCount>0&&<span className="spicy-nav-badge">{overdueTasksCount}</span>}
                   </button>
                 ))}
               </div>
@@ -2798,6 +2879,7 @@ export default function SpicyFinanzas() {
       {view==="tasks"&&<TasksView tasks={tasks} comments={taskComments} currentUserEmail={session.user.email} onRefresh={loadAll}/>}
       {view==="services"&&<ServicesView/>}
       {view==="categories"&&<CategoriesPanel catsIncome={catsIncome} catsExpense={catsExpense} isAdmin={isAdmin} onRefresh={loadAll}/>}
+      {view==="usuarios"&&isAdmin&&<UserPermissionsPanel users={allUsers} hiddenSections={hiddenSections} onRefresh={loadAll}/>}
 
       {/* ADD */}
       {view==="add"&&isAdmin&&(
