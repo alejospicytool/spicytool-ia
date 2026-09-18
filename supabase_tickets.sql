@@ -13,9 +13,15 @@ create table if not exists public.clients (
   created_at timestamptz not null default now()
 );
 
+-- 2026-09-18: el campo "Cliente / Empresa" del ticket pasó a ser texto libre
+-- (client_name) en vez de referenciar la tabla `clients` desde un selector.
+-- `client_id` queda en la tabla sin usarse (no se borró la columna para evitar
+-- una migración destructiva sobre datos ya existentes); `clients` queda vacía
+-- y sin ningún consumidor en el frontend.
 create table if not exists public.tickets (
   id text primary key,
-  client_id text references public.clients(id),
+  client_id text references public.clients(id), -- deprecado, sin uso desde el frontend
+  client_name text not null,
   category text not null,             -- 'Error bloqueante' | 'Error funcional' | 'Duda de uso' | 'Mejora' | 'Administrativo'
   priority text not null default 'Media',   -- 'Alta' | 'Media' | 'Baja'
   status text not null default 'Inicio por OPS',

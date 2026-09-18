@@ -119,13 +119,13 @@ const NAV_ICONS = {
   dashboard:"▦", accounts:"🏦", add:"+", history:"☰", runway:"📈", pnl:"📊",
   referrals:"🤝",
   services:"⚡", categories:"⊞",
-  tickets:"🎫"
+  tickets:"🎫", tasks:"📋"
 };
 const NAV_LABELS = {
   dashboard:"Resumen", accounts:"Cuentas", add:"Registrar", history:"Historial", runway:"Runway", pnl:"P&L",
   referrals:"Referidos",
   services:"Servicios", categories:"Categorías",
-  tickets:"Tickets"
+  tickets:"Tickets", tasks:"Tareas"
 };
 
 const NAV_SECTIONS = [
@@ -142,7 +142,7 @@ const NAV_SECTIONS = [
   },
   {
     label: "Operaciones",
-    views: ["tickets"],
+    views: ["tickets","tasks"],
     adminOnly: false,
   },
   {
@@ -169,6 +169,18 @@ const TICKET_PRIORITIES = ["Alta","Media","Baja"];
 const TICKET_CHANNELS   = ["WhatsApp","Email"];
 const TICKET_STATUSES   = ["Inicio por OPS","🚨 Urgente","En espera","Escalado","En DEV","Solucionado","Archivado"];
 const TICKET_TEAM       = ["Nico","Ticiana","Lucas"];
+
+// ── Tareas (Operaciones) ────────────────────────────────────────────────────
+const TASK_STAGES = [
+  { key: "Sin Empezar", emoji: "⚪" },
+  { key: "Urgentes",    emoji: "🚨" },
+  { key: "Stand By",    emoji: "⏸️" },
+  { key: "En Curso",    emoji: "🔄" },
+  { key: "Escalado",    emoji: "🧗" },
+  { key: "Finalizado",  emoji: "✅" },
+  { key: "Archivado",   emoji: "📁" },
+];
+const WEEKDAY_LABELS = ["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"];
 
 const WORKER_URL = "";
 const COMMISSION_RATE = 0.20;
@@ -1812,36 +1824,22 @@ function ServicesView() {
 }
 
 // ── Tickets View (Kanban) ───────────────────────────────────────────────────
-function TicketsView({ tickets, clients, onRefresh }) {
+function TicketsView({ tickets, onRefresh }) {
   const [showNew, setShowNew] = useState(false);
   const [detail,  setDetail]  = useState(null);
   const [dragOverStatus, setDragOverStatus] = useState(null);
-  const [form, setForm] = useState({ client_id:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigned_to:"" });
-  const [addingClient, setAddingClient] = useState(false);
-  const [newClientName, setNewClientName] = useState("");
-  const [savingClient, setSavingClient] = useState(false);
+  const [form, setForm] = useState({ client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigned_to:"" });
   const [saving, setSaving] = useState(false);
 
-  const clientName = (id) => clients.find(c=>c.id===id)?.name || "—";
-  const catInfo    = (key) => TICKET_CATEGORIES.find(c=>c.key===key);
-
-  async function addClient() {
-    if (!newClientName.trim()) return;
-    setSavingClient(true);
-    const id = "cli_"+Date.now();
-    await sb.from("clients").insert({ id, name:newClientName.trim() });
-    setSavingClient(false); setNewClientName(""); setAddingClient(false);
-    setForm(f=>({ ...f, client_id:id }));
-    onRefresh();
-  }
+  const catInfo = (key) => TICKET_CATEGORIES.find(c=>c.key===key);
 
   async function createTicket(e) {
     e.preventDefault();
-    if (!form.client_id || !form.category || !form.channel) return;
+    if (!form.client_name.trim() || !form.category || !form.channel) return;
     setSaving(true);
     await sb.from("tickets").insert({
       id: "tk_"+Date.now(),
-      client_id: form.client_id,
+      client_name: form.client_name.trim(),
       category: form.category,
       priority: form.priority,
       channel: form.channel,
@@ -1850,7 +1848,7 @@ function TicketsView({ tickets, clients, onRefresh }) {
       status: "Inicio por OPS",
     });
     setSaving(false);
-    setForm({ client_id:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigned_to:"" });
+    setForm({ client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigned_to:"" });
     setShowNew(false);
     onRefresh();
   }
@@ -1922,7 +1920,7 @@ function TicketsView({ tickets, clients, onRefresh }) {
                         <span style={{ fontSize:12 }}>{c?.emoji} {t.category}</span>
                         <span className={prioClass(t.priority)}>{t.priority}</span>
                       </div>
-                      <div style={{ fontSize:13,fontWeight:600,color:"#111",marginBottom:4 }}>{clientName(t.client_id)}</div>
+                      <div style={{ fontSize:13,fontWeight:600,color:"#111",marginBottom:4 }}>{t.client_name}</div>
                       {t.message && <div style={{ fontSize:12,color:"#888",overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical" }}>{t.message}</div>}
                       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8,fontSize:11,color:"#aaa" }}>
                         <span>{t.channel==="WhatsApp"?"📱":"📧"} {t.assigned_to||"Sin asignar"}</span>
@@ -1945,21 +1943,7 @@ function TicketsView({ tickets, clients, onRefresh }) {
             <div style={{ fontSize:16,fontWeight:700,color:"#111" }}>Nuevo ticket</div>
 
             <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Cliente / Empresa
-              {!addingClient ? (
-                <div style={{ display:"flex",gap:8,marginTop:4 }}>
-                  <select required value={form.client_id} onChange={e=>setForm(f=>({...f,client_id:e.target.value}))} className="spicy-select" style={{ flex:1 }}>
-                    <option value="">Seleccionar cliente...</option>
-                    {clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                  <button type="button" className="spicy-btn-secondary" onClick={()=>setAddingClient(true)}>+ Nuevo</button>
-                </div>
-              ) : (
-                <div style={{ display:"flex",gap:8,marginTop:4 }}>
-                  <input autoFocus className="spicy-input" placeholder="Nombre del cliente/empresa" value={newClientName} onChange={e=>setNewClientName(e.target.value)}/>
-                  <button type="button" className="spicy-btn-primary" disabled={savingClient||!newClientName.trim()} onClick={addClient}>Agregar</button>
-                  <button type="button" className="spicy-btn-secondary" onClick={()=>{setAddingClient(false);setNewClientName("");}}>×</button>
-                </div>
-              )}
+              <input required autoFocus className="spicy-input" placeholder="Nombre del cliente o empresa" value={form.client_name} onChange={e=>setForm(f=>({...f,client_name:e.target.value}))} style={{ width:"100%",marginTop:4 }}/>
             </label>
 
             <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Categoría
@@ -1995,7 +1979,7 @@ function TicketsView({ tickets, clients, onRefresh }) {
 
             <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:4 }}>
               <button type="button" className="spicy-btn-secondary" onClick={()=>setShowNew(false)}>Cancelar</button>
-              <button type="submit" className="spicy-btn-primary" disabled={saving||!form.client_id||!form.category}>Crear ticket</button>
+              <button type="submit" className="spicy-btn-primary" disabled={saving||!form.client_name.trim()||!form.category}>Crear ticket</button>
             </div>
           </form>
         </div>
@@ -2007,8 +1991,10 @@ function TicketsView({ tickets, clients, onRefresh }) {
           <div onClick={()=>setDetail(null)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}>
             <div onClick={e=>e.stopPropagation()} style={{ background:"white",borderRadius:16,width:"100%",maxWidth:520,maxHeight:"85vh",overflowY:"auto",padding:24,display:"flex",flexDirection:"column",gap:12 }}>
               <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
-                <div>
-                  <div style={{ fontSize:16,fontWeight:700,color:"#111" }}>{clientName(detail.client_id)}</div>
+                <div style={{ flex:1 }}>
+                  <input key={detail.id} defaultValue={detail.client_name}
+                    onBlur={e=>updateTicket(detail,{client_name:e.target.value.trim()||detail.client_name})}
+                    style={{ fontSize:16,fontWeight:700,color:"#111",border:"none",outline:"none",width:"100%",padding:0,fontFamily:"inherit",background:"transparent" }}/>
                   <div style={{ fontSize:12,color:"#aaa",marginTop:3 }}>creado {new Date(detail.created_at).toLocaleDateString("es-UY")}</div>
                 </div>
                 <button onClick={()=>setDetail(null)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#ccc",lineHeight:1 }}>×</button>
@@ -2064,6 +2050,349 @@ function TicketsView({ tickets, clients, onRefresh }) {
   );
 }
 
+// ── Tasks View (Kanban + Calendario) ────────────────────────────────────────
+function TasksView({ tasks, comments, currentUserEmail, onRefresh }) {
+  const todayISO = new Date().toISOString().split("T")[0];
+  const emptyForm = () => ({ title:"", start_date:todayISO, end_date:todayISO, assigned_to:"", priority:"Media", description:"" });
+
+  const [mode, setMode] = useState("kanban"); // 'kanban' | 'calendar'
+  const [calMode, setCalMode] = useState("month"); // 'month' | 'week'
+  const [calCursor, setCalCursor] = useState(new Date());
+  const [filterAssigned, setFilterAssigned] = useState("");
+  const [showNew, setShowNew] = useState(false);
+  const [detail, setDetail] = useState(null);
+  const [dragOverStage, setDragOverStage] = useState(null);
+  const [form, setForm] = useState(emptyForm());
+  const [saving, setSaving] = useState(false);
+  const [newComment, setNewComment] = useState("");
+
+  const visible = filterAssigned ? tasks.filter(t=>t.assigned_to===filterAssigned) : tasks;
+  const prioClass = (p) => p==="Alta" ? "spicy-badge-red" : p==="Media" ? "spicy-badge-amber" : "spicy-badge-gray";
+  const PRIO_COLOR = { Alta: ST_RED, Media: "#D97706", Baja: "#9CA3AF" };
+  const getComments = (taskId) => comments.filter(c=>c.task_id===taskId).sort((a,b)=>a.created_at.localeCompare(b.created_at));
+  const fmtRange = (t) => {
+    const s = new Date(t.start_date+"T00:00:00"), e = new Date(t.end_date+"T00:00:00");
+    const f = (d) => `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}`;
+    return t.start_date === t.end_date ? f(s) : `${f(s)} → ${f(e)}`;
+  };
+
+  async function createTask(e) {
+    e.preventDefault();
+    if (!form.title.trim() || !form.start_date || !form.end_date || form.end_date < form.start_date) return;
+    setSaving(true);
+    await sb.from("tasks").insert({
+      id: "task_"+Date.now(),
+      title: form.title.trim(),
+      start_date: form.start_date,
+      end_date: form.end_date,
+      assigned_to: form.assigned_to || null,
+      priority: form.priority,
+      stage: "Sin Empezar",
+      description: form.description.trim() || null,
+    });
+    setSaving(false);
+    setForm(emptyForm());
+    setShowNew(false);
+    onRefresh();
+  }
+
+  async function updateTask(task, patch) {
+    await sb.from("tasks").update(patch).eq("id", task.id);
+    setDetail(d => d && d.id===task.id ? { ...d, ...patch } : d);
+    onRefresh();
+  }
+
+  async function deleteTask(task) {
+    await sb.from("tasks").delete().eq("id", task.id);
+    setDetail(null);
+    onRefresh();
+  }
+
+  async function addComment(task) {
+    if (!newComment.trim()) return;
+    await sb.from("task_comments").insert({
+      id: "cm_"+Date.now(),
+      task_id: task.id,
+      author: currentUserEmail,
+      text: newComment.trim(),
+    });
+    setNewComment("");
+    onRefresh();
+  }
+
+  function openDetail(task) {
+    setDetail(task);
+    setNewComment("");
+  }
+
+  // ── Calendar grid helpers ──────────────────────────────────────────────
+  function isoOf(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
+  function startOfWeek(d) { const dow=(d.getDay()+6)%7; const s=new Date(d); s.setDate(d.getDate()-dow); return s; }
+  function buildGrid() {
+    if (calMode === "week") return Array.from({length:7},(_,i)=>{ const d=new Date(startOfWeek(calCursor)); d.setDate(d.getDate()+i); return d; });
+    const first = new Date(calCursor.getFullYear(), calCursor.getMonth(), 1);
+    const gridStart = startOfWeek(first);
+    return Array.from({length:42},(_,i)=>{ const d=new Date(gridStart); d.setDate(gridStart.getDate()+i); return d; });
+  }
+  const gridDays = buildGrid();
+  const calLabel = calMode === "month"
+    ? `${MONTH_LABELS[calCursor.getMonth()]} ${calCursor.getFullYear()}`
+    : (() => { const s=gridDays[0], e=gridDays[6]; const f=(d)=>`${d.getDate()} ${MONTH_LABELS[d.getMonth()]}`; return `${f(s)} – ${f(e)}`; })();
+  function shiftCursor(delta) {
+    setCalCursor(c => { const d = new Date(c); if (calMode==="month") d.setMonth(d.getMonth()+delta); else d.setDate(d.getDate()+delta*7); return d; });
+  }
+  function tasksForDay(d) {
+    const iso = isoOf(d);
+    return visible.filter(t => t.start_date <= iso && iso <= t.end_date);
+  }
+
+  const toggleBtn = (active) => ({ padding:"7px 14px",fontSize:12,fontWeight:600,border:"none",cursor:"pointer",background:active?ST_RED:"white",color:active?"white":"#666" });
+
+  return (
+    <>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,gap:12,flexWrap:"wrap" }}>
+        <div>
+          <div style={{ fontSize:20,fontWeight:700,color:"#111" }}>Tareas</div>
+          <div style={{ fontSize:13,color:"#888",marginTop:4 }}>{visible.length} tareas · Operaciones</div>
+        </div>
+        <div style={{ display:"flex",gap:8,alignItems:"center",flexWrap:"wrap" }}>
+          <select className="spicy-select" value={filterAssigned} onChange={e=>setFilterAssigned(e.target.value)}>
+            <option value="">Todos los responsables</option>
+            {TICKET_TEAM.map(n=><option key={n} value={n}>{n}</option>)}
+          </select>
+          <div style={{ display:"flex",border:"1px solid #E0E0E0",borderRadius:8,overflow:"hidden" }}>
+            <button onClick={()=>setMode("kanban")} style={toggleBtn(mode==="kanban")}>Kanban</button>
+            <button onClick={()=>setMode("calendar")} style={toggleBtn(mode==="calendar")}>Calendario</button>
+          </div>
+          <button className="spicy-btn-primary" onClick={()=>setShowNew(true)}>+ Nueva tarea</button>
+        </div>
+      </div>
+
+      {mode==="calendar" && (
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:10 }}>
+          <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+            <button className="spicy-btn-secondary" onClick={()=>shiftCursor(-1)}>‹</button>
+            <div style={{ fontSize:14,fontWeight:600,color:"#111",minWidth:150,textAlign:"center" }}>{calLabel}</div>
+            <button className="spicy-btn-secondary" onClick={()=>shiftCursor(1)}>›</button>
+            <button className="spicy-btn-secondary" onClick={()=>setCalCursor(new Date())}>Hoy</button>
+          </div>
+          <div style={{ display:"flex",border:"1px solid #E0E0E0",borderRadius:8,overflow:"hidden" }}>
+            <button onClick={()=>setCalMode("month")} style={toggleBtn(calMode==="month")}>Mes</button>
+            <button onClick={()=>setCalMode("week")} style={toggleBtn(calMode==="week")}>Semana</button>
+          </div>
+        </div>
+      )}
+
+      {mode==="kanban" ? (
+        <div style={{ overflowX:"auto", paddingBottom:8 }}>
+          <div style={{ display:"flex", gap:14, minWidth: TASK_STAGES.length * 250 }}>
+            {TASK_STAGES.map(stage => {
+              const col = visible.filter(t => t.stage === stage.key);
+              return (
+                <div key={stage.key}
+                  onDragOver={e=>{ e.preventDefault(); setDragOverStage(stage.key); }}
+                  onDragLeave={()=>setDragOverStage(s=>s===stage.key?null:s)}
+                  onDrop={e=>{
+                    e.preventDefault();
+                    const id = e.dataTransfer.getData("text/task-id");
+                    const t = tasks.find(x=>x.id===id);
+                    setDragOverStage(null);
+                    if (t && t.stage!==stage.key) updateTask(t, {stage: stage.key});
+                  }}
+                  style={{
+                    width:236, flexShrink:0, background: dragOverStage===stage.key?"#FFF3EE":"#F7F7F8",
+                    border:"1px solid #EBEBEB", borderRadius:12, padding:10, minHeight:120,
+                  }}>
+                  <div style={{ fontSize:12,fontWeight:700,color:"#555",marginBottom:10,display:"flex",justifyContent:"space-between" }}>
+                    <span>{stage.emoji} {stage.key}</span>
+                    <span style={{ color:"#bbb" }}>{col.length}</span>
+                  </div>
+                  {col.map(t => (
+                    <div key={t.id} draggable
+                      onDragStart={e=>e.dataTransfer.setData("text/task-id", t.id)}
+                      onClick={()=>openDetail(t)}
+                      style={{ background:"white",border:"1px solid #EBEBEB",borderRadius:10,padding:"10px 12px",marginBottom:8,cursor:"grab",boxShadow:"0 1px 2px rgba(0,0,0,0.03)" }}>
+                      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,gap:6 }}>
+                        <span style={{ fontSize:13,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{t.title}</span>
+                        <span className={prioClass(t.priority)}>{t.priority}</span>
+                      </div>
+                      <div style={{ fontSize:11,color:"#999",marginBottom:4 }}>{fmtRange(t)}</div>
+                      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:6,fontSize:11,color:"#aaa" }}>
+                        <span>{t.assigned_to||"Sin asignar"}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {col.length===0 && <div style={{ fontSize:11,color:"#ccc",textAlign:"center",padding:"12px 0" }}>Sin tareas</div>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div style={{ background:"white",border:"1px solid #EBEBEB",borderRadius:12,overflow:"hidden" }}>
+          <div style={{ display:"grid",gridTemplateColumns:"repeat(7,1fr)" }}>
+            {WEEKDAY_LABELS.map(w => (
+              <div key={w} style={{ fontSize:11,fontWeight:700,color:"#999",textAlign:"center",padding:"8px 4px",borderBottom:"1px solid #F0F0F0" }}>{w}</div>
+            ))}
+          </div>
+          <div style={{ display:"grid",gridTemplateColumns:"repeat(7,1fr)" }}>
+            {gridDays.map((d,i) => {
+              const iso = isoOf(d);
+              const inMonth = calMode==="week" || d.getMonth()===calCursor.getMonth();
+              const isToday = iso === todayISO;
+              const dayTasks = tasksForDay(d);
+              const maxChips = calMode==="week" ? 6 : 3;
+              return (
+                <div key={i} style={{
+                  minHeight: calMode==="week" ? 220 : 92, padding:6,
+                  borderRight:(i%7!==6)?"1px solid #F5F5F5":"none",
+                  borderBottom:"1px solid #F5F5F5",
+                  background: inMonth ? "white" : "#FAFAFA",
+                }}>
+                  <div style={{
+                    fontSize:11,fontWeight:isToday?700:500,color:inMonth?(isToday?ST_RED:"#888"):"#ccc",
+                    marginBottom:4,
+                    width:isToday?18:"auto",height:isToday?18:"auto",
+                    display:isToday?"flex":"block",alignItems:"center",justifyContent:"center",
+                    background:isToday?ST_RED_BG:"transparent",borderRadius:isToday?"50%":0,
+                  }}>{d.getDate()}</div>
+                  {dayTasks.slice(0,maxChips).map(t => (
+                    <div key={t.id} onClick={()=>openDetail(t)} title={t.title} style={{
+                      fontSize:10,padding:"2px 5px 2px 6px",marginBottom:2,borderRadius:4,
+                      background:"#F7F7F8",borderLeft:`3px solid ${PRIO_COLOR[t.priority]}`,
+                      cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:"#333",
+                    }}>{t.title}</div>
+                  ))}
+                  {dayTasks.length>maxChips && <div style={{ fontSize:10,color:"#aaa",paddingLeft:4 }}>+{dayTasks.length-maxChips} más</div>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* New task modal */}
+      {showNew && (
+        <div onClick={()=>setShowNew(false)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}>
+          <form onClick={e=>e.stopPropagation()} onSubmit={createTask} style={{ background:"white",borderRadius:16,width:"100%",maxWidth:480,padding:24,display:"flex",flexDirection:"column",gap:14,maxHeight:"85vh",overflowY:"auto" }}>
+            <div style={{ fontSize:16,fontWeight:700,color:"#111" }}>Nueva tarea</div>
+
+            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Nombre de la tarea
+              <input required autoFocus className="spicy-input" value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))} style={{ width:"100%",marginTop:4 }}/>
+            </label>
+
+            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Fecha
+              <div style={{ display:"flex",gap:8,alignItems:"center",marginTop:4 }}>
+                <input required type="date" className="spicy-input" value={form.start_date} onChange={e=>{ const v=e.target.value; setForm(f=>({...f,start_date:v,end_date: f.end_date<v?v:f.end_date})); }} style={{ flex:1 }}/>
+                <span style={{ color:"#bbb" }}>→</span>
+                <input required type="date" className="spicy-input" min={form.start_date} value={form.end_date} onChange={e=>setForm(f=>({...f,end_date:e.target.value}))} style={{ flex:1 }}/>
+              </div>
+            </label>
+
+            <div style={{ display:"flex",gap:12 }}>
+              <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Responsable
+                <select className="spicy-select" value={form.assigned_to} onChange={e=>setForm(f=>({...f,assigned_to:e.target.value}))} style={{ width:"100%",marginTop:4 }}>
+                  <option value="">Sin asignar</option>
+                  {TICKET_TEAM.map(n=><option key={n} value={n}>{n}</option>)}
+                </select>
+              </label>
+              <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Prioridad
+                <select className="spicy-select" value={form.priority} onChange={e=>setForm(f=>({...f,priority:e.target.value}))} style={{ width:"100%",marginTop:4 }}>
+                  {TICKET_PRIORITIES.map(p=><option key={p} value={p}>{p}</option>)}
+                </select>
+              </label>
+            </div>
+
+            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Descripción
+              <textarea className="spicy-input" rows={3} value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} style={{ width:"100%",marginTop:4,resize:"vertical" }}/>
+            </label>
+
+            <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:4 }}>
+              <button type="button" className="spicy-btn-secondary" onClick={()=>setShowNew(false)}>Cancelar</button>
+              <button type="submit" className="spicy-btn-primary" disabled={saving||!form.title.trim()||form.end_date<form.start_date}>Crear tarea</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Task detail modal */}
+      {detail && (
+        <div onClick={()=>setDetail(null)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:"white",borderRadius:16,width:"100%",maxWidth:520,maxHeight:"85vh",overflowY:"auto",padding:24,display:"flex",flexDirection:"column",gap:12 }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
+              <input key={detail.id} defaultValue={detail.title}
+                onBlur={e=>updateTask(detail,{title:e.target.value.trim()||detail.title})}
+                style={{ fontSize:16,fontWeight:700,color:"#111",border:"none",outline:"none",flex:1,padding:0,fontFamily:"inherit",background:"transparent" }}/>
+              <button onClick={()=>setDetail(null)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#ccc",lineHeight:1 }}>×</button>
+            </div>
+
+            <div style={{ display:"flex",gap:12 }}>
+              <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Inicio
+                <input type="date" className="spicy-input" value={detail.start_date} onChange={e=>{ const v=e.target.value; updateTask(detail, { start_date:v, end_date: detail.end_date<v?v:detail.end_date }); }} style={{ width:"100%",marginTop:4 }}/>
+              </label>
+              <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Fin
+                <input type="date" className="spicy-input" min={detail.start_date} value={detail.end_date} onChange={e=>updateTask(detail,{end_date:e.target.value})} style={{ width:"100%",marginTop:4 }}/>
+              </label>
+            </div>
+
+            <div style={{ display:"flex",gap:12 }}>
+              <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Etapa
+                <select className="spicy-select" value={detail.stage} onChange={e=>updateTask(detail,{stage:e.target.value})} style={{ width:"100%",marginTop:4 }}>
+                  {TASK_STAGES.map(s=><option key={s.key} value={s.key}>{s.emoji} {s.key}</option>)}
+                </select>
+              </label>
+              <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Prioridad
+                <select className="spicy-select" value={detail.priority} onChange={e=>updateTask(detail,{priority:e.target.value})} style={{ width:"100%",marginTop:4 }}>
+                  {TICKET_PRIORITIES.map(p=><option key={p} value={p}>{p}</option>)}
+                </select>
+              </label>
+            </div>
+
+            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Responsable
+              <select className="spicy-select" value={detail.assigned_to||""} onChange={e=>updateTask(detail,{assigned_to:e.target.value||null})} style={{ width:"100%",marginTop:4 }}>
+                <option value="">Sin asignar</option>
+                {TICKET_TEAM.map(n=><option key={n} value={n}>{n}</option>)}
+              </select>
+            </label>
+
+            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Descripción
+              <textarea key={detail.id} defaultValue={detail.description||""} onBlur={e=>updateTask(detail,{description:e.target.value||null})} className="spicy-input" rows={3} style={{ width:"100%",marginTop:4,resize:"vertical" }}/>
+            </label>
+
+            <div>
+              <div style={{ fontSize:12,color:"#666",fontWeight:500,marginBottom:6 }}>Comentarios</div>
+              <div style={{ display:"flex",flexDirection:"column",gap:6,maxHeight:180,overflowY:"auto",marginBottom:8 }}>
+                {getComments(detail.id).map(c=>(
+                  <div key={c.id} style={{ background:"#F7F7F8",borderRadius:8,padding:"7px 10px" }}>
+                    <div style={{ display:"flex",justifyContent:"space-between",fontSize:11,color:"#999",marginBottom:2 }}>
+                      <span style={{ fontWeight:600,color:"#666" }}>{c.author}</span>
+                      <span>{new Date(c.created_at).toLocaleString("es-UY",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</span>
+                    </div>
+                    <div style={{ fontSize:13,color:"#333" }}>{c.text}</div>
+                  </div>
+                ))}
+                {getComments(detail.id).length===0 && <div style={{ fontSize:12,color:"#ccc" }}>Sin comentarios todavía.</div>}
+              </div>
+              <div style={{ display:"flex",gap:8 }}>
+                <input className="spicy-input" placeholder="Agregar comentario..." value={newComment}
+                  onChange={e=>setNewComment(e.target.value)}
+                  onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); addComment(detail); } }}
+                  style={{ flex:1 }}/>
+                <button className="spicy-btn-primary" onClick={()=>addComment(detail)} disabled={!newComment.trim()}>Enviar</button>
+              </div>
+            </div>
+
+            <div style={{ display:"flex",justifyContent:"space-between",marginTop:4 }}>
+              <button className="spicy-btn-secondary" style={{ color:ST_RED,borderColor:ST_RED_BG }} onClick={()=>deleteTask(detail)}>Eliminar tarea</button>
+              <button className="spicy-btn-primary" onClick={()=>setDetail(null)}>Listo</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // ── Main App ───────────────────────────────────────────────────────────────
 export default function SpicyFinanzas() {
   const [session,  setSession]  = useState(null);
@@ -2078,7 +2407,8 @@ export default function SpicyFinanzas() {
   const [catsIncome,  setCatsIncome]  = useState([]);
   const [catsExpense, setCatsExpense] = useState([]);
   const [tickets,     setTickets]     = useState([]);
-  const [clients,     setClients]     = useState([]);
+  const [tasks,       setTasks]       = useState([]);
+  const [taskComments,setTaskComments]= useState([]);
   const [dataLoaded, setDataLoaded]   = useState(false);
 
   const [view,      setView]      = useState("dashboard");
@@ -2108,7 +2438,7 @@ export default function SpicyFinanzas() {
 
   async function loadAll() {
     setDataLoaded(false);
-    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,clientsRes]=await Promise.all([
+    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,tasksRes,taskCommentsRes]=await Promise.all([
       sb.from("user_roles").select("role").eq("user_id",session.user.id).single(),
       sb.from("transactions").select("*").order("date",{ascending:false}),
       sb.from("accounts").select("*").order("created_at"),
@@ -2117,7 +2447,8 @@ export default function SpicyFinanzas() {
       sb.from("referred_clients").select("*").order("name"),
       sb.from("referred_client_payments").select("*").order("date",{ascending:false}),
       sb.from("tickets").select("*").order("created_at",{ascending:false}),
-      sb.from("clients").select("*").order("name"),
+      sb.from("tasks").select("*").order("start_date"),
+      sb.from("task_comments").select("*").order("created_at"),
     ]);
     setRole(roleRes.data?.role||"reader");
     setTxns(txRes.data||[]);
@@ -2128,7 +2459,8 @@ export default function SpicyFinanzas() {
     setCatsIncome((catRes.data||[]).filter(c=>c.type==="income"));
     setCatsExpense((catRes.data||[]).filter(c=>c.type==="expense"));
     setTickets(ticketsRes.data||[]);
-    setClients(clientsRes.data||[]);
+    setTasks(tasksRes.data||[]);
+    setTaskComments(taskCommentsRes.data||[]);
     setDataLoaded(true);
   }
 
@@ -2462,7 +2794,8 @@ export default function SpicyFinanzas() {
       {view==="referrals"&&<ReferralDashboard txns={txns} referrers={referrers} referredClients={referredClients} payments={referredClientPayments} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="runway"&&<RunwayView txns={txns} accounts={accounts}/>}
       {view==="pnl"&&<PnLView txns={txns}/>}
-      {view==="tickets"&&<TicketsView tickets={tickets} clients={clients} onRefresh={loadAll}/>}
+      {view==="tickets"&&<TicketsView tickets={tickets} onRefresh={loadAll}/>}
+      {view==="tasks"&&<TasksView tasks={tasks} comments={taskComments} currentUserEmail={session.user.email} onRefresh={loadAll}/>}
       {view==="services"&&<ServicesView/>}
       {view==="categories"&&<CategoriesPanel catsIncome={catsIncome} catsExpense={catsExpense} isAdmin={isAdmin} onRefresh={loadAll}/>}
 
