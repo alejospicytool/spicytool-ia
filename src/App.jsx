@@ -2700,6 +2700,10 @@ export default function SpicyFinanzas() {
   const curMK=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
   const referralOwed=txns.filter(t=>t.type==="income"&&t.referrer_id&&monthKey(t.date)===curMK).reduce((s,t)=>s+Number(t.amount),0)*COMMISSION_RATE;
 
+  const urgentTicketsCount = tickets.filter(t=>t.status==="🚨 Urgente").length;
+  const todayISOForTasks = new Date().toISOString().split("T")[0];
+  const overdueTasksCount = tasks.filter(t=>t.end_date<todayISOForTasks && !["Finalizado","Archivado"].includes(t.stage)).length;
+
   const sourceBadge=(t)=>{
     if(t.source)return <span style={{ fontSize:10,padding:"1px 5px",borderRadius:4,marginLeft:5,background:t.source==="mercury"?"var(--color-background-info)":"var(--color-background-success)",color:t.source==="mercury"?"var(--color-text-info)":"var(--color-text-success)" }}>{t.source}</span>;
     if(t.referrer_id)return <span style={{ fontSize:10,padding:"1px 5px",borderRadius:4,marginLeft:5,background:"var(--color-background-warning)",color:"var(--color-text-warning)" }}>ref</span>;
@@ -2744,6 +2748,8 @@ export default function SpicyFinanzas() {
                     <span style={{ fontSize:14 }}>{NAV_ICONS[v]}</span>
                     {NAV_LABELS[v]}
                     {v==="referrals"&&referralOwed>0&&<span className="spicy-nav-badge">{fmt(referralOwed)}</span>}
+                    {v==="tickets"&&urgentTicketsCount>0&&<span className="spicy-nav-badge">{urgentTicketsCount}</span>}
+                    {v==="tasks"&&overdueTasksCount>0&&<span className="spicy-nav-badge">{overdueTasksCount}</span>}
                   </button>
                 ))}
               </div>
