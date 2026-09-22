@@ -119,13 +119,13 @@ const NAV_ICONS = {
   dashboard:"▦", accounts:"🏦", add:"+", history:"☰", runway:"📈", pnl:"📊",
   referrals:"🤝",
   services:"⚡", categories:"⊞",
-  tickets:"🎫", tasks:"📋"
+  opsdash:"🧭", tickets:"🎫", tasks:"📋"
 };
 const NAV_LABELS = {
   dashboard:"Resumen", accounts:"Cuentas", add:"Registrar", history:"Historial", runway:"Runway", pnl:"P&L",
   referrals:"Referidos",
   services:"Servicios", categories:"Categorías",
-  tickets:"Tickets", tasks:"Tareas"
+  opsdash:"Resumen", tickets:"Tickets", tasks:"Tareas"
 };
 
 const NAV_SECTIONS = [
@@ -142,7 +142,7 @@ const NAV_SECTIONS = [
   },
   {
     label: "Operaciones",
-    views: ["tickets","tasks"],
+    views: ["opsdash","tickets","tasks"],
     adminOnly: false,
   },
   {
@@ -1823,6 +1823,128 @@ function ServicesView() {
   );
 }
 
+// ── Operations Summary (Resumen de Operaciones) ─────────────────────────────
+function fmtDuration(ms) {
+  if (ms==null) return "—";
+  const hours = ms / 3600000;
+  if (hours < 1) return Math.max(1,Math.round(ms/60000)) + "m";
+  if (hours < 48) return Math.round(hours) + "h";
+  return Math.round(hours/24) + "d";
+}
+
+function OperationsSummaryView({ tickets, tasks, setView }) {
+  const todayISO = new Date().toISOString().split("T")[0];
+  const in7days = (() => { const d=new Date(); d.setDate(d.getDate()+7); return d.toISOString().split("T")[0]; })();
+
+  const urgentTickets = tickets.filter(t=>t.status==="🚨 Urgente");
+  const respondedTickets = tickets.filter(t=>t.first_response_at);
+  const resolvedTickets  = tickets.filter(t=>t.resolved_at);
+  const avgFirstResponse = respondedTickets.length
+    ? respondedTickets.reduce((s,t)=>s+(new Date(t.first_response_at)-new Date(t.created_at)),0)/respondedTickets.length
+    : null;
+  const avgResolution = resolvedTickets.length
+    ? resolvedTickets.reduce((s,t)=>s+(new Date(t.resolved_at)-new Date(t.created_at)),0)/resolvedTickets.length
+    : null;
+
+  const overdueTasks = tasks.filter(t=>t.end_date<todayISO && !["Finalizado","Archivado"].includes(t.stage));
+  const dueSoonTasks  = tasks.filter(t=>t.end_date>=todayISO && t.end_date<=in7days && !["Finalizado","Archivado"].includes(t.stage));
+
+  const ticketsByStatus = TICKET_STATUSES.map(s=>({ label:s, count: tickets.filter(t=>t.status===s).length }));
+  const maxTicketsByStatus = Math.max(1, ...ticketsByStatus.map(x=>x.count));
+  const tasksByStage = TASK_STAGES.map(s=>({ label:`${s.emoji} ${s.key}`, count: tasks.filter(t=>t.stage===s.key).length }));
+  const maxTasksByStage = Math.max(1, ...tasksByStage.map(x=>x.count));
+
+  const activeTickets = tickets.filter(t=>!["Solucionado","Archivado"].includes(t.status));
+  const activeTasks   = tasks.filter(t=>!["Finalizado","Archivado"].includes(t.stage));
+  const workload = [...TICKET_TEAM,""].map(name=>({
+    name: name||"Sin asignar",
+    tickets: activeTickets.filter(t=>(t.assigned_to||"")===name).length,
+    tasks:   activeTasks.filter(t=>(t.assigned_to||"")===name).length,
+  })).filter(w=>w.tickets>0||w.tasks>0);
+
+  const kpis = [
+    { label:"Tickets urgentes", value:urgentTickets.length, warn:urgentTickets.length>0, onClick:()=>setView("tickets") },
+    { label:"Primera respuesta prom.", value:fmtDuration(avgFirstResponse), sub:`${respondedTickets.length} tickets con dato` },
+    { label:"Resolución prom.", value:fmtDuration(avgResolution), sub:`${resolvedTickets.length} tickets resueltos` },
+    { label:"Tareas vencidas", value:overdueTasks.length, warn:overdueTasks.length>0, onClick:()=>setView("tasks") },
+  ];
+
+  return (
+    <>
+      <div style={{ fontSize:20,fontWeight:700,color:"#111",marginBottom:20 }}>Resumen de Operaciones</div>
+
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:20 }}>
+        {kpis.map(k=>(
+          <div key={k.label} className="spicy-kpi" style={{ cursor:k.onClick?"pointer":"default" }} onClick={k.onClick}>
+            <div className="spicy-kpi-label">{k.label}</div>
+            <div className="spicy-kpi-value" style={{ color:k.warn?ST_RED:"#111" }}>{k.value}</div>
+            {k.sub&&<div className="spicy-kpi-sub">{k.sub}</div>}
+          </div>
+        ))}
+      </div>
+
+      {dueSoonTasks.length>0&&(
+        <div onClick={()=>setView("tasks")} style={{ background:"#FEF3C7",border:"1px solid #FCD34D",borderRadius:10,padding:"12px 16px",marginBottom:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between" }}>
+          <div style={{ fontSize:13,color:"#92400E",fontWeight:600 }}>⚠ {dueSoonTasks.length} tarea{dueSoonTasks.length===1?"":"s"} vence{dueSoonTasks.length===1?"":"n"} en los próximos 7 días</div>
+          <span style={{ fontSize:12,color:"#92400E",fontWeight:600 }}>Ver →</span>
+        </div>
+      )}
+
+      <div style={{ display:"flex",gap:16,flexWrap:"wrap" }}>
+        <div className="spicy-card" style={{ flex:"1 1 320px" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+            <span style={{ fontSize:14,fontWeight:600,color:"#111" }}>Tickets por estado</span>
+            <button onClick={()=>setView("tickets")} style={{ fontSize:12,color:ST_RED,background:"none",border:"none",cursor:"pointer",fontWeight:600 }}>Ver todos →</button>
+          </div>
+          {ticketsByStatus.every(x=>x.count===0) && <div style={{ fontSize:13,color:"#bbb",textAlign:"center",padding:"1rem" }}>Sin tickets todavía.</div>}
+          {ticketsByStatus.filter(x=>x.count>0).map(x=>(
+            <div key={x.label} style={{ marginBottom:12 }}>
+              <div style={{ display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6 }}>
+                <span style={{ color:"#555" }}>{x.label}</span>
+                <span style={{ fontWeight:600,color:"#111" }}>{x.count}</span>
+              </div>
+              <div style={{ height:6,background:"#F3F3F3",borderRadius:4,overflow:"hidden" }}>
+                <div style={{ height:"100%",width:`${Math.round((x.count/maxTicketsByStatus)*100)}%`,background:ST_RED,borderRadius:4 }}/>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="spicy-card" style={{ flex:"1 1 320px" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+            <span style={{ fontSize:14,fontWeight:600,color:"#111" }}>Tareas por etapa</span>
+            <button onClick={()=>setView("tasks")} style={{ fontSize:12,color:ST_RED,background:"none",border:"none",cursor:"pointer",fontWeight:600 }}>Ver todas →</button>
+          </div>
+          {tasksByStage.every(x=>x.count===0) && <div style={{ fontSize:13,color:"#bbb",textAlign:"center",padding:"1rem" }}>Sin tareas todavía.</div>}
+          {tasksByStage.filter(x=>x.count>0).map(x=>(
+            <div key={x.label} style={{ marginBottom:12 }}>
+              <div style={{ display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6 }}>
+                <span style={{ color:"#555" }}>{x.label}</span>
+                <span style={{ fontWeight:600,color:"#111" }}>{x.count}</span>
+              </div>
+              <div style={{ height:6,background:"#F3F3F3",borderRadius:4,overflow:"hidden" }}>
+                <div style={{ height:"100%",width:`${Math.round((x.count/maxTasksByStage)*100)}%`,background:"#533AB7",borderRadius:4 }}/>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="spicy-card">
+        <div style={{ fontSize:14,fontWeight:600,color:"#111",marginBottom:14 }}>Carga por responsable <span style={{ fontSize:11,color:"#aaa",fontWeight:400 }}>— tickets y tareas activos (no resueltos/archivados)</span></div>
+        {workload.length===0 && <div style={{ fontSize:13,color:"#bbb",textAlign:"center",padding:"1rem" }}>Nada asignado todavía.</div>}
+        {workload.map(w=>(
+          <div key={w.name} className="spicy-table-row">
+            <span style={{ flex:1,fontSize:13,fontWeight:500,color:"#111" }}>{w.name}</span>
+            <span className="spicy-badge-red" style={{ marginRight:6 }}>{w.tickets} ticket{w.tickets===1?"":"s"}</span>
+            <span className="spicy-badge-gray">{w.tasks} tarea{w.tasks===1?"":"s"}</span>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 // ── Tickets View (Kanban) ───────────────────────────────────────────────────
 function TicketsView({ tickets, onRefresh }) {
   const [showNew, setShowNew] = useState(false);
@@ -2794,6 +2916,7 @@ export default function SpicyFinanzas() {
       {view==="referrals"&&<ReferralDashboard txns={txns} referrers={referrers} referredClients={referredClients} payments={referredClientPayments} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="runway"&&<RunwayView txns={txns} accounts={accounts}/>}
       {view==="pnl"&&<PnLView txns={txns}/>}
+      {view==="opsdash"&&<OperationsSummaryView tickets={tickets} tasks={tasks} setView={setView}/>}
       {view==="tickets"&&<TicketsView tickets={tickets} onRefresh={loadAll}/>}
       {view==="tasks"&&<TasksView tasks={tasks} comments={taskComments} currentUserEmail={session.user.email} onRefresh={loadAll}/>}
       {view==="services"&&<ServicesView/>}
