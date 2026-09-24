@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
+import { ONBOARDING_STAGES, ONBOARDING_LEAD_SOURCES, ONBOARDING_PAYMENT_STATUS, calcularEstado, calcularAvance, diasEntre, ESTADO_BADGE } from "./onboardingLogic.js";
 
 // ── Supabase ───────────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://khuavhbraikzreyhptog.supabase.co";
@@ -119,13 +120,13 @@ const NAV_ICONS = {
   dashboard:"▦", accounts:"🏦", add:"+", history:"☰", runway:"📈", pnl:"📊",
   referrals:"🤝",
   services:"⚡", categories:"⊞",
-  opsdash:"🧭", tickets:"🎫", tasks:"📋", usuarios:"👥"
+  opsdash:"🧭", tickets:"🎫", tasks:"📋", onboarding:"🚀", usuarios:"👥"
 };
 const NAV_LABELS = {
   dashboard:"Resumen", accounts:"Cuentas", add:"Registrar", history:"Historial", runway:"Runway", pnl:"P&L",
   referrals:"Referidos",
   services:"Servicios", categories:"Categorías",
-  opsdash:"Resumen", tickets:"Tickets", tasks:"Tareas", usuarios:"Usuarios"
+  opsdash:"Resumen", tickets:"Tickets", tasks:"Tareas", onboarding:"Onboarding", usuarios:"Usuarios"
 };
 const ADMIN_ONLY_VIEWS = ["add","usuarios"];
 
@@ -143,7 +144,7 @@ const NAV_SECTIONS = [
   },
   {
     label: "Operaciones",
-    views: ["opsdash","tickets","tasks"],
+    views: ["opsdash","tickets","tasks","onboarding"],
     adminOnly: false,
   },
   {
@@ -2641,6 +2642,362 @@ function TasksView({ tasks, comments, currentUserEmail, onRefresh }) {
   );
 }
 
+// ── Onboarding View (Kanban + Tabla) ─────────────────────────────────────────
+function OnboardingView({ onboarding, history, onRefresh }) {
+  const todayISO = new Date().toISOString().split("T")[0];
+  const emptyForm = () => ({ client_name:"", fecha_registro:todayISO, responsable:"", fuente_de_leads:[], bloqueado:false });
+
+  const [mode, setMode] = useState("kanban"); // 'kanban' | 'tabla'
+  const [filterEtapa, setFilterEtapa] = useState("");
+  const [filterEstado, setFilterEstado] = useState("");
+  const [filterResponsable, setFilterResponsable] = useState("");
+  const [filterBloqueado, setFilterBloqueado] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+  const [detail, setDetail] = useState(null);
+  const [dragOverEtapa, setDragOverEtapa] = useState(null);
+  const [form, setForm] = useState(emptyForm());
+  const [saving, setSaving] = useState(false);
+
+  const withEstado = onboarding.map(r => ({ ...r, _estado: calcularEstado(r, new Date()) }));
+  const visible = withEstado.filter(r =>
+    (!filterEtapa || r.etapa_actual===filterEtapa) &&
+    (!filterEstado || r._estado===filterEstado) &&
+    (!filterResponsable || r.responsable===filterResponsable) &&
+    (!filterBloqueado || r.bloqueado)
+  );
+  const responsables = [...new Set(onboarding.map(r=>r.responsable).filter(Boolean))];
+
+  const getHistory = (id) => history.filter(h=>h.onboarding_id===id).sort((a,b)=>a.fecha_entrada.localeCompare(b.fecha_entrada));
+
+  async function createRecord(e) {
+    e.preventDefault();
+    if (!form.client_name.trim()) return;
+    setSaving(true);
+    const id = "ob_"+Date.now();
+    await sb.from("onboarding").insert({
+      id,
+      client_name: form.client_name.trim(),
+      etapa_actual: ONBOARDING_STAGES[0].key,
+      fecha_registro: form.fecha_registro,
+      fecha_entrada_etapa_actual: form.fecha_registro,
+      responsable: form.responsable || null,
+      bloqueado: form.bloqueado,
+      fuente_de_leads: form.fuente_de_leads,
+      estado_de_pago: "No Cobrado",
+    });
+    await sb.from("onboarding_stage_history").insert({
+      id: "oh_"+Date.now(), onboarding_id:id, etapa:ONBOARDING_STAGES[0].key, fecha_entrada: form.fecha_registro,
+    });
+    setSaving(false);
+    setForm(emptyForm());
+    setShowNew(false);
+    onRefresh();
+  }
+
+  async function updateRecord(record, patch) {
+    await sb.from("onboarding").update(patch).eq("id", record.id);
+    setDetail(d => d && d.id===record.id ? { ...d, ...patch } : d);
+    onRefresh();
+  }
+
+  async function moveEtapa(record, newEtapa) {
+    if (record.etapa_actual === newEtapa) return;
+    const patch = { etapa_actual: newEtapa, fecha_entrada_etapa_actual: todayISO };
+    await sb.from("onboarding").update(patch).eq("id", record.id);
+    await sb.from("onboarding_stage_history").insert({ id:"oh_"+Date.now(), onboarding_id:record.id, etapa:newEtapa, fecha_entrada:todayISO });
+    setDetail(d => d && d.id===record.id ? { ...d, ...patch } : d);
+    onRefresh();
+  }
+
+  async function toggleLeadSource(record, source, checked) {
+    const current = record.fuente_de_leads || [];
+    const next = checked ? [...current, source] : current.filter(s=>s!==source);
+    await updateRecord(record, { fuente_de_leads: next });
+  }
+
+  async function toggleIntegracion(record, source, checked) {
+    const current = record.integraciones_pendientes || [];
+    const next = checked ? [...current, source] : current.filter(s=>s!==source);
+    await updateRecord(record, { integraciones_pendientes: next });
+  }
+
+  async function deleteRecord(record) {
+    await sb.from("onboarding").delete().eq("id", record.id);
+    setDetail(null);
+    onRefresh();
+  }
+
+  const toggleBtn = (active) => ({ padding:"7px 14px",fontSize:12,fontWeight:600,border:"none",cursor:"pointer",background:active?ST_RED:"white",color:active?"white":"#666" });
+
+  return (
+    <>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,gap:12,flexWrap:"wrap" }}>
+        <div>
+          <div style={{ fontSize:20,fontWeight:700,color:"#111" }}>Onboarding</div>
+          <div style={{ fontSize:13,color:"#888",marginTop:4 }}>{visible.length} de {onboarding.length} clientes · Operaciones</div>
+        </div>
+        <div style={{ display:"flex",gap:8,alignItems:"center",flexWrap:"wrap" }}>
+          <div style={{ display:"flex",border:"1px solid #E0E0E0",borderRadius:8,overflow:"hidden" }}>
+            <button onClick={()=>setMode("kanban")} style={toggleBtn(mode==="kanban")}>Kanban</button>
+            <button onClick={()=>setMode("tabla")} style={toggleBtn(mode==="tabla")}>Tabla</button>
+          </div>
+          <button className="spicy-btn-primary" onClick={()=>setShowNew(true)}>+ Nuevo cliente</button>
+        </div>
+      </div>
+
+      {/* Filtros */}
+      <div style={{ display:"flex",gap:8,flexWrap:"wrap",marginBottom:16,alignItems:"center" }}>
+        <select className="spicy-select" value={filterEtapa} onChange={e=>setFilterEtapa(e.target.value)}>
+          <option value="">Todas las etapas</option>
+          {ONBOARDING_STAGES.map(s=><option key={s.key} value={s.key}>{s.key}</option>)}
+        </select>
+        <select className="spicy-select" value={filterEstado} onChange={e=>setFilterEstado(e.target.value)}>
+          <option value="">Todos los estados</option>
+          {Object.keys(ESTADO_BADGE).map(k=><option key={k} value={k}>{ESTADO_BADGE[k].label}</option>)}
+        </select>
+        <select className="spicy-select" value={filterResponsable} onChange={e=>setFilterResponsable(e.target.value)}>
+          <option value="">Todos los responsables</option>
+          {responsables.map(r=><option key={r} value={r}>{r}</option>)}
+        </select>
+        <label style={{ display:"flex",alignItems:"center",gap:6,fontSize:13,color:"#666" }}>
+          <input type="checkbox" checked={filterBloqueado} onChange={e=>setFilterBloqueado(e.target.checked)}/> Solo bloqueados
+        </label>
+      </div>
+
+      {mode==="kanban" ? (
+        <div style={{ overflowX:"auto", paddingBottom:8 }}>
+          <div style={{ display:"flex", gap:14, minWidth: ONBOARDING_STAGES.length * 240 }}>
+            {ONBOARDING_STAGES.map(stage => {
+              const col = visible.filter(r=>r.etapa_actual===stage.key);
+              return (
+                <div key={stage.key}
+                  onDragOver={e=>{ e.preventDefault(); setDragOverEtapa(stage.key); }}
+                  onDragLeave={()=>setDragOverEtapa(s=>s===stage.key?null:s)}
+                  onDrop={e=>{
+                    e.preventDefault();
+                    const id = e.dataTransfer.getData("text/onboarding-id");
+                    const r = onboarding.find(x=>x.id===id);
+                    setDragOverEtapa(null);
+                    if (r) moveEtapa(r, stage.key);
+                  }}
+                  style={{
+                    width:224, flexShrink:0, background: dragOverEtapa===stage.key?"#FFF3EE":"#F7F7F8",
+                    border:"1px solid #EBEBEB", borderRadius:12, padding:10, minHeight:120,
+                  }}>
+                  <div style={{ fontSize:12,fontWeight:700,color:"#555",marginBottom:10,display:"flex",justifyContent:"space-between" }}>
+                    <span>{stage.key}</span>
+                    <span style={{ color:"#bbb" }}>{col.length}</span>
+                  </div>
+                  {col.map(r => {
+                    const badge = ESTADO_BADGE[r._estado] || ESTADO_BADGE["sin fecha"];
+                    return (
+                      <div key={r.id} draggable
+                        onDragStart={e=>e.dataTransfer.setData("text/onboarding-id", r.id)}
+                        onClick={()=>setDetail(r)}
+                        style={{ background:"white",border:"1px solid #EBEBEB",borderRadius:10,padding:"10px 12px",marginBottom:8,cursor:"grab",boxShadow:"0 1px 2px rgba(0,0,0,0.03)" }}>
+                        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,gap:6 }}>
+                          <span style={{ fontSize:13,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{r.client_name}</span>
+                          <span style={{ fontSize:10,padding:"2px 7px",borderRadius:5,fontWeight:600,background:badge.bg,color:badge.color,flexShrink:0 }}>{badge.label}</span>
+                        </div>
+                        <div style={{ height:4,background:"#F3F3F3",borderRadius:2,overflow:"hidden",marginBottom:6 }}>
+                          <div style={{ height:"100%",width:`${Math.round(calcularAvance(r.etapa_actual)*100)}%`,background:"#533AB7",borderRadius:2 }}/>
+                        </div>
+                        <div style={{ fontSize:11,color:"#aaa" }}>{r.responsable||"Sin asignar"}</div>
+                      </div>
+                    );
+                  })}
+                  {col.length===0 && <div style={{ fontSize:11,color:"#ccc",textAlign:"center",padding:"12px 0" }}>Sin clientes</div>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="spicy-card" style={{ padding:0,overflow:"hidden" }}>
+          <div style={{ overflowX:"auto" }}>
+            <table style={{ borderCollapse:"collapse",width:"100%",minWidth:820 }}>
+              <thead>
+                <tr style={{ background:"#FAFAFA" }}>
+                  {["Cliente","Etapa","Responsable","Estado","Avance","Días registro","Días etapa","Pago","Bloq."].map(h=>(
+                    <th key={h} style={{ textAlign:"left",fontSize:11,color:"#888",fontWeight:600,padding:"10px 12px",borderBottom:"1px solid #EBEBEB",whiteSpace:"nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map(r=>{
+                  const badge = ESTADO_BADGE[r._estado] || ESTADO_BADGE["sin fecha"];
+                  return (
+                    <tr key={r.id} onClick={()=>setDetail(r)} style={{ cursor:"pointer" }}>
+                      <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:13,fontWeight:500,color:"#111" }}>{r.client_name}</td>
+                      <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:"#555" }}>{r.etapa_actual}</td>
+                      <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:"#555" }}>{r.responsable||"—"}</td>
+                      <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5" }}>
+                        <span style={{ fontSize:10,padding:"2px 7px",borderRadius:5,fontWeight:600,background:badge.bg,color:badge.color }}>{badge.label}</span>
+                      </td>
+                      <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:"#555",minWidth:80 }}>
+                        <div style={{ height:5,background:"#F3F3F3",borderRadius:3,overflow:"hidden" }}>
+                          <div style={{ height:"100%",width:`${Math.round(calcularAvance(r.etapa_actual)*100)}%`,background:"#533AB7" }}/>
+                        </div>
+                      </td>
+                      <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:"#555" }}>{diasEntre(r.fecha_registro)}</td>
+                      <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:"#555" }}>{diasEntre(r.fecha_entrada_etapa_actual)}</td>
+                      <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:"#555" }}>{r.estado_de_pago}</td>
+                      <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12 }}>{r.bloqueado?"🔒":""}</td>
+                    </tr>
+                  );
+                })}
+                {visible.length===0 && (
+                  <tr><td colSpan={9} style={{ padding:"20px",textAlign:"center",color:"#ccc",fontSize:13 }}>Sin resultados.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Nuevo cliente modal */}
+      {showNew && (
+        <div onClick={()=>setShowNew(false)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}>
+          <form onClick={e=>e.stopPropagation()} onSubmit={createRecord} style={{ background:"white",borderRadius:16,width:"100%",maxWidth:420,padding:24,display:"flex",flexDirection:"column",gap:14,maxHeight:"85vh",overflowY:"auto" }}>
+            <div style={{ fontSize:16,fontWeight:700,color:"#111" }}>Nuevo cliente en onboarding</div>
+
+            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Cliente / Empresa
+              <input required autoFocus className="spicy-input" value={form.client_name} onChange={e=>setForm(f=>({...f,client_name:e.target.value}))} style={{ width:"100%",marginTop:4 }}/>
+            </label>
+
+            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Fecha de registro
+              <input type="date" className="spicy-input" value={form.fecha_registro} onChange={e=>setForm(f=>({...f,fecha_registro:e.target.value}))} style={{ width:"100%",marginTop:4 }}/>
+            </label>
+
+            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Responsable
+              <select className="spicy-select" value={form.responsable} onChange={e=>setForm(f=>({...f,responsable:e.target.value}))} style={{ width:"100%",marginTop:4 }}>
+                <option value="">Sin asignar</option>
+                {TICKET_TEAM.map(n=><option key={n} value={n}>{n}</option>)}
+              </select>
+            </label>
+
+            <div style={{ fontSize:12,color:"#666",fontWeight:500 }}>Fuente de leads
+              <div style={{ display:"flex",flexWrap:"wrap",gap:10,marginTop:6 }}>
+                {ONBOARDING_LEAD_SOURCES.map(s=>(
+                  <label key={s} style={{ display:"flex",alignItems:"center",gap:5,fontSize:12,color:"#555",fontWeight:400 }}>
+                    <input type="checkbox" checked={form.fuente_de_leads.includes(s)} onChange={e=>{
+                      setForm(f=>({ ...f, fuente_de_leads: e.target.checked ? [...f.fuente_de_leads, s] : f.fuente_de_leads.filter(x=>x!==s) }));
+                    }}/> {s}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <label style={{ display:"flex",alignItems:"center",gap:6,fontSize:13,color:"#666" }}>
+              <input type="checkbox" checked={form.bloqueado} onChange={e=>setForm(f=>({...f,bloqueado:e.target.checked}))}/> Bloqueado
+            </label>
+
+            <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:4 }}>
+              <button type="button" className="spicy-btn-secondary" onClick={()=>setShowNew(false)}>Cancelar</button>
+              <button type="submit" className="spicy-btn-primary" disabled={saving||!form.client_name.trim()}>Crear</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Detalle */}
+      {detail && (()=>{
+        const badge = ESTADO_BADGE[calcularEstado(detail, new Date())] || ESTADO_BADGE["sin fecha"];
+        return (
+          <div onClick={()=>setDetail(null)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}>
+            <div onClick={e=>e.stopPropagation()} style={{ background:"white",borderRadius:16,width:"100%",maxWidth:540,maxHeight:"85vh",overflowY:"auto",padding:24,display:"flex",flexDirection:"column",gap:12 }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
+                <div style={{ flex:1 }}>
+                  <input key={detail.id} defaultValue={detail.client_name}
+                    onBlur={e=>updateRecord(detail,{client_name:e.target.value.trim()||detail.client_name})}
+                    style={{ fontSize:16,fontWeight:700,color:"#111",border:"none",outline:"none",width:"100%",padding:0,fontFamily:"inherit",background:"transparent" }}/>
+                  <span style={{ fontSize:10,padding:"2px 7px",borderRadius:5,fontWeight:600,background:badge.bg,color:badge.color,marginTop:4,display:"inline-block" }}>{badge.label}</span>
+                </div>
+                <button onClick={()=>setDetail(null)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#ccc",lineHeight:1 }}>×</button>
+              </div>
+
+              <div style={{ height:6,background:"#F3F3F3",borderRadius:3,overflow:"hidden" }}>
+                <div style={{ height:"100%",width:`${Math.round(calcularAvance(detail.etapa_actual)*100)}%`,background:"#533AB7" }}/>
+              </div>
+
+              <div style={{ display:"flex",gap:12 }}>
+                <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Etapa
+                  <select className="spicy-select" value={detail.etapa_actual} onChange={e=>moveEtapa(detail, e.target.value)} style={{ width:"100%",marginTop:4 }}>
+                    {ONBOARDING_STAGES.map(s=><option key={s.key} value={s.key}>{s.key}</option>)}
+                  </select>
+                </label>
+                <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Responsable
+                  <select className="spicy-select" value={detail.responsable||""} onChange={e=>updateRecord(detail,{responsable:e.target.value||null})} style={{ width:"100%",marginTop:4 }}>
+                    <option value="">Sin asignar</option>
+                    {TICKET_TEAM.map(n=><option key={n} value={n}>{n}</option>)}
+                  </select>
+                </label>
+              </div>
+
+              <div style={{ display:"flex",gap:12 }}>
+                <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Fecha de registro
+                  <input type="date" className="spicy-input" value={detail.fecha_registro} onChange={e=>updateRecord(detail,{fecha_registro:e.target.value})} style={{ width:"100%",marginTop:4 }}/>
+                </label>
+                <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Estado de pago
+                  <select className="spicy-select" value={detail.estado_de_pago} onChange={e=>updateRecord(detail,{estado_de_pago:e.target.value})} style={{ width:"100%",marginTop:4 }}>
+                    {ONBOARDING_PAYMENT_STATUS.map(p=><option key={p} value={p}>{p}</option>)}
+                  </select>
+                </label>
+              </div>
+
+              <label style={{ display:"flex",alignItems:"center",gap:6,fontSize:13,color:"#666" }}>
+                <input type="checkbox" checked={detail.bloqueado} onChange={e=>updateRecord(detail,{bloqueado:e.target.checked})}/> Bloqueado
+              </label>
+
+              <div style={{ fontSize:12,color:"#666",fontWeight:500 }}>Fuente de leads
+                <div style={{ display:"flex",flexWrap:"wrap",gap:10,marginTop:6 }}>
+                  {ONBOARDING_LEAD_SOURCES.map(s=>(
+                    <label key={s} style={{ display:"flex",alignItems:"center",gap:5,fontSize:12,color:"#555",fontWeight:400 }}>
+                      <input type="checkbox" checked={(detail.fuente_de_leads||[]).includes(s)} onChange={e=>toggleLeadSource(detail,s,e.target.checked)}/> {s}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ fontSize:12,color:"#666",fontWeight:500 }}>Integraciones pendientes
+                <div style={{ display:"flex",flexWrap:"wrap",gap:10,marginTop:6 }}>
+                  {ONBOARDING_LEAD_SOURCES.map(s=>(
+                    <label key={s} style={{ display:"flex",alignItems:"center",gap:5,fontSize:12,color:"#555",fontWeight:400 }}>
+                      <input type="checkbox" checked={(detail.integraciones_pendientes||[]).includes(s)} onChange={e=>toggleIntegracion(detail,s,e.target.checked)}/> {s}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ fontSize:11,color:"#aaa" }}>
+                {diasEntre(detail.fecha_registro)} días desde registro · {diasEntre(detail.fecha_entrada_etapa_actual)} días en esta etapa
+              </div>
+
+              <div>
+                <div style={{ fontSize:12,color:"#666",fontWeight:500,marginBottom:6 }}>Historial de etapas</div>
+                <div style={{ display:"flex",flexDirection:"column",gap:4,maxHeight:140,overflowY:"auto" }}>
+                  {getHistory(detail.id).map(h=>(
+                    <div key={h.id} style={{ display:"flex",justifyContent:"space-between",fontSize:12,color:"#555",background:"#F7F7F8",borderRadius:6,padding:"5px 8px" }}>
+                      <span>{h.etapa}</span>
+                      <span style={{ color:"#aaa" }}>{h.fecha_entrada}</span>
+                    </div>
+                  ))}
+                  {getHistory(detail.id).length===0 && <div style={{ fontSize:12,color:"#ccc" }}>Sin historial.</div>}
+                </div>
+              </div>
+
+              <div style={{ display:"flex",justifyContent:"space-between",marginTop:4 }}>
+                <button className="spicy-btn-secondary" style={{ color:ST_RED,borderColor:ST_RED_BG }} onClick={()=>deleteRecord(detail)}>Eliminar</button>
+                <button className="spicy-btn-primary" onClick={()=>setDetail(null)}>Listo</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+    </>
+  );
+}
+
 // ── Main App ───────────────────────────────────────────────────────────────
 export default function SpicyFinanzas() {
   const [session,  setSession]  = useState(null);
@@ -2659,6 +3016,8 @@ export default function SpicyFinanzas() {
   const [taskComments,setTaskComments]= useState([]);
   const [allUsers,        setAllUsers]        = useState([]);
   const [allowedSections, setAllowedSections] = useState([]);
+  const [onboarding,        setOnboarding]        = useState([]);
+  const [onboardingHistory, setOnboardingHistory] = useState([]);
   const [dataLoaded, setDataLoaded]   = useState(false);
 
   const [view,      setView]      = useState("dashboard");
@@ -2688,7 +3047,7 @@ export default function SpicyFinanzas() {
 
   async function loadAll() {
     setDataLoaded(false);
-    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,tasksRes,taskCommentsRes,usersRes,allowedRes]=await Promise.all([
+    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,tasksRes,taskCommentsRes,usersRes,allowedRes,onboardingRes,onboardingHistoryRes]=await Promise.all([
       sb.from("user_roles").select("role").eq("user_id",session.user.id).single(),
       sb.from("transactions").select("*").order("date",{ascending:false}),
       sb.from("accounts").select("*").order("created_at"),
@@ -2701,6 +3060,8 @@ export default function SpicyFinanzas() {
       sb.from("task_comments").select("*").order("created_at"),
       sb.from("user_roles").select("user_id,email,role,first_name,last_name").order("email"),
       sb.from("allowed_sections").select("*"),
+      sb.from("onboarding").select("*").order("created_at",{ascending:false}),
+      sb.from("onboarding_stage_history").select("*"),
     ]);
     setRole(roleRes.data?.role||"reader");
     setTxns(txRes.data||[]);
@@ -2715,6 +3076,8 @@ export default function SpicyFinanzas() {
     setTaskComments(taskCommentsRes.data||[]);
     setAllUsers(usersRes.data||[]);
     setAllowedSections(allowedRes.data||[]);
+    setOnboarding(onboardingRes.data||[]);
+    setOnboardingHistory(onboardingHistoryRes.data||[]);
     setDataLoaded(true);
   }
 
@@ -3074,6 +3437,7 @@ export default function SpicyFinanzas() {
       {view==="opsdash"&&<OperationsSummaryView tickets={tickets} tasks={tasks} setView={setView}/>}
       {view==="tickets"&&<TicketsView tickets={tickets} onRefresh={loadAll}/>}
       {view==="tasks"&&<TasksView tasks={tasks} comments={taskComments} currentUserEmail={session.user.email} onRefresh={loadAll}/>}
+      {view==="onboarding"&&<OnboardingView onboarding={onboarding} history={onboardingHistory} onRefresh={loadAll}/>}
       {view==="services"&&<ServicesView/>}
       {view==="categories"&&<CategoriesPanel catsIncome={catsIncome} catsExpense={catsExpense} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="usuarios"&&isAdmin&&<UserPermissionsPanel users={allUsers} allowedSections={allowedSections} onRefresh={loadAll}/>}
