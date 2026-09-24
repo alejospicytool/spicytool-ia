@@ -496,7 +496,7 @@ function CategoriesPanel({ catsIncome, catsExpense, isAdmin, onRefresh }) {
 }
 
 // ── User Permissions Panel ───────────────────────────────────────────────────
-function UserPermissionsPanel({ users, hiddenSections, onRefresh }) {
+function UserPermissionsPanel({ users, allowedSections, onRefresh }) {
   const sections = NAV_SECTIONS.map(s=>s.label);
   const emptyForm = () => ({ email:"", first_name:"", last_name:"", role:"reader" });
 
@@ -505,12 +505,12 @@ function UserPermissionsPanel({ users, hiddenSections, onRefresh }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const isHidden = (userId, section) => hiddenSections.some(h=>h.user_id===userId && h.section===section);
+  const isAllowed = (userId, section) => allowedSections.some(a=>a.user_id===userId && a.section===section);
   const displayName = (u) => (u.first_name||u.last_name) ? `${u.first_name||""} ${u.last_name||""}`.trim() : u.email;
 
-  async function toggle(userId, section, hide) {
-    if (hide) await sb.from("hidden_sections").insert({ user_id:userId, section });
-    else await sb.from("hidden_sections").delete().eq("user_id",userId).eq("section",section);
+  async function toggle(userId, section, allow) {
+    if (allow) await sb.from("allowed_sections").insert({ user_id:userId, section });
+    else await sb.from("allowed_sections").delete().eq("user_id",userId).eq("section",section);
     onRefresh();
   }
 
@@ -542,7 +542,7 @@ function UserPermissionsPanel({ users, hiddenSections, onRefresh }) {
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20 }}>
         <div>
           <div style={{ fontSize:16,fontWeight:700,color:"#111",marginBottom:4 }}>Usuarios y permisos</div>
-          <div style={{ fontSize:13,color:"#888" }}>Elegí qué secciones puede ver cada usuario. Los admins siempre ven todo.</div>
+          <div style={{ fontSize:13,color:"#888" }}>Tildá qué secciones puede ver cada usuario — arrancan sin ver ninguna. Los admins siempre ven todo.</div>
         </div>
         <button className="spicy-btn-primary" onClick={()=>{setError("");setForm(emptyForm());setShowAdd(true);}}>+ Agregar usuario</button>
       </div>
@@ -568,7 +568,7 @@ function UserPermissionsPanel({ users, hiddenSections, onRefresh }) {
                     {u.role==="admin" ? (
                       <span style={{ fontSize:11,color:"#ccc" }}>—</span>
                     ) : (
-                      <input type="checkbox" checked={!isHidden(u.user_id,s)} onChange={e=>toggle(u.user_id,s,!e.target.checked)}/>
+                      <input type="checkbox" checked={isAllowed(u.user_id,s)} onChange={e=>toggle(u.user_id,s,e.target.checked)}/>
                     )}
                   </td>
                 ))}
@@ -3014,8 +3014,8 @@ export default function SpicyFinanzas() {
   const [tickets,     setTickets]     = useState([]);
   const [tasks,       setTasks]       = useState([]);
   const [taskComments,setTaskComments]= useState([]);
-  const [allUsers,       setAllUsers]       = useState([]);
-  const [hiddenSections, setHiddenSections] = useState([]);
+  const [allUsers,        setAllUsers]        = useState([]);
+  const [allowedSections, setAllowedSections] = useState([]);
   const [onboarding,        setOnboarding]        = useState([]);
   const [onboardingHistory, setOnboardingHistory] = useState([]);
   const [dataLoaded, setDataLoaded]   = useState(false);
@@ -3047,7 +3047,7 @@ export default function SpicyFinanzas() {
 
   async function loadAll() {
     setDataLoaded(false);
-    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,tasksRes,taskCommentsRes,usersRes,hiddenRes,onboardingRes,onboardingHistoryRes]=await Promise.all([
+    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,tasksRes,taskCommentsRes,usersRes,allowedRes,onboardingRes,onboardingHistoryRes]=await Promise.all([
       sb.from("user_roles").select("role").eq("user_id",session.user.id).single(),
       sb.from("transactions").select("*").order("date",{ascending:false}),
       sb.from("accounts").select("*").order("created_at"),
@@ -3059,7 +3059,7 @@ export default function SpicyFinanzas() {
       sb.from("tasks").select("*").order("start_date"),
       sb.from("task_comments").select("*").order("created_at"),
       sb.from("user_roles").select("user_id,email,role,first_name,last_name").order("email"),
-      sb.from("hidden_sections").select("*"),
+      sb.from("allowed_sections").select("*"),
       sb.from("onboarding").select("*").order("created_at",{ascending:false}),
       sb.from("onboarding_stage_history").select("*"),
     ]);
@@ -3075,28 +3075,26 @@ export default function SpicyFinanzas() {
     setTasks(tasksRes.data||[]);
     setTaskComments(taskCommentsRes.data||[]);
     setAllUsers(usersRes.data||[]);
-    setHiddenSections(hiddenRes.data||[]);
+    setAllowedSections(allowedRes.data||[]);
     setOnboarding(onboardingRes.data||[]);
     setOnboardingHistory(onboardingHistoryRes.data||[]);
     setDataLoaded(true);
   }
 
   const isAdmin = role==="admin";
-  const myHiddenSections = new Set(session ? hiddenSections.filter(h=>h.user_id===session.user.id).map(h=>h.section) : []);
+  const myAllowedSections = new Set(session ? allowedSections.filter(a=>a.user_id===session.user.id).map(a=>a.section) : []);
+  const canSeeSection = (label) => isAdmin || myAllowedSections.has(label);
+  const currentSection = NAV_SECTIONS.find(s=>s.views.includes(view));
+  const currentViewBlocked = (currentSection && !canSeeSection(currentSection.label)) || (ADMIN_ONLY_VIEWS.includes(view) && !isAdmin);
 
-  // ── Si la vista actual quedó oculta (sección restringida, o dejó de ser admin), redirigir ──
+  // ── Si la vista actual quedó fuera de lo permitido (o dejó de ser admin), redirigir ──
   useEffect(()=>{
-    if (!session || !dataLoaded) return;
-    const section = NAV_SECTIONS.find(s=>s.views.includes(view));
-    const sectionHidden = section && !isAdmin && myHiddenSections.has(section.label);
-    const viewBlocked = ADMIN_ONLY_VIEWS.includes(view) && !isAdmin;
-    if (sectionHidden || viewBlocked) {
-      const fallback = NAV_SECTIONS
-        .filter(s => isAdmin || !myHiddenSections.has(s.label))
-        .flatMap(s => s.views.filter(v => !ADMIN_ONLY_VIEWS.includes(v) || isAdmin))[0];
-      setView(fallback || "dashboard");
-    }
-  },[session, dataLoaded, isAdmin, view, hiddenSections]);
+    if (!session || !dataLoaded || !currentViewBlocked) return;
+    const fallback = NAV_SECTIONS
+      .filter(s => canSeeSection(s.label))
+      .flatMap(s => s.views.filter(v => !ADMIN_ONLY_VIEWS.includes(v) || isAdmin))[0];
+    setView(fallback || "dashboard");
+  },[session, dataLoaded, isAdmin, view, allowedSections]);
 
   async function handleAdd(e) {
     e.preventDefault();
@@ -3243,7 +3241,7 @@ export default function SpicyFinanzas() {
         </div>
 
         <nav className="spicy-nav">
-          {NAV_SECTIONS.filter(section => isAdmin || !myHiddenSections.has(section.label)).map(section=>{
+          {NAV_SECTIONS.filter(section => canSeeSection(section.label)).map(section=>{
             const visibleViews = section.views.filter(v =>
               !ADMIN_ONLY_VIEWS.includes(v) || isAdmin
             );
@@ -3281,6 +3279,10 @@ export default function SpicyFinanzas() {
       <div className="spicy-main">
         {syncError&&<div style={{ fontSize:13,color:ST_RED,marginBottom:16,padding:"10px 14px",background:ST_RED_BG,borderRadius:10,border:`1px solid ${ST_RED}22` }}>{syncError}</div>}
 
+      {currentViewBlocked ? (
+        <div style={{ fontSize:13,color:"#999",textAlign:"center",padding:"4rem 1rem" }}>Todavía no tenés acceso a ninguna sección. Pedile a un admin que te habilite el acceso.</div>
+      ) : (
+      <>
       {/* DASHBOARD */}
       {view==="dashboard"&&(
         <>
@@ -3438,7 +3440,7 @@ export default function SpicyFinanzas() {
       {view==="onboarding"&&<OnboardingView onboarding={onboarding} history={onboardingHistory} onRefresh={loadAll}/>}
       {view==="services"&&<ServicesView/>}
       {view==="categories"&&<CategoriesPanel catsIncome={catsIncome} catsExpense={catsExpense} isAdmin={isAdmin} onRefresh={loadAll}/>}
-      {view==="usuarios"&&isAdmin&&<UserPermissionsPanel users={allUsers} hiddenSections={hiddenSections} onRefresh={loadAll}/>}
+      {view==="usuarios"&&isAdmin&&<UserPermissionsPanel users={allUsers} allowedSections={allowedSections} onRefresh={loadAll}/>}
 
       {/* ADD */}
       {view==="add"&&isAdmin&&(
@@ -3486,6 +3488,8 @@ export default function SpicyFinanzas() {
           sourceBadge={sourceBadge} invoiceBadge={invoiceBadge}
           uploadInvoice={uploadInvoice} viewInvoice={viewInvoice}
         />
+      )}
+      </>
       )}
 
       </div>{/* end spicy-main */}
