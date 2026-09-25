@@ -117,6 +117,7 @@ function BrandStyles() {
 
 // ── Nav icon map ───────────────────────────────────────────────────────────
 const NAV_ICONS = {
+  inicio:"🏠",
   dashboard:"▦", accounts:"🏦", add:"+", history:"☰", runway:"📈", pnl:"📊",
   referrals:"🤝",
   services:"⚡", categories:"⊞",
@@ -124,6 +125,7 @@ const NAV_ICONS = {
   devdash:"📈", devtasks:"🛠️",
 };
 const NAV_LABELS = {
+  inicio:"Inicio",
   dashboard:"Resumen", accounts:"Cuentas", add:"Registrar", history:"Historial", runway:"Runway", pnl:"P&L",
   referrals:"Referidos",
   services:"Servicios", categories:"Categorías",
@@ -131,8 +133,16 @@ const NAV_LABELS = {
   devdash:"Resumen", devtasks:"Tareas",
 };
 const ADMIN_ONLY_VIEWS = ["add","usuarios"];
+// La sección Inicio es la única visible para todos sin pasar por allowed_sections —
+// es la landing personal de cada usuario, no un módulo con permisos propios.
+const ALWAYS_VISIBLE_SECTIONS = ["Inicio"];
 
 const NAV_SECTIONS = [
+  {
+    label: "Inicio",
+    views: ["inicio"],
+    adminOnly: false,
+  },
   {
     label: "Finanzas",
     views: ["dashboard","accounts","add","history","runway","pnl"],
@@ -2011,6 +2021,70 @@ function fmtDuration(ms) {
   return Math.round(hours/24) + "d";
 }
 
+// ── Inicio (landing personal) ───────────────────────────────────────────────
+function InicioView({ myOpenTickets, myOpenDevTasks, ticketHistory, devTaskHistory, currentUserEmail, setView }) {
+  const lastActivity = (entries, idField, id) => {
+    const forId = entries.filter(e=>e[idField]===id);
+    if (!forId.length) return null;
+    return forId.reduce((max,e)=> e.changed_at>max?e.changed_at:max, forId[0].changed_at);
+  };
+
+  const ticketRows = myOpenTickets
+    .map(t=>({ t, last: lastActivity(ticketHistory,"ticket_id",t.id) || t.created_at }))
+    .sort((a,b)=>b.last.localeCompare(a.last));
+  const devTaskRows = myOpenDevTasks
+    .map(t=>({ t, last: lastActivity(devTaskHistory,"dev_task_id",t.id) || t.created_at }))
+    .sort((a,b)=>b.last.localeCompare(a.last));
+
+  const catInfo = (key) => TICKET_CATEGORIES.find(c=>c.key===key);
+  const total = ticketRows.length + devTaskRows.length;
+
+  return (
+    <>
+      <div style={{ fontSize:20,fontWeight:700,color:"#111",marginBottom:4 }}>Hola, {currentUserEmail}</div>
+      <div style={{ fontSize:13,color:"#888",marginBottom:20 }}>
+        {total>0 ? `Tenés ${total} cosa${total===1?"":"s"} asignada${total===1?"":"s"} sin cerrar.` : "No tenés nada asignado sin cerrar. 🎉"}
+      </div>
+
+      <div style={{ display:"flex",gap:16,flexWrap:"wrap" }}>
+        <div className="spicy-card" style={{ flex:"1 1 380px" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+            <span style={{ fontSize:14,fontWeight:600,color:"#111" }}>Tickets asignados a mí</span>
+            {ticketRows.length>0 && <button onClick={()=>setView("tickets")} style={{ fontSize:12,color:ST_RED,background:"none",border:"none",cursor:"pointer",fontWeight:600 }}>Ver todos →</button>}
+          </div>
+          {ticketRows.length===0 && <div style={{ fontSize:13,color:"#bbb",textAlign:"center",padding:"1rem" }}>Nada por acá.</div>}
+          {ticketRows.map(({t})=>{
+            const c = catInfo(t.category);
+            const blocking = t.category==="Bloqueante";
+            return (
+              <div key={t.id} onClick={()=>setView("tickets")} className="spicy-table-row" style={{ cursor:"pointer" }}>
+                <span style={{ fontSize:12,marginRight:8 }}>{c?.emoji}</span>
+                <span style={{ flex:1,fontSize:13,color:blocking?ST_RED:"#111",fontWeight:blocking?600:400 }}>{t.client_name}</span>
+                <span className="spicy-badge-gray">{t.status}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="spicy-card" style={{ flex:"1 1 380px" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+            <span style={{ fontSize:14,fontWeight:600,color:"#111" }}>Tareas de dev asignadas a mí</span>
+            {devTaskRows.length>0 && <button onClick={()=>setView("devtasks")} style={{ fontSize:12,color:ST_RED,background:"none",border:"none",cursor:"pointer",fontWeight:600 }}>Ver todas →</button>}
+          </div>
+          {devTaskRows.length===0 && <div style={{ fontSize:13,color:"#bbb",textAlign:"center",padding:"1rem" }}>Nada por acá.</div>}
+          {devTaskRows.map(({t})=>(
+            <div key={t.id} onClick={()=>setView("devtasks")} className="spicy-table-row" style={{ cursor:"pointer" }}>
+              <span style={{ flex:1,fontSize:13,color:"#111" }}>{t.title}</span>
+              {t.fibonacci_score && <span className="spicy-badge-gray" style={{ marginRight:6 }}>{t.fibonacci_score}</span>}
+              <span className="spicy-badge-gray">{t.stage}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
 function OperationsSummaryView({ tickets, tasks, statusHistory, assignees, allUsers, setView }) {
   const todayISO = new Date().toISOString().split("T")[0];
   const in7days = (() => { const d=new Date(); d.setDate(d.getDate()+7); return d.toISOString().split("T")[0]; })();
@@ -3839,7 +3913,7 @@ export default function SpicyFinanzas() {
   const [attachments,     setAttachments]     = useState([]);
   const [dataLoaded, setDataLoaded]   = useState(false);
 
-  const [view,      setView]      = useState("dashboard");
+  const [view,      setView]      = useState("inicio");
   const [filterType,setFilterType]= useState("all");
   const [filterAcc, setFilterAcc] = useState("all");
   const [syncing,   setSyncing]   = useState(false);
@@ -3919,7 +3993,7 @@ export default function SpicyFinanzas() {
   const isDev = role==="dev";
   const canEditFibonacci = isAdmin || isDev;
   const myAllowedSections = new Set(session ? allowedSections.filter(a=>a.user_id===session.user.id).map(a=>a.section) : []);
-  const canSeeSection = (label) => isAdmin || myAllowedSections.has(label);
+  const canSeeSection = (label) => ALWAYS_VISIBLE_SECTIONS.includes(label) || isAdmin || myAllowedSections.has(label);
   const currentSection = NAV_SECTIONS.find(s=>s.views.includes(view));
   const currentViewBlocked = (currentSection && !canSeeSection(currentSection.label)) || (ADMIN_ONLY_VIEWS.includes(view) && !isAdmin);
 
@@ -4048,6 +4122,12 @@ export default function SpicyFinanzas() {
   const todayISOForTasks = new Date().toISOString().split("T")[0];
   const overdueTasksCount = tasks.filter(t=>t.end_date<todayISOForTasks && !["Finalizado","Archivado"].includes(t.stage)).length;
 
+  const myAssignedTicketIds = new Set(entityAssignees.filter(a=>a.entity_type==="ticket" && a.user_id===session.user.id).map(a=>a.entity_id));
+  const myAssignedDevTaskIds = new Set(entityAssignees.filter(a=>a.entity_type==="dev_task" && a.user_id===session.user.id).map(a=>a.entity_id));
+  const myOpenTickets  = tickets.filter(t=>myAssignedTicketIds.has(t.id) && statusGroup(t.status)!=="Cerrados");
+  const myOpenDevTasks = devTasks.filter(t=>myAssignedDevTaskIds.has(t.id) && !DEV_TASK_STAGES_CERRADOS.includes(t.stage));
+  const myAssignedCount = myOpenTickets.length + myOpenDevTasks.length;
+
   const sourceBadge=(t)=>{
     if(t.source)return <span style={{ fontSize:10,padding:"1px 5px",borderRadius:4,marginLeft:5,background:t.source==="mercury"?"var(--color-background-info)":"var(--color-background-success)",color:t.source==="mercury"?"var(--color-text-info)":"var(--color-text-success)" }}>{t.source}</span>;
     if(t.referrer_id)return <span style={{ fontSize:10,padding:"1px 5px",borderRadius:4,marginLeft:5,background:"var(--color-background-warning)",color:"var(--color-text-warning)" }}>ref</span>;
@@ -4092,6 +4172,7 @@ export default function SpicyFinanzas() {
                     <span style={{ fontSize:14 }}>{NAV_ICONS[v]}</span>
                     {NAV_LABELS[v]}
                     {v==="referrals"&&referralOwed>0&&<span className="spicy-nav-badge">{fmt(referralOwed)}</span>}
+                    {v==="inicio"&&myAssignedCount>0&&<span className="spicy-nav-badge">{myAssignedCount}</span>}
                     {v==="tickets"&&urgentTicketsCount>0&&<span className="spicy-nav-badge">{urgentTicketsCount}</span>}
                     {v==="tasks"&&overdueTasksCount>0&&<span className="spicy-nav-badge">{overdueTasksCount}</span>}
                   </button>
@@ -4270,6 +4351,7 @@ export default function SpicyFinanzas() {
       {view==="referrals"&&<ReferralDashboard txns={txns} referrers={referrers} referredClients={referredClients} payments={referredClientPayments} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="runway"&&<RunwayView txns={txns} accounts={accounts}/>}
       {view==="pnl"&&<PnLView txns={txns}/>}
+      {view==="inicio"&&<InicioView myOpenTickets={myOpenTickets} myOpenDevTasks={myOpenDevTasks} ticketHistory={ticketStatusHistory} devTaskHistory={devTaskStatusHistory} currentUserEmail={session.user.email} setView={setView}/>}
       {view==="opsdash"&&<OperationsSummaryView tickets={tickets} tasks={tasks} statusHistory={ticketStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
       {view==="tickets"&&<TicketsView tickets={tickets} statusHistory={ticketStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} canEditFibonacci={canEditFibonacci} assignees={entityAssignees} comments={comments} attachments={attachments} devTasks={devTasks} setView={setView} onRefresh={loadAll}/>}
       {view==="tasks"&&<TasksView tasks={tasks} comments={taskComments} currentUserEmail={session.user.email} onRefresh={loadAll}/>}
