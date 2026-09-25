@@ -2022,28 +2022,49 @@ function fmtDuration(ms) {
 }
 
 // ── Inicio (landing personal) ───────────────────────────────────────────────
-function InicioView({ myOpenTickets, myOpenDevTasks, ticketHistory, devTaskHistory, currentUserEmail, setView }) {
-  const lastActivity = (entries, idField, id) => {
-    const forId = entries.filter(e=>e[idField]===id);
-    if (!forId.length) return null;
-    return forId.reduce((max,e)=> e.changed_at>max?e.changed_at:max, forId[0].changed_at);
+const INICIO_LAST_VISIT_KEY = "spicy_inicio_last_visit";
+
+function InicioView({ myOpenTickets, myOpenDevTasks, ticketHistory, devTaskHistory, comments, currentUserEmail, setView }) {
+  // Se lee la visita anterior UNA sola vez (antes de pisarla) para poder marcar
+  // qué cambió desde la última vez que el usuario entró a Inicio.
+  const [lastVisit] = useState(() => {
+    try { return localStorage.getItem(INICIO_LAST_VISIT_KEY); } catch { return null; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(INICIO_LAST_VISIT_KEY, new Date().toISOString()); } catch {}
+  }, []);
+
+  // Última actividad = lo más reciente entre el historial de estado/etapa y los
+  // comentarios (antes solo miraba el historial, así que un comentario sin cambio
+  // de estado no hacía subir el item en el orden).
+  const lastActivityFor = (entityType, id, statusHist, statusIdField, createdAt) => {
+    const times = [
+      createdAt,
+      ...statusHist.filter(h=>h[statusIdField]===id).map(h=>h.changed_at),
+      ...comments.filter(c=>c.entity_type===entityType && c.entity_id===id).map(c=>c.created_at),
+    ];
+    return times.reduce((max,t)=> t>max?t:max, times[0]);
   };
 
   const ticketRows = myOpenTickets
-    .map(t=>({ t, last: lastActivity(ticketHistory,"ticket_id",t.id) || t.created_at }))
+    .map(t=>({ t, last: lastActivityFor("ticket", t.id, ticketHistory, "ticket_id", t.created_at) }))
     .sort((a,b)=>b.last.localeCompare(a.last));
   const devTaskRows = myOpenDevTasks
-    .map(t=>({ t, last: lastActivity(devTaskHistory,"dev_task_id",t.id) || t.created_at }))
+    .map(t=>({ t, last: lastActivityFor("dev_task", t.id, devTaskHistory, "dev_task_id", t.created_at) }))
     .sort((a,b)=>b.last.localeCompare(a.last));
 
+  const isNew = (last) => lastVisit && last > lastVisit;
   const catInfo = (key) => TICKET_CATEGORIES.find(c=>c.key===key);
   const total = ticketRows.length + devTaskRows.length;
+  const newCount = [...ticketRows,...devTaskRows].filter(r=>isNew(r.last)).length;
+
+  const NewDot = () => <span title="Cambió desde tu última visita" style={{ width:7,height:7,borderRadius:"50%",background:ST_RED,display:"inline-block",marginRight:8,flexShrink:0 }}/>;
 
   return (
     <>
       <div style={{ fontSize:20,fontWeight:700,color:"#111",marginBottom:4 }}>Hola, {currentUserEmail}</div>
       <div style={{ fontSize:13,color:"#888",marginBottom:20 }}>
-        {total>0 ? `Tenés ${total} cosa${total===1?"":"s"} asignada${total===1?"":"s"} sin cerrar.` : "No tenés nada asignado sin cerrar. 🎉"}
+        {total>0 ? `Tenés ${total} cosa${total===1?"":"s"} asignada${total===1?"":"s"} sin cerrar${newCount>0?`, ${newCount} con novedades desde tu última visita`:""}.` : "No tenés nada asignado sin cerrar. 🎉"}
       </div>
 
       <div style={{ display:"flex",gap:16,flexWrap:"wrap" }}>
@@ -2053,11 +2074,12 @@ function InicioView({ myOpenTickets, myOpenDevTasks, ticketHistory, devTaskHisto
             {ticketRows.length>0 && <button onClick={()=>setView("tickets")} style={{ fontSize:12,color:ST_RED,background:"none",border:"none",cursor:"pointer",fontWeight:600 }}>Ver todos →</button>}
           </div>
           {ticketRows.length===0 && <div style={{ fontSize:13,color:"#bbb",textAlign:"center",padding:"1rem" }}>Nada por acá.</div>}
-          {ticketRows.map(({t})=>{
+          {ticketRows.map(({t,last})=>{
             const c = catInfo(t.category);
             const blocking = t.category==="Bloqueante";
             return (
               <div key={t.id} onClick={()=>setView("tickets")} className="spicy-table-row" style={{ cursor:"pointer" }}>
+                {isNew(last) && <NewDot/>}
                 <span style={{ fontSize:12,marginRight:8 }}>{c?.emoji}</span>
                 <span style={{ flex:1,fontSize:13,color:blocking?ST_RED:"#111",fontWeight:blocking?600:400 }}>{t.client_name}</span>
                 <span className="spicy-badge-gray">{t.status}</span>
@@ -2072,8 +2094,9 @@ function InicioView({ myOpenTickets, myOpenDevTasks, ticketHistory, devTaskHisto
             {devTaskRows.length>0 && <button onClick={()=>setView("devtasks")} style={{ fontSize:12,color:ST_RED,background:"none",border:"none",cursor:"pointer",fontWeight:600 }}>Ver todas →</button>}
           </div>
           {devTaskRows.length===0 && <div style={{ fontSize:13,color:"#bbb",textAlign:"center",padding:"1rem" }}>Nada por acá.</div>}
-          {devTaskRows.map(({t})=>(
+          {devTaskRows.map(({t,last})=>(
             <div key={t.id} onClick={()=>setView("devtasks")} className="spicy-table-row" style={{ cursor:"pointer" }}>
+              {isNew(last) && <NewDot/>}
               <span style={{ flex:1,fontSize:13,color:"#111" }}>{t.title}</span>
               {t.fibonacci_score && <span className="spicy-badge-gray" style={{ marginRight:6 }}>{t.fibonacci_score}</span>}
               <span className="spicy-badge-gray">{t.stage}</span>
@@ -4351,7 +4374,7 @@ export default function SpicyFinanzas() {
       {view==="referrals"&&<ReferralDashboard txns={txns} referrers={referrers} referredClients={referredClients} payments={referredClientPayments} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="runway"&&<RunwayView txns={txns} accounts={accounts}/>}
       {view==="pnl"&&<PnLView txns={txns}/>}
-      {view==="inicio"&&<InicioView myOpenTickets={myOpenTickets} myOpenDevTasks={myOpenDevTasks} ticketHistory={ticketStatusHistory} devTaskHistory={devTaskStatusHistory} currentUserEmail={session.user.email} setView={setView}/>}
+      {view==="inicio"&&<InicioView myOpenTickets={myOpenTickets} myOpenDevTasks={myOpenDevTasks} ticketHistory={ticketStatusHistory} devTaskHistory={devTaskStatusHistory} comments={comments} currentUserEmail={session.user.email} setView={setView}/>}
       {view==="opsdash"&&<OperationsSummaryView tickets={tickets} tasks={tasks} statusHistory={ticketStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
       {view==="tickets"&&<TicketsView tickets={tickets} statusHistory={ticketStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} canEditFibonacci={canEditFibonacci} assignees={entityAssignees} comments={comments} attachments={attachments} devTasks={devTasks} setView={setView} onRefresh={loadAll}/>}
       {view==="tasks"&&<TasksView tasks={tasks} comments={taskComments} currentUserEmail={session.user.email} onRefresh={loadAll}/>}
