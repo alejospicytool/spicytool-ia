@@ -120,13 +120,15 @@ const NAV_ICONS = {
   dashboard:"▦", accounts:"🏦", add:"+", history:"☰", runway:"📈", pnl:"📊",
   referrals:"🤝",
   services:"⚡", categories:"⊞",
-  opsdash:"🧭", tickets:"🎫", tasks:"📋", onboarding:"🚀", usuarios:"👥"
+  opsdash:"🧭", tickets:"🎫", tasks:"📋", onboarding:"🚀", usuarios:"👥",
+  devdash:"📈", devtasks:"🛠️",
 };
 const NAV_LABELS = {
   dashboard:"Resumen", accounts:"Cuentas", add:"Registrar", history:"Historial", runway:"Runway", pnl:"P&L",
   referrals:"Referidos",
   services:"Servicios", categories:"Categorías",
-  opsdash:"Resumen", tickets:"Tickets", tasks:"Tareas", onboarding:"Onboarding", usuarios:"Usuarios"
+  opsdash:"Resumen", tickets:"Tickets", tasks:"Tareas", onboarding:"Onboarding", usuarios:"Usuarios",
+  devdash:"Resumen", devtasks:"Tareas",
 };
 const ADMIN_ONLY_VIEWS = ["add","usuarios"];
 
@@ -148,6 +150,11 @@ const NAV_SECTIONS = [
     adminOnly: false,
   },
   {
+    label: "Devs",
+    views: ["devdash","devtasks"],
+    adminOnly: false,
+  },
+  {
     label: "Dashboard Producto",
     views: ["services"],
     adminOnly: false,
@@ -161,16 +168,43 @@ const NAV_SECTIONS = [
 
 // ── Tickets (Operaciones) ───────────────────────────────────────────────────
 const TICKET_CATEGORIES = [
-  { key: "Error bloqueante", emoji: "🔴" },
-  { key: "Error funcional",  emoji: "🟠" },
-  { key: "Duda de uso",      emoji: "🔵" },
-  { key: "Mejora",           emoji: "🟢" },
-  { key: "Administrativo",   emoji: "⚪" },
+  { key: "Bloqueante",  emoji: "🔴" },
+  { key: "Funcional",   emoji: "🟠" },
+  { key: "Duda de uso", emoji: "🔵" },
+  { key: "Mejora",      emoji: "🟢" },
+  { key: "Administrativo", emoji: "⚪" },
 ];
 const TICKET_PRIORITIES = ["Alta","Media","Baja"];
 const TICKET_CHANNELS   = ["WhatsApp","Email"];
-const TICKET_STATUSES   = ["Inicio por OPS","🚨 Urgente","En espera","Escalado","En DEV","Solucionado","Archivado"];
-const TICKET_TEAM       = ["Nico","Ticiana","Lucas"];
+const TICKET_STATUSES   = [
+  "En Espera (Sin Solución)","Inicio por OPS","Inicio","Pausado",
+  "En Curso","En DEV","Revision","Testeando (Prod)","Solucionado","Archivado",
+];
+const TICKET_STATUS_GROUPS = {
+  "Sin empezar": ["Inicio por OPS","Inicio"],
+  "En espera":   ["En Espera (Sin Solución)","Pausado"],
+  "En curso":    ["En Curso","En DEV","Revision"],
+  "Cerrados":    ["Testeando (Prod)","Solucionado","Archivado"],
+};
+const TICKET_STATUSES_EN_CURSO = TICKET_STATUS_GROUPS["En curso"];
+function statusGroup(status) {
+  return Object.keys(TICKET_STATUS_GROUPS).find(g => TICKET_STATUS_GROUPS[g].includes(status)) || null;
+}
+const TICKET_TEAM = ["Nico","Ticiana","Lucas"];
+
+function userDisplayName(u) {
+  return (u.first_name||u.last_name) ? `${u.first_name||""} ${u.last_name||""}`.trim() : u.email;
+}
+
+const FIBONACCI_SCALE = [
+  { value: 1,  label: "trivial",   help: "cambio de config, texto, DNS, tarea administrativa" },
+  { value: 2,  label: "chico",     help: "cambio chico en un solo lugar, ajuste simple de UI, bug con causa conocida" },
+  { value: 3,  label: "estándar",  help: "feature o bug estándar dentro de un módulo, con algo de investigación (la mayoría de los tickets)" },
+  { value: 5,  label: "mediano",   help: "toca varios componentes o una integración; bug que cruza servicios" },
+  { value: 8,  label: "grande",    help: "integración o servicio nuevo, migración de un subsistema" },
+  { value: 13, label: "épico",     help: "épico (migración de plataforma, rediseño completo, capacidad nueva)" },
+  { value: 21, label: "gigante",   help: "reservado para algo claramente más grande que un 13" },
+];
 
 // ── Tareas (Operaciones) ────────────────────────────────────────────────────
 const TASK_STAGES = [
@@ -183,6 +217,11 @@ const TASK_STAGES = [
   { key: "Archivado",   emoji: "📁" },
 ];
 const WEEKDAY_LABELS = ["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"];
+
+// ── Tareas de desarrollo de producto (Devs) ─────────────────────────────────
+const DEV_TASK_STAGES = ["Backlog","Por Hacer","In Progress","Testing","Done"];
+const DEV_TASK_STAGES_CERRADOS = ["Testing","Done"];
+const DEV_TASK_STAGE_EN_CURSO = "In Progress";
 
 const WORKER_URL = "";
 const COMMISSION_RATE = 0.20;
@@ -603,6 +642,7 @@ function UserPermissionsPanel({ users, allowedSections, onRefresh }) {
             <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Rol
               <select className="spicy-select" value={form.role} onChange={e=>setForm(f=>({...f,role:e.target.value}))} style={{ width:"100%",marginTop:4 }}>
                 <option value="reader">reader</option>
+                <option value="dev">dev</option>
                 <option value="admin">admin</option>
               </select>
             </label>
@@ -1959,19 +1999,21 @@ function fmtDuration(ms) {
   return Math.round(hours/24) + "d";
 }
 
-function OperationsSummaryView({ tickets, tasks, setView }) {
+function OperationsSummaryView({ tickets, tasks, statusHistory, setView }) {
   const todayISO = new Date().toISOString().split("T")[0];
   const in7days = (() => { const d=new Date(); d.setDate(d.getDate()+7); return d.toISOString().split("T")[0]; })();
 
-  const urgentTickets = tickets.filter(t=>t.status==="🚨 Urgente");
-  const respondedTickets = tickets.filter(t=>t.first_response_at);
-  const resolvedTickets  = tickets.filter(t=>t.resolved_at);
-  const avgFirstResponse = respondedTickets.length
-    ? respondedTickets.reduce((s,t)=>s+(new Date(t.first_response_at)-new Date(t.created_at)),0)/respondedTickets.length
-    : null;
+  const blockingTickets = tickets.filter(t=>t.category==="Bloqueante" && statusGroup(t.status)!=="Cerrados");
+  const firstEntryTo = (ticketId, status) => statusHistory
+    .filter(h=>h.ticket_id===ticketId && h.status===status)
+    .sort((a,b)=>a.changed_at.localeCompare(b.changed_at))[0];
+  const resolvedTickets = tickets
+    .map(t=>({ t, h: firstEntryTo(t.id,"Solucionado") }))
+    .filter(x=>x.h);
   const avgResolution = resolvedTickets.length
-    ? resolvedTickets.reduce((s,t)=>s+(new Date(t.resolved_at)-new Date(t.created_at)),0)/resolvedTickets.length
+    ? resolvedTickets.reduce((s,x)=>s+(new Date(x.h.changed_at)-new Date(x.t.created_at)),0)/resolvedTickets.length
     : null;
+  const unestimated = tickets.filter(t=>!t.fibonacci_score && statusGroup(t.status)!=="Sin empezar");
 
   const overdueTasks = tasks.filter(t=>t.end_date<todayISO && !["Finalizado","Archivado"].includes(t.stage));
   const dueSoonTasks  = tasks.filter(t=>t.end_date>=todayISO && t.end_date<=in7days && !["Finalizado","Archivado"].includes(t.stage));
@@ -1981,18 +2023,19 @@ function OperationsSummaryView({ tickets, tasks, setView }) {
   const tasksByStage = TASK_STAGES.map(s=>({ label:`${s.emoji} ${s.key}`, count: tasks.filter(t=>t.stage===s.key).length }));
   const maxTasksByStage = Math.max(1, ...tasksByStage.map(x=>x.count));
 
-  const activeTickets = tickets.filter(t=>!["Solucionado","Archivado"].includes(t.status));
+  const activeTickets = tickets.filter(t=>statusGroup(t.status)!=="Cerrados");
   const activeTasks   = tasks.filter(t=>!["Finalizado","Archivado"].includes(t.stage));
-  const workload = [...TICKET_TEAM,""].map(name=>({
+  const roster = [...new Set([...activeTickets.map(t=>t.assigned_to||""),...activeTasks.map(t=>t.assigned_to||"")])];
+  const workload = roster.map(name=>({
     name: name||"Sin asignar",
     tickets: activeTickets.filter(t=>(t.assigned_to||"")===name).length,
     tasks:   activeTasks.filter(t=>(t.assigned_to||"")===name).length,
   })).filter(w=>w.tickets>0||w.tasks>0);
 
   const kpis = [
-    { label:"Tickets urgentes", value:urgentTickets.length, warn:urgentTickets.length>0, onClick:()=>setView("tickets") },
-    { label:"Primera respuesta prom.", value:fmtDuration(avgFirstResponse), sub:`${respondedTickets.length} tickets con dato` },
+    { label:"Tickets bloqueantes", value:blockingTickets.length, warn:blockingTickets.length>0, onClick:()=>setView("tickets") },
     { label:"Resolución prom.", value:fmtDuration(avgResolution), sub:`${resolvedTickets.length} tickets resueltos` },
+    { label:"Tickets sin estimar", value:unestimated.length, warn:unestimated.length>0, onClick:()=>setView("tickets") },
     { label:"Tareas vencidas", value:overdueTasks.length, warn:overdueTasks.length>0, onClick:()=>setView("tasks") },
   ];
 
@@ -2073,29 +2116,36 @@ function OperationsSummaryView({ tickets, tasks, setView }) {
 }
 
 // ── Tickets View (Kanban) ───────────────────────────────────────────────────
-function TicketsView({ tickets, onRefresh }) {
+function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, canEditFibonacci, onRefresh }) {
   const [showNew, setShowNew] = useState(false);
   const [detail,  setDetail]  = useState(null);
   const [dragOverStatus, setDragOverStatus] = useState(null);
+  const [filterCategory, setFilterCategory] = useState("");
   const [form, setForm] = useState({ client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigned_to:"" });
   const [saving, setSaving] = useState(false);
+  const [statusError, setStatusError] = useState("");
 
   const catInfo = (key) => TICKET_CATEGORIES.find(c=>c.key===key);
+  const visibleTickets = filterCategory ? tickets.filter(t=>t.category===filterCategory) : tickets;
+  const historyFor = (ticketId) => statusHistory.filter(h=>h.ticket_id===ticketId).sort((a,b)=>a.changed_at.localeCompare(b.changed_at));
 
   async function createTicket(e) {
     e.preventDefault();
     if (!form.client_name.trim() || !form.category || !form.channel) return;
     setSaving(true);
+    const id = "tk_"+Date.now();
+    const status = "Inicio por OPS";
     await sb.from("tickets").insert({
-      id: "tk_"+Date.now(),
+      id,
       client_name: form.client_name.trim(),
       category: form.category,
       priority: form.priority,
       channel: form.channel,
       message: form.message.trim() || null,
       assigned_to: form.assigned_to || null,
-      status: "Inicio por OPS",
+      status,
     });
+    await sb.from("ticket_status_history").insert({ id:"tsh_"+Date.now(), ticket_id:id, status, changed_by:currentUserEmail });
     setSaving(false);
     setForm({ client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigned_to:"" });
     setShowNew(false);
@@ -2109,11 +2159,15 @@ function TicketsView({ tickets, onRefresh }) {
   }
 
   async function moveStatus(ticket, newStatus) {
-    const patch = { status: newStatus };
-    if (!ticket.first_response_at && newStatus !== "Inicio por OPS") patch.first_response_at = new Date().toISOString();
-    if (newStatus === "Solucionado") { if (!ticket.resolved_at) patch.resolved_at = new Date().toISOString(); }
-    else if (ticket.resolved_at) patch.resolved_at = null;
-    await updateTicket(ticket, patch);
+    if (newStatus === ticket.status) return;
+    if (TICKET_STATUSES_EN_CURSO.includes(newStatus) && !ticket.fibonacci_score) {
+      setStatusError("Este ticket necesita un puntaje Fibonacci antes de pasar a \""+newStatus+"\".");
+      return;
+    }
+    setStatusError("");
+    await updateTicket(ticket, { status: newStatus });
+    await sb.from("ticket_status_history").insert({ id:"tsh_"+Date.now()+"_"+Math.random().toString(36).slice(2,6), ticket_id:ticket.id, status:newStatus, changed_by:currentUserEmail });
+    onRefresh();
   }
 
   async function deleteTicket(ticket) {
@@ -2126,19 +2180,25 @@ function TicketsView({ tickets, onRefresh }) {
 
   return (
     <>
-      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,gap:12,flexWrap:"wrap" }}>
         <div>
           <div style={{ fontSize:20,fontWeight:700,color:"#111" }}>Tickets</div>
-          <div style={{ fontSize:13,color:"#888",marginTop:4 }}>{tickets.length} tickets · Operaciones</div>
+          <div style={{ fontSize:13,color:"#888",marginTop:4 }}>{visibleTickets.length} tickets · Operaciones</div>
         </div>
-        <button className="spicy-btn-primary" onClick={()=>setShowNew(true)}>+ Nuevo ticket</button>
+        <div style={{ display:"flex",gap:10,alignItems:"center" }}>
+          <select value={filterCategory} onChange={e=>setFilterCategory(e.target.value)} className="spicy-select">
+            <option value="">Todas las categorías</option>
+            {TICKET_CATEGORIES.map(c=><option key={c.key} value={c.key}>{c.emoji} {c.key}</option>)}
+          </select>
+          <button className="spicy-btn-primary" onClick={()=>setShowNew(true)}>+ Nuevo ticket</button>
+        </div>
       </div>
 
       {/* Kanban board */}
       <div style={{ overflowX:"auto", paddingBottom:8 }}>
         <div style={{ display:"flex", gap:14, minWidth: TICKET_STATUSES.length * 250 }}>
           {TICKET_STATUSES.map(status => {
-            const col = tickets.filter(t => t.status === status);
+            const col = visibleTickets.filter(t => t.status === status);
             return (
               <div key={status}
                 onDragOver={e=>{ e.preventDefault(); setDragOverStatus(status); }}
@@ -2160,20 +2220,24 @@ function TicketsView({ tickets, onRefresh }) {
                 </div>
                 {col.map(t => {
                   const c = catInfo(t.category);
+                  const blocking = t.category === "Bloqueante";
                   return (
                     <div key={t.id} draggable
                       onDragStart={e=>e.dataTransfer.setData("text/ticket-id", t.id)}
                       onClick={()=>setDetail(t)}
-                      style={{ background:"white",border:"1px solid #EBEBEB",borderRadius:10,padding:"10px 12px",marginBottom:8,cursor:"grab",boxShadow:"0 1px 2px rgba(0,0,0,0.03)" }}>
+                      style={{ background: blocking?"#FEF0F0":"white", border: blocking?"1px solid #F5B5AC":"1px solid #EBEBEB", borderRadius:10,padding:"10px 12px",marginBottom:8,cursor:"grab",boxShadow:"0 1px 2px rgba(0,0,0,0.03)" }}>
                       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6 }}>
-                        <span style={{ fontSize:12 }}>{c?.emoji} {t.category}</span>
+                        <span style={{ fontSize:12, fontWeight:blocking?700:400, color:blocking?ST_RED:"#111" }}>{c?.emoji} {t.category}</span>
                         <span className={prioClass(t.priority)}>{t.priority}</span>
                       </div>
                       <div style={{ fontSize:13,fontWeight:600,color:"#111",marginBottom:4 }}>{t.client_name}</div>
                       {t.message && <div style={{ fontSize:12,color:"#888",overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical" }}>{t.message}</div>}
                       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8,fontSize:11,color:"#aaa" }}>
                         <span>{t.channel==="WhatsApp"?"📱":"📧"} {t.assigned_to||"Sin asignar"}</span>
-                        <span>{new Date(t.created_at).toLocaleDateString("es-UY",{day:"2-digit",month:"2-digit"})}</span>
+                        <span style={{ display:"flex",alignItems:"center",gap:6 }}>
+                          {t.fibonacci_score && <span className="spicy-badge-gray">{t.fibonacci_score}</span>}
+                          {new Date(t.created_at).toLocaleDateString("es-UY",{day:"2-digit",month:"2-digit"})}
+                        </span>
                       </div>
                     </div>
                   );
@@ -2218,7 +2282,7 @@ function TicketsView({ tickets, onRefresh }) {
             <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Responsable
               <select value={form.assigned_to} onChange={e=>setForm(f=>({...f,assigned_to:e.target.value}))} className="spicy-select" style={{ width:"100%",marginTop:4 }}>
                 <option value="">Sin asignar</option>
-                {TICKET_TEAM.map(n=><option key={n} value={n}>{n}</option>)}
+                {allUsers.map(u=><option key={u.user_id} value={userDisplayName(u)}>{userDisplayName(u)}</option>)}
               </select>
             </label>
 
@@ -2273,18 +2337,39 @@ function TicketsView({ tickets, onRefresh }) {
                 <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Responsable
                   <select value={detail.assigned_to||""} onChange={e=>updateTicket(detail,{assigned_to:e.target.value||null})} className="spicy-select" style={{ width:"100%",marginTop:4 }}>
                     <option value="">Sin asignar</option>
-                    {TICKET_TEAM.map(n=><option key={n} value={n}>{n}</option>)}
+                    {allUsers.map(u=><option key={u.user_id} value={userDisplayName(u)}>{userDisplayName(u)}</option>)}
                   </select>
                 </label>
+              </div>
+              {statusError && <div style={{ fontSize:12,color:ST_RED,background:"#FEF0F0",borderRadius:8,padding:"6px 10px" }}>{statusError}</div>}
+
+              <div>
+                <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Puntaje Fibonacci (esfuerzo)
+                  <select value={detail.fibonacci_score||""} disabled={!canEditFibonacci}
+                    onChange={e=>updateTicket(detail,{fibonacci_score:e.target.value?Number(e.target.value):null})}
+                    className="spicy-select" style={{ width:"100%",marginTop:4 }}>
+                    <option value="">Sin estimar</option>
+                    {FIBONACCI_SCALE.map(f=><option key={f.value} value={f.value}>{f.value} — {f.label}</option>)}
+                  </select>
+                </label>
+                {!canEditFibonacci && <div style={{ fontSize:11,color:"#aaa",marginTop:3 }}>Solo usuarios dev o admin pueden editar el puntaje.</div>}
+                <div style={{ fontSize:11,color:"#aaa",marginTop:6,lineHeight:1.5 }}>
+                  {FIBONACCI_SCALE.map(f=><div key={f.value}><b>{f.value}</b>: {f.help}</div>)}
+                </div>
               </div>
 
               <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Nota de resolución
                 <textarea key={detail.id} defaultValue={detail.resolution_note||""} onBlur={e=>updateTicket(detail,{resolution_note:e.target.value||null})} className="spicy-input" rows={2} style={{ width:"100%",marginTop:4,resize:"vertical" }}/>
               </label>
 
-              <div style={{ fontSize:11,color:"#aaa",display:"flex",flexDirection:"column",gap:2 }}>
-                {detail.first_response_at && <span>Primera respuesta: {new Date(detail.first_response_at).toLocaleString("es-UY")}</span>}
-                {detail.resolved_at && <span>Resuelto: {new Date(detail.resolved_at).toLocaleString("es-UY")}</span>}
+              <div>
+                <div style={{ fontSize:12,color:"#666",fontWeight:500,marginBottom:6 }}>Historial de estados</div>
+                <div style={{ fontSize:11,color:"#aaa",display:"flex",flexDirection:"column",gap:3,maxHeight:120,overflowY:"auto" }}>
+                  {historyFor(detail.id).map(h=>(
+                    <div key={h.id}>{new Date(h.changed_at).toLocaleString("es-UY")} — {h.status} {h.changed_by?`(${h.changed_by})`:""}</div>
+                  ))}
+                  {historyFor(detail.id).length===0 && <span>Sin historial todavía.</span>}
+                </div>
               </div>
 
               <div style={{ display:"flex",justifyContent:"space-between",marginTop:8 }}>
@@ -2295,6 +2380,394 @@ function TicketsView({ tickets, onRefresh }) {
           </div>
         );
       })()}
+    </>
+  );
+}
+
+// ── Dev Tasks View (Kanban, tareas de desarrollo de producto) ──────────────
+function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, canEditFibonacci, onRefresh }) {
+  const [showNew, setShowNew] = useState(false);
+  const [detail,  setDetail]  = useState(null);
+  const [dragOverStage, setDragOverStage] = useState(null);
+  const [form, setForm] = useState({ title:"", description:"", assigned_to:"" });
+  const [saving, setSaving] = useState(false);
+  const [stageError, setStageError] = useState("");
+
+  const historyFor = (taskId) => statusHistory.filter(h=>h.dev_task_id===taskId).sort((a,b)=>a.changed_at.localeCompare(b.changed_at));
+
+  async function createDevTask(e) {
+    e.preventDefault();
+    if (!form.title.trim()) return;
+    setSaving(true);
+    const id = "dt_"+Date.now();
+    const stage = "Backlog";
+    await sb.from("dev_tasks").insert({
+      id, title: form.title.trim(), description: form.description.trim()||null,
+      assigned_to: form.assigned_to || null, stage,
+    });
+    await sb.from("dev_task_status_history").insert({ id:"dth_"+Date.now(), dev_task_id:id, stage, changed_by:currentUserEmail });
+    setSaving(false);
+    setForm({ title:"", description:"", assigned_to:"" });
+    setShowNew(false);
+    onRefresh();
+  }
+
+  async function updateDevTask(task, patch) {
+    await sb.from("dev_tasks").update(patch).eq("id", task.id);
+    setDetail(d => d && d.id===task.id ? { ...d, ...patch } : d);
+    onRefresh();
+  }
+
+  async function moveStage(task, newStage) {
+    if (newStage === task.stage) return;
+    if (newStage === DEV_TASK_STAGE_EN_CURSO && !task.fibonacci_score) {
+      setStageError("Esta tarea necesita un puntaje Fibonacci antes de pasar a \"In Progress\".");
+      return;
+    }
+    setStageError("");
+    await updateDevTask(task, { stage: newStage });
+    await sb.from("dev_task_status_history").insert({ id:"dth_"+Date.now()+"_"+Math.random().toString(36).slice(2,6), dev_task_id:task.id, stage:newStage, changed_by:currentUserEmail });
+    onRefresh();
+  }
+
+  async function deleteDevTask(task) {
+    await sb.from("dev_tasks").delete().eq("id", task.id);
+    setDetail(null);
+    onRefresh();
+  }
+
+  return (
+    <>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
+        <div>
+          <div style={{ fontSize:20,fontWeight:700,color:"#111" }}>Tareas de desarrollo</div>
+          <div style={{ fontSize:13,color:"#888",marginTop:4 }}>{devTasks.length} tareas · Devs</div>
+        </div>
+        <button className="spicy-btn-primary" onClick={()=>setShowNew(true)}>+ Nueva tarea</button>
+      </div>
+
+      <div style={{ overflowX:"auto", paddingBottom:8 }}>
+        <div style={{ display:"flex", gap:14, minWidth: DEV_TASK_STAGES.length * 250 }}>
+          {DEV_TASK_STAGES.map(stage => {
+            const col = devTasks.filter(t => t.stage === stage);
+            return (
+              <div key={stage}
+                onDragOver={e=>{ e.preventDefault(); setDragOverStage(stage); }}
+                onDragLeave={()=>setDragOverStage(s=>s===stage?null:s)}
+                onDrop={e=>{
+                  e.preventDefault();
+                  const id = e.dataTransfer.getData("text/dev-task-id");
+                  const t = devTasks.find(x=>x.id===id);
+                  setDragOverStage(null);
+                  if (t && t.stage!==stage) moveStage(t, stage);
+                }}
+                style={{
+                  width:236, flexShrink:0, background: dragOverStage===stage?"#FFF3EE":"#F7F7F8",
+                  border:"1px solid #EBEBEB", borderRadius:12, padding:10, minHeight:120,
+                }}>
+                <div style={{ fontSize:12,fontWeight:700,color:"#555",marginBottom:10,display:"flex",justifyContent:"space-between" }}>
+                  <span>{stage}</span>
+                  <span style={{ color:"#bbb" }}>{col.length}</span>
+                </div>
+                {col.map(t => (
+                  <div key={t.id} draggable
+                    onDragStart={e=>e.dataTransfer.setData("text/dev-task-id", t.id)}
+                    onClick={()=>setDetail(t)}
+                    style={{ background:"white",border:"1px solid #EBEBEB",borderRadius:10,padding:"10px 12px",marginBottom:8,cursor:"grab",boxShadow:"0 1px 2px rgba(0,0,0,0.03)" }}>
+                    <div style={{ fontSize:13,fontWeight:600,color:"#111",marginBottom:4 }}>{t.title}</div>
+                    {t.description && <div style={{ fontSize:12,color:"#888",overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical" }}>{t.description}</div>}
+                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8,fontSize:11,color:"#aaa" }}>
+                      <span>{t.assigned_to||"Sin asignar"}</span>
+                      {t.fibonacci_score && <span className="spicy-badge-gray">{t.fibonacci_score}</span>}
+                    </div>
+                  </div>
+                ))}
+                {col.length===0 && <div style={{ fontSize:11,color:"#ccc",textAlign:"center",padding:"12px 0" }}>Sin tareas</div>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {showNew && (
+        <div onClick={()=>setShowNew(false)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}>
+          <form onClick={e=>e.stopPropagation()} onSubmit={createDevTask} style={{ background:"white",borderRadius:16,width:"100%",maxWidth:480,padding:24,display:"flex",flexDirection:"column",gap:14,maxHeight:"85vh",overflowY:"auto" }}>
+            <div style={{ fontSize:16,fontWeight:700,color:"#111" }}>Nueva tarea de desarrollo</div>
+            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Título
+              <input required autoFocus className="spicy-input" value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))} style={{ width:"100%",marginTop:4 }}/>
+            </label>
+            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Descripción
+              <textarea value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} className="spicy-input" rows={3} style={{ width:"100%",marginTop:4,resize:"vertical" }}/>
+            </label>
+            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Responsable
+              <select value={form.assigned_to} onChange={e=>setForm(f=>({...f,assigned_to:e.target.value}))} className="spicy-select" style={{ width:"100%",marginTop:4 }}>
+                <option value="">Sin asignar</option>
+                {allUsers.map(u=><option key={u.user_id} value={userDisplayName(u)}>{userDisplayName(u)}</option>)}
+              </select>
+            </label>
+            <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:4 }}>
+              <button type="button" className="spicy-btn-secondary" onClick={()=>setShowNew(false)}>Cancelar</button>
+              <button type="submit" className="spicy-btn-primary" disabled={saving||!form.title.trim()}>Crear tarea</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {detail && (
+        <div onClick={()=>setDetail(null)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:"white",borderRadius:16,width:"100%",maxWidth:520,maxHeight:"85vh",overflowY:"auto",padding:24,display:"flex",flexDirection:"column",gap:12 }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
+              <input key={detail.id} defaultValue={detail.title}
+                onBlur={e=>updateDevTask(detail,{title:e.target.value.trim()||detail.title})}
+                style={{ fontSize:16,fontWeight:700,color:"#111",border:"none",outline:"none",width:"100%",padding:0,fontFamily:"inherit",background:"transparent" }}/>
+              <button onClick={()=>setDetail(null)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#ccc",lineHeight:1 }}>×</button>
+            </div>
+
+            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Descripción
+              <textarea key={detail.id} defaultValue={detail.description||""} onBlur={e=>updateDevTask(detail,{description:e.target.value||null})} className="spicy-input" rows={3} style={{ width:"100%",marginTop:4,resize:"vertical" }}/>
+            </label>
+
+            <div style={{ display:"flex",gap:12 }}>
+              <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Etapa
+                <select value={detail.stage} onChange={e=>moveStage(detail, e.target.value)} className="spicy-select" style={{ width:"100%",marginTop:4 }}>
+                  {DEV_TASK_STAGES.map(s=><option key={s} value={s}>{s}</option>)}
+                </select>
+              </label>
+              <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Responsable
+                <select value={detail.assigned_to||""} onChange={e=>updateDevTask(detail,{assigned_to:e.target.value||null})} className="spicy-select" style={{ width:"100%",marginTop:4 }}>
+                  <option value="">Sin asignar</option>
+                  {allUsers.map(u=><option key={u.user_id} value={userDisplayName(u)}>{userDisplayName(u)}</option>)}
+                </select>
+              </label>
+            </div>
+            {stageError && <div style={{ fontSize:12,color:ST_RED,background:"#FEF0F0",borderRadius:8,padding:"6px 10px" }}>{stageError}</div>}
+
+            <div>
+              <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Puntaje Fibonacci (esfuerzo)
+                <select value={detail.fibonacci_score||""} disabled={!canEditFibonacci}
+                  onChange={e=>updateDevTask(detail,{fibonacci_score:e.target.value?Number(e.target.value):null})}
+                  className="spicy-select" style={{ width:"100%",marginTop:4 }}>
+                  <option value="">Sin estimar</option>
+                  {FIBONACCI_SCALE.map(f=><option key={f.value} value={f.value}>{f.value} — {f.label}</option>)}
+                </select>
+              </label>
+              {!canEditFibonacci && <div style={{ fontSize:11,color:"#aaa",marginTop:3 }}>Solo usuarios dev o admin pueden editar el puntaje.</div>}
+              <div style={{ fontSize:11,color:"#aaa",marginTop:6,lineHeight:1.5 }}>
+                {FIBONACCI_SCALE.map(f=><div key={f.value}><b>{f.value}</b>: {f.help}</div>)}
+              </div>
+            </div>
+
+            <div>
+              <div style={{ fontSize:12,color:"#666",fontWeight:500,marginBottom:6 }}>Historial de etapas</div>
+              <div style={{ fontSize:11,color:"#aaa",display:"flex",flexDirection:"column",gap:3,maxHeight:120,overflowY:"auto" }}>
+                {historyFor(detail.id).map(h=>(
+                  <div key={h.id}>{new Date(h.changed_at).toLocaleString("es-UY")} — {h.stage} {h.changed_by?`(${h.changed_by})`:""}</div>
+                ))}
+                {historyFor(detail.id).length===0 && <span>Sin historial todavía.</span>}
+              </div>
+            </div>
+
+            <div style={{ display:"flex",justifyContent:"space-between",marginTop:8 }}>
+              <button className="spicy-btn-secondary" style={{ color:ST_RED,borderColor:ST_RED_BG }} onClick={()=>deleteDevTask(detail)}>Eliminar tarea</button>
+              <button className="spicy-btn-primary" onClick={()=>setDetail(null)}>Listo</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ── Devs Metrics View (dashboard) ───────────────────────────────────────────
+function DevsMetricsView({ tickets, ticketHistory, devTasks, devTaskHistory, setView }) {
+  const [typeFilter, setTypeFilter] = useState("all"); // 'all' | 'tickets' | 'dev'
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+
+  const inRange = (iso) => (!fromDate || iso>=fromDate) && (!toDate || iso<=toDate);
+  const weekOf = (iso) => {
+    const d = new Date(iso);
+    const day = (d.getDay()+6)%7; // lunes=0
+    d.setDate(d.getDate()-day);
+    return d.toISOString().split("T")[0];
+  };
+
+  const showTickets = typeFilter!=="dev";
+  const showDev = typeFilter!=="tickets";
+
+  // Items cerrados (con fecha de cierre + puntaje) para velocidad / puntos soporte vs producto
+  const closedTicketEvents = showTickets ? ticketHistory
+    .filter(h=>TICKET_STATUS_GROUPS["Cerrados"].includes(h.status) && inRange(h.changed_at.split("T")[0]))
+    .map(h=>{ const t=tickets.find(x=>x.id===h.ticket_id); return t?{ id:t.id, week:weekOf(h.changed_at), score:t.fibonacci_score||0, assigned_to:t.assigned_to||"Sin asignar", changed_at:h.changed_at }:null; })
+    .filter(Boolean) : [];
+  const closedDevEvents = showDev ? devTaskHistory
+    .filter(h=>DEV_TASK_STAGES_CERRADOS.includes(h.stage) && inRange(h.changed_at.split("T")[0]))
+    .map(h=>{ const t=devTasks.find(x=>x.id===h.dev_task_id); return t?{ id:t.id, week:weekOf(h.changed_at), score:t.fibonacci_score||0, assigned_to:t.assigned_to||"Sin asignar", changed_at:h.changed_at }:null; })
+    .filter(Boolean) : [];
+
+  const weeks = [...new Set([...closedTicketEvents,...closedDevEvents].map(e=>e.week))].sort();
+
+  const velocityByWeek = weeks.map(w=>({
+    week: w,
+    ticketPoints: closedTicketEvents.filter(e=>e.week===w).reduce((s,e)=>s+e.score,0),
+    devPoints: closedDevEvents.filter(e=>e.week===w).reduce((s,e)=>s+e.score,0),
+  }));
+  const maxWeekly = Math.max(1, ...velocityByWeek.map(w=>w.ticketPoints+w.devPoints));
+
+  const byPerson = {};
+  [...closedTicketEvents,...closedDevEvents].forEach(e=>{
+    byPerson[e.assigned_to] = (byPerson[e.assigned_to]||0) + e.score;
+  });
+  const workloadPoints = Object.entries(byPerson).map(([name,points])=>({name,points})).sort((a,b)=>b.points-a.points);
+  const maxPersonPoints = Math.max(1, ...workloadPoints.map(w=>w.points));
+
+  // Cycle time dev (creación → primera Testeando (Prod)) y tiempo de resolución (creación → primera Solucionado)
+  const firstEntryTo = (hist, idField, id, status, statusField) => hist
+    .filter(h=>h[idField]===id && h[statusField]===status)
+    .sort((a,b)=>a.changed_at.localeCompare(b.changed_at))[0];
+  const devCycleTimes = showTickets ? tickets
+    .map(t=>({ t, h: firstEntryTo(ticketHistory,"ticket_id",t.id,"Testeando (Prod)","status") }))
+    .filter(x=>x.h && inRange(x.h.changed_at.split("T")[0]))
+    .map(x=>new Date(x.h.changed_at)-new Date(x.t.created_at)) : [];
+  const resolutionTimes = showTickets ? tickets
+    .map(t=>({ t, h: firstEntryTo(ticketHistory,"ticket_id",t.id,"Solucionado","status") }))
+    .filter(x=>x.h && inRange(x.h.changed_at.split("T")[0]))
+    .map(x=>new Date(x.h.changed_at)-new Date(x.t.created_at)) : [];
+  const avg = (arr) => arr.length ? arr.reduce((s,x)=>s+x,0)/arr.length : null;
+
+  // Tiempo promedio en cada estado (tickets)
+  const avgTimeInStatus = TICKET_STATUSES.map(status=>{
+    const durations = [];
+    tickets.forEach(t=>{
+      const h = ticketHistory.filter(x=>x.ticket_id===t.id).sort((a,b)=>a.changed_at.localeCompare(b.changed_at));
+      h.forEach((entry,i)=>{
+        if (entry.status!==status) return;
+        const next = h[i+1];
+        const end = next ? new Date(next.changed_at) : new Date();
+        durations.push(end-new Date(entry.changed_at));
+      });
+    });
+    return { status, avgMs: avg(durations) };
+  }).filter(x=>x.avgMs!=null);
+
+  const ticketsByCategory = TICKET_CATEGORIES.map(c=>({ label:c.key, emoji:c.emoji, count: tickets.filter(t=>t.category===c.key).length }));
+  const maxByCategory = Math.max(1, ...ticketsByCategory.map(x=>x.count));
+
+  const unestimated = [
+    ...(showTickets ? tickets.filter(t=>!t.fibonacci_score && statusGroup(t.status)!=="Sin empezar").map(t=>({ id:t.id, label:t.client_name, kind:"ticket" })) : []),
+    ...(showDev ? devTasks.filter(t=>!t.fibonacci_score && t.stage!=="Backlog" && t.stage!=="Por Hacer").map(t=>({ id:t.id, label:t.title, kind:"dev" })) : []),
+  ];
+
+  return (
+    <>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:12 }}>
+        <div style={{ fontSize:20,fontWeight:700,color:"#111" }}>Devs — Resumen</div>
+        <div style={{ display:"flex",gap:10,alignItems:"center",flexWrap:"wrap" }}>
+          <select value={typeFilter} onChange={e=>setTypeFilter(e.target.value)} className="spicy-select">
+            <option value="all">Tickets + Producto</option>
+            <option value="tickets">Solo tickets</option>
+            <option value="dev">Solo desarrollo de producto</option>
+          </select>
+          <input type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} className="spicy-input"/>
+          <input type="date" value={toDate} onChange={e=>setToDate(e.target.value)} className="spicy-input"/>
+        </div>
+      </div>
+
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:20 }}>
+        <div className="spicy-kpi">
+          <div className="spicy-kpi-label">Cycle time dev prom.</div>
+          <div className="spicy-kpi-value">{fmtDuration(avg(devCycleTimes))}</div>
+          <div className="spicy-kpi-sub">{devCycleTimes.length} tickets con dato</div>
+        </div>
+        <div className="spicy-kpi">
+          <div className="spicy-kpi-label">Resolución prom.</div>
+          <div className="spicy-kpi-value">{fmtDuration(avg(resolutionTimes))}</div>
+          <div className="spicy-kpi-sub">{resolutionTimes.length} tickets resueltos</div>
+        </div>
+        <div className="spicy-kpi" style={{ cursor:"pointer" }} onClick={()=>setView("devtasks")}>
+          <div className="spicy-kpi-label">Puntos esta semana</div>
+          <div className="spicy-kpi-value">{velocityByWeek.length ? velocityByWeek[velocityByWeek.length-1].ticketPoints+velocityByWeek[velocityByWeek.length-1].devPoints : 0}</div>
+        </div>
+        <div className="spicy-kpi" style={{ cursor:unestimated.length?"pointer":"default" }}>
+          <div className="spicy-kpi-label">Sin estimar</div>
+          <div className="spicy-kpi-value" style={{ color:unestimated.length?ST_RED:"#111" }}>{unestimated.length}</div>
+        </div>
+      </div>
+
+      <div style={{ display:"flex",gap:16,flexWrap:"wrap" }}>
+        <div className="spicy-card" style={{ flex:"1 1 320px" }}>
+          <div style={{ fontSize:14,fontWeight:600,color:"#111",marginBottom:14 }}>Velocidad — puntos cerrados por semana <span style={{ fontSize:11,color:"#aaa",fontWeight:400 }}>(soporte vs. producto)</span></div>
+          {velocityByWeek.length===0 && <div style={{ fontSize:13,color:"#bbb",textAlign:"center",padding:"1rem" }}>Sin datos todavía.</div>}
+          {velocityByWeek.map(w=>(
+            <div key={w.week} style={{ marginBottom:12 }}>
+              <div style={{ display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:6 }}>
+                <span style={{ color:"#555" }}>{w.week}</span>
+                <span style={{ fontWeight:600,color:"#111" }}>{w.ticketPoints+w.devPoints} pts</span>
+              </div>
+              <div style={{ height:8,background:"#F3F3F3",borderRadius:4,overflow:"hidden",display:"flex" }}>
+                <div style={{ height:"100%",width:`${Math.round((w.ticketPoints/maxWeekly)*100)}%`,background:ST_RED }}/>
+                <div style={{ height:"100%",width:`${Math.round((w.devPoints/maxWeekly)*100)}%`,background:"#533AB7" }}/>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="spicy-card" style={{ flex:"1 1 320px" }}>
+          <div style={{ fontSize:14,fontWeight:600,color:"#111",marginBottom:14 }}>Carga de trabajo <span style={{ fontSize:11,color:"#aaa",fontWeight:400 }}>— puntos cerrados por persona, no es un ranking</span></div>
+          {workloadPoints.length===0 && <div style={{ fontSize:13,color:"#bbb",textAlign:"center",padding:"1rem" }}>Sin datos todavía.</div>}
+          {workloadPoints.map(w=>(
+            <div key={w.name} style={{ marginBottom:12 }}>
+              <div style={{ display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6 }}>
+                <span style={{ color:"#555" }}>{w.name}</span>
+                <span style={{ fontWeight:600,color:"#111" }}>{w.points} pts</span>
+              </div>
+              <div style={{ height:6,background:"#F3F3F3",borderRadius:4,overflow:"hidden" }}>
+                <div style={{ height:"100%",width:`${Math.round((w.points/maxPersonPoints)*100)}%`,background:"#533AB7",borderRadius:4 }}/>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display:"flex",gap:16,flexWrap:"wrap",marginTop:16 }}>
+        <div className="spicy-card" style={{ flex:"1 1 320px" }}>
+          <div style={{ fontSize:14,fontWeight:600,color:"#111",marginBottom:14 }}>Tiempo promedio por estado (tickets)</div>
+          {avgTimeInStatus.length===0 && <div style={{ fontSize:13,color:"#bbb",textAlign:"center",padding:"1rem" }}>Sin datos todavía.</div>}
+          {avgTimeInStatus.map(x=>(
+            <div key={x.status} className="spicy-table-row">
+              <span style={{ flex:1,fontSize:13,color:"#555" }}>{x.status}</span>
+              <span style={{ fontSize:13,fontWeight:600,color:"#111" }}>{fmtDuration(x.avgMs)}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="spicy-card" style={{ flex:"1 1 320px" }}>
+          <div style={{ fontSize:14,fontWeight:600,color:"#111",marginBottom:14 }}>Tickets por categoría</div>
+          {ticketsByCategory.every(x=>x.count===0) && <div style={{ fontSize:13,color:"#bbb",textAlign:"center",padding:"1rem" }}>Sin tickets todavía.</div>}
+          {ticketsByCategory.filter(x=>x.count>0).map(x=>(
+            <div key={x.label} style={{ marginBottom:12 }}>
+              <div style={{ display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6 }}>
+                <span style={{ color:"#555" }}>{x.emoji} {x.label}</span>
+                <span style={{ fontWeight:600,color:"#111" }}>{x.count}</span>
+              </div>
+              <div style={{ height:6,background:"#F3F3F3",borderRadius:4,overflow:"hidden" }}>
+                <div style={{ height:"100%",width:`${Math.round((x.count/maxByCategory)*100)}%`,background:ST_RED,borderRadius:4 }}/>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="spicy-card" style={{ marginTop:16 }}>
+        <div style={{ fontSize:14,fontWeight:600,color:"#111",marginBottom:14 }}>Sin estimar <span style={{ fontSize:11,color:"#aaa",fontWeight:400 }}>— en curso o cerrados sin puntaje Fibonacci</span></div>
+        {unestimated.length===0 && <div style={{ fontSize:13,color:"#bbb",textAlign:"center",padding:"1rem" }}>Nada sin estimar. 🎉</div>}
+        {unestimated.map(u=>(
+          <div key={u.kind+u.id} className="spicy-table-row" style={{ cursor:"pointer" }} onClick={()=>setView(u.kind==="ticket"?"tickets":"devtasks")}>
+            <span style={{ flex:1,fontSize:13,color:"#111" }}>{u.label}</span>
+            <span style={{ fontSize:12,color:ST_RED,fontWeight:600 }}>Ver →</span>
+          </div>
+        ))}
+      </div>
     </>
   );
 }
@@ -3001,7 +3474,7 @@ function OnboardingView({ onboarding, history, onRefresh }) {
 // ── Main App ───────────────────────────────────────────────────────────────
 export default function SpicyFinanzas() {
   const [session,  setSession]  = useState(null);
-  const [role,     setRole]     = useState(null); // 'admin' | 'reader' | null
+  const [role,     setRole]     = useState(null); // 'admin' | 'reader' | 'dev' | null
   const [authReady,setAuthReady]= useState(false);
 
   const [txns,      setTxns]      = useState([]);
@@ -3012,12 +3485,15 @@ export default function SpicyFinanzas() {
   const [catsIncome,  setCatsIncome]  = useState([]);
   const [catsExpense, setCatsExpense] = useState([]);
   const [tickets,     setTickets]     = useState([]);
+  const [ticketStatusHistory, setTicketStatusHistory] = useState([]);
   const [tasks,       setTasks]       = useState([]);
   const [taskComments,setTaskComments]= useState([]);
   const [allUsers,        setAllUsers]        = useState([]);
   const [allowedSections, setAllowedSections] = useState([]);
   const [onboarding,        setOnboarding]        = useState([]);
   const [onboardingHistory, setOnboardingHistory] = useState([]);
+  const [devTasks,            setDevTasks]            = useState([]);
+  const [devTaskStatusHistory,setDevTaskStatusHistory]= useState([]);
   const [dataLoaded, setDataLoaded]   = useState(false);
 
   const [view,      setView]      = useState("dashboard");
@@ -3047,7 +3523,7 @@ export default function SpicyFinanzas() {
 
   async function loadAll() {
     setDataLoaded(false);
-    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,tasksRes,taskCommentsRes,usersRes,allowedRes,onboardingRes,onboardingHistoryRes]=await Promise.all([
+    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,ticketHistoryRes,tasksRes,taskCommentsRes,usersRes,allowedRes,onboardingRes,onboardingHistoryRes,devTasksRes,devTaskHistoryRes]=await Promise.all([
       sb.from("user_roles").select("role").eq("user_id",session.user.id).single(),
       sb.from("transactions").select("*").order("date",{ascending:false}),
       sb.from("accounts").select("*").order("created_at"),
@@ -3056,12 +3532,15 @@ export default function SpicyFinanzas() {
       sb.from("referred_clients").select("*").order("name"),
       sb.from("referred_client_payments").select("*").order("date",{ascending:false}),
       sb.from("tickets").select("*").order("created_at",{ascending:false}),
+      sb.from("ticket_status_history").select("*"),
       sb.from("tasks").select("*").order("start_date"),
       sb.from("task_comments").select("*").order("created_at"),
       sb.from("user_roles").select("user_id,email,role,first_name,last_name").order("email"),
       sb.from("allowed_sections").select("*"),
       sb.from("onboarding").select("*").order("created_at",{ascending:false}),
       sb.from("onboarding_stage_history").select("*"),
+      sb.from("dev_tasks").select("*").order("created_at",{ascending:false}),
+      sb.from("dev_task_status_history").select("*"),
     ]);
     setRole(roleRes.data?.role||"reader");
     setTxns(txRes.data||[]);
@@ -3072,16 +3551,21 @@ export default function SpicyFinanzas() {
     setCatsIncome((catRes.data||[]).filter(c=>c.type==="income"));
     setCatsExpense((catRes.data||[]).filter(c=>c.type==="expense"));
     setTickets(ticketsRes.data||[]);
+    setTicketStatusHistory(ticketHistoryRes.data||[]);
     setTasks(tasksRes.data||[]);
     setTaskComments(taskCommentsRes.data||[]);
     setAllUsers(usersRes.data||[]);
     setAllowedSections(allowedRes.data||[]);
     setOnboarding(onboardingRes.data||[]);
     setOnboardingHistory(onboardingHistoryRes.data||[]);
+    setDevTasks(devTasksRes.data||[]);
+    setDevTaskStatusHistory(devTaskHistoryRes.data||[]);
     setDataLoaded(true);
   }
 
   const isAdmin = role==="admin";
+  const isDev = role==="dev";
+  const canEditFibonacci = isAdmin || isDev;
   const myAllowedSections = new Set(session ? allowedSections.filter(a=>a.user_id===session.user.id).map(a=>a.section) : []);
   const canSeeSection = (label) => isAdmin || myAllowedSections.has(label);
   const currentSection = NAV_SECTIONS.find(s=>s.views.includes(view));
@@ -3208,7 +3692,7 @@ export default function SpicyFinanzas() {
   const curMK=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
   const referralOwed=txns.filter(t=>t.type==="income"&&t.referrer_id&&monthKey(t.date)===curMK).reduce((s,t)=>s+Number(t.amount),0)*COMMISSION_RATE;
 
-  const urgentTicketsCount = tickets.filter(t=>t.status==="🚨 Urgente").length;
+  const urgentTicketsCount = tickets.filter(t=>t.category==="Bloqueante" && statusGroup(t.status)!=="Cerrados").length;
   const todayISOForTasks = new Date().toISOString().split("T")[0];
   const overdueTasksCount = tasks.filter(t=>t.end_date<todayISOForTasks && !["Finalizado","Archivado"].includes(t.stage)).length;
 
@@ -3434,10 +3918,12 @@ export default function SpicyFinanzas() {
       {view==="referrals"&&<ReferralDashboard txns={txns} referrers={referrers} referredClients={referredClients} payments={referredClientPayments} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="runway"&&<RunwayView txns={txns} accounts={accounts}/>}
       {view==="pnl"&&<PnLView txns={txns}/>}
-      {view==="opsdash"&&<OperationsSummaryView tickets={tickets} tasks={tasks} setView={setView}/>}
-      {view==="tickets"&&<TicketsView tickets={tickets} onRefresh={loadAll}/>}
+      {view==="opsdash"&&<OperationsSummaryView tickets={tickets} tasks={tasks} statusHistory={ticketStatusHistory} setView={setView}/>}
+      {view==="tickets"&&<TicketsView tickets={tickets} statusHistory={ticketStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} canEditFibonacci={canEditFibonacci} onRefresh={loadAll}/>}
       {view==="tasks"&&<TasksView tasks={tasks} comments={taskComments} currentUserEmail={session.user.email} onRefresh={loadAll}/>}
       {view==="onboarding"&&<OnboardingView onboarding={onboarding} history={onboardingHistory} onRefresh={loadAll}/>}
+      {view==="devdash"&&<DevsMetricsView tickets={tickets} ticketHistory={ticketStatusHistory} devTasks={devTasks} devTaskHistory={devTaskStatusHistory} setView={setView}/>}
+      {view==="devtasks"&&<DevTasksView devTasks={devTasks} statusHistory={devTaskStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} canEditFibonacci={canEditFibonacci} onRefresh={loadAll}/>}
       {view==="services"&&<ServicesView/>}
       {view==="categories"&&<CategoriesPanel catsIncome={catsIncome} catsExpense={catsExpense} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="usuarios"&&isAdmin&&<UserPermissionsPanel users={allUsers} allowedSections={allowedSections} onRefresh={loadAll}/>}
