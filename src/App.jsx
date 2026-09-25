@@ -2024,7 +2024,7 @@ function fmtDuration(ms) {
 // ── Inicio (landing personal) ───────────────────────────────────────────────
 const INICIO_LAST_VISIT_KEY = "spicy_inicio_last_visit";
 
-function InicioView({ myOpenTickets, myOpenDevTasks, ticketHistory, devTaskHistory, comments, currentUserEmail, setView }) {
+function InicioView({ myOpenTickets, myOpenDevTasks, myOpenTasks, ticketHistory, devTaskHistory, comments, currentUserEmail, setView }) {
   // Se lee la visita anterior UNA sola vez (antes de pisarla) para poder marcar
   // qué cambió desde la última vez que el usuario entró a Inicio.
   const [lastVisit] = useState(() => {
@@ -2052,11 +2052,14 @@ function InicioView({ myOpenTickets, myOpenDevTasks, ticketHistory, devTaskHisto
   const devTaskRows = myOpenDevTasks
     .map(t=>({ t, last: lastActivityFor("dev_task", t.id, devTaskHistory, "dev_task_id", t.created_at) }))
     .sort((a,b)=>b.last.localeCompare(a.last));
+  const taskRows = myOpenTasks
+    .map(t=>({ t, last: lastActivityFor("task", t.id, [], "", t.created_at) }))
+    .sort((a,b)=>b.last.localeCompare(a.last));
 
   const isNew = (last) => lastVisit && last > lastVisit;
   const catInfo = (key) => TICKET_CATEGORIES.find(c=>c.key===key);
-  const total = ticketRows.length + devTaskRows.length;
-  const newCount = [...ticketRows,...devTaskRows].filter(r=>isNew(r.last)).length;
+  const total = ticketRows.length + devTaskRows.length + taskRows.length;
+  const newCount = [...ticketRows,...devTaskRows,...taskRows].filter(r=>isNew(r.last)).length;
 
   const NewDot = () => <span title="Cambió desde tu última visita" style={{ width:7,height:7,borderRadius:"50%",background:ST_RED,display:"inline-block",marginRight:8,flexShrink:0 }}/>;
 
@@ -2103,6 +2106,21 @@ function InicioView({ myOpenTickets, myOpenDevTasks, ticketHistory, devTaskHisto
             </div>
           ))}
         </div>
+
+        <div className="spicy-card" style={{ flex:"1 1 380px" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+            <span style={{ fontSize:14,fontWeight:600,color:"#111" }}>Tareas asignadas a mí</span>
+            {taskRows.length>0 && <button onClick={()=>setView("tasks")} style={{ fontSize:12,color:ST_RED,background:"none",border:"none",cursor:"pointer",fontWeight:600 }}>Ver todas →</button>}
+          </div>
+          {taskRows.length===0 && <div style={{ fontSize:13,color:"#bbb",textAlign:"center",padding:"1rem" }}>Nada por acá.</div>}
+          {taskRows.map(({t,last})=>(
+            <div key={t.id} onClick={()=>setView("tasks")} className="spicy-table-row" style={{ cursor:"pointer" }}>
+              {isNew(last) && <NewDot/>}
+              <span style={{ flex:1,fontSize:13,color:"#111" }}>{t.title}</span>
+              <span className="spicy-badge-gray">{t.stage}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </>
   );
@@ -2134,16 +2152,16 @@ function OperationsSummaryView({ tickets, tasks, statusHistory, assignees, allUs
 
   const activeTickets = tickets.filter(t=>statusGroup(t.status)!=="Cerrados");
   const activeTasks   = tasks.filter(t=>!["Finalizado","Archivado"].includes(t.stage));
-  const ticketAssigneeNames = (ticketId) => {
-    const ids = assignees.filter(a=>a.entity_type==="ticket" && a.entity_id===ticketId).map(a=>a.user_id);
+  const assigneeNamesFor = (entityType, id) => {
+    const ids = assignees.filter(a=>a.entity_type===entityType && a.entity_id===id).map(a=>a.user_id);
     const names = ids.map(id=>{ const u=allUsers.find(x=>x.user_id===id); return u?userDisplayName(u):null; }).filter(Boolean);
     return names.length ? names : [""];
   };
-  const roster = [...new Set([...activeTickets.flatMap(t=>ticketAssigneeNames(t.id)),...activeTasks.map(t=>t.assigned_to||"")])];
+  const roster = [...new Set([...activeTickets.flatMap(t=>assigneeNamesFor("ticket",t.id)),...activeTasks.flatMap(t=>assigneeNamesFor("task",t.id))])];
   const workload = roster.map(name=>({
     name: name||"Sin asignar",
-    tickets: activeTickets.filter(t=>ticketAssigneeNames(t.id).includes(name)).length,
-    tasks:   activeTasks.filter(t=>(t.assigned_to||"")===name).length,
+    tickets: activeTickets.filter(t=>assigneeNamesFor("ticket",t.id).includes(name)).length,
+    tasks:   activeTasks.filter(t=>assigneeNamesFor("task",t.id).includes(name)).length,
   })).filter(w=>w.tickets>0||w.tasks>0);
 
   const kpis = [
@@ -3210,9 +3228,9 @@ function DevsMetricsView({ tickets, ticketHistory, devTasks, devTaskHistory, ass
 }
 
 // ── Tasks View (Kanban + Calendario) ────────────────────────────────────────
-function TasksView({ tasks, comments, currentUserEmail, onRefresh }) {
+function TasksView({ tasks, allUsers, assignees, comments, attachments, currentUserEmail, currentUserId, onRefresh }) {
   const todayISO = new Date().toISOString().split("T")[0];
-  const emptyForm = () => ({ title:"", start_date:todayISO, end_date:todayISO, assigned_to:"", priority:"Media", description:"" });
+  const emptyForm = () => ({ title:"", start_date:todayISO, end_date:todayISO, assigneeIds:[], priority:"Media", description:"" });
 
   const [mode, setMode] = useState("kanban"); // 'kanban' | 'calendar'
   const [calMode, setCalMode] = useState("month"); // 'month' | 'week'
@@ -3223,12 +3241,15 @@ function TasksView({ tasks, comments, currentUserEmail, onRefresh }) {
   const [dragOverStage, setDragOverStage] = useState(null);
   const [form, setForm] = useState(emptyForm());
   const [saving, setSaving] = useState(false);
-  const [newComment, setNewComment] = useState("");
 
-  const visible = filterAssigned ? tasks.filter(t=>t.assigned_to===filterAssigned) : tasks;
+  const visible = filterAssigned
+    ? tasks.filter(t=>assignees.some(a=>a.entity_type==="task"&&a.entity_id===t.id&&a.user_id===filterAssigned))
+    : tasks;
   const prioClass = (p) => p==="Alta" ? "spicy-badge-red" : p==="Media" ? "spicy-badge-amber" : "spicy-badge-gray";
   const PRIO_COLOR = { Alta: ST_RED, Media: "#D97706", Baja: "#9CA3AF" };
-  const getComments = (taskId) => comments.filter(c=>c.task_id===taskId).sort((a,b)=>a.created_at.localeCompare(b.created_at));
+  const assigneesFor = (taskId) => assignees.filter(a=>a.entity_type==="task" && a.entity_id===taskId).map(a=>allUsers.find(u=>u.user_id===a.user_id)).filter(Boolean);
+  const commentsCount = (taskId) => comments.filter(c=>c.entity_type==="task" && c.entity_id===taskId).length;
+  const attachmentsCount = (taskId) => attachments.filter(a=>a.entity_type==="task" && a.entity_id===taskId).length;
   const fmtRange = (t) => {
     const s = new Date(t.start_date+"T00:00:00"), e = new Date(t.end_date+"T00:00:00");
     const f = (d) => `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}`;
@@ -3239,16 +3260,19 @@ function TasksView({ tasks, comments, currentUserEmail, onRefresh }) {
     e.preventDefault();
     if (!form.title.trim() || !form.start_date || !form.end_date || form.end_date < form.start_date) return;
     setSaving(true);
+    const id = "task_"+Date.now();
     await sb.from("tasks").insert({
-      id: "task_"+Date.now(),
+      id,
       title: form.title.trim(),
       start_date: form.start_date,
       end_date: form.end_date,
-      assigned_to: form.assigned_to || null,
       priority: form.priority,
       stage: "Sin Empezar",
       description: form.description.trim() || null,
     });
+    if (form.assigneeIds.length) {
+      await sb.from("entity_assignees").insert(form.assigneeIds.map(userId=>({ id:"ea_"+Date.now()+"_"+Math.random().toString(36).slice(2,6), entity_type:"task", entity_id:id, user_id:userId })));
+    }
     setSaving(false);
     setForm(emptyForm());
     setShowNew(false);
@@ -3267,21 +3291,8 @@ function TasksView({ tasks, comments, currentUserEmail, onRefresh }) {
     onRefresh();
   }
 
-  async function addComment(task) {
-    if (!newComment.trim()) return;
-    await sb.from("task_comments").insert({
-      id: "cm_"+Date.now(),
-      task_id: task.id,
-      author: currentUserEmail,
-      text: newComment.trim(),
-    });
-    setNewComment("");
-    onRefresh();
-  }
-
   function openDetail(task) {
     setDetail(task);
-    setNewComment("");
   }
 
   // ── Calendar grid helpers ──────────────────────────────────────────────
@@ -3317,7 +3328,7 @@ function TasksView({ tasks, comments, currentUserEmail, onRefresh }) {
         <div style={{ display:"flex",gap:8,alignItems:"center",flexWrap:"wrap" }}>
           <select className="spicy-select" value={filterAssigned} onChange={e=>setFilterAssigned(e.target.value)}>
             <option value="">Todos los responsables</option>
-            {TICKET_TEAM.map(n=><option key={n} value={n}>{n}</option>)}
+            {allUsers.map(u=><option key={u.user_id} value={u.user_id}>{userDisplayName(u)}</option>)}
           </select>
           <div style={{ display:"flex",border:"1px solid #E0E0E0",borderRadius:8,overflow:"hidden" }}>
             <button onClick={()=>setMode("kanban")} style={toggleBtn(mode==="kanban")}>Kanban</button>
@@ -3376,8 +3387,15 @@ function TasksView({ tasks, comments, currentUserEmail, onRefresh }) {
                         <span className={prioClass(t.priority)}>{t.priority}</span>
                       </div>
                       <div style={{ fontSize:11,color:"#999",marginBottom:4 }}>{fmtRange(t)}</div>
-                      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:6,fontSize:11,color:"#aaa" }}>
-                        <span>{t.assigned_to||"Sin asignar"}</span>
+                      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:6 }}>
+                        <div style={{ display:"flex",gap:4 }}>
+                          {assigneesFor(t.id).map(u=><Avatar key={u.user_id} name={userDisplayName(u)} size={20}/>)}
+                          {assigneesFor(t.id).length===0 && <span style={{ fontSize:11,color:"#ccc" }}>Sin asignar</span>}
+                        </div>
+                        <span style={{ display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#aaa" }}>
+                          {commentsCount(t.id)>0 && <span>💬{commentsCount(t.id)}</span>}
+                          {attachmentsCount(t.id)>0 && <span>📎{attachmentsCount(t.id)}</span>}
+                        </span>
                       </div>
                     </div>
                   ))}
@@ -3448,18 +3466,15 @@ function TasksView({ tasks, comments, currentUserEmail, onRefresh }) {
               </div>
             </label>
 
-            <div style={{ display:"flex",gap:12 }}>
-              <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Responsable
-                <select className="spicy-select" value={form.assigned_to} onChange={e=>setForm(f=>({...f,assigned_to:e.target.value}))} style={{ width:"100%",marginTop:4 }}>
-                  <option value="">Sin asignar</option>
-                  {TICKET_TEAM.map(n=><option key={n} value={n}>{n}</option>)}
-                </select>
-              </label>
-              <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Prioridad
-                <select className="spicy-select" value={form.priority} onChange={e=>setForm(f=>({...f,priority:e.target.value}))} style={{ width:"100%",marginTop:4 }}>
-                  {TICKET_PRIORITIES.map(p=><option key={p} value={p}>{p}</option>)}
-                </select>
-              </label>
+            <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Prioridad
+              <select className="spicy-select" value={form.priority} onChange={e=>setForm(f=>({...f,priority:e.target.value}))} style={{ width:"100%",marginTop:4 }}>
+                {TICKET_PRIORITIES.map(p=><option key={p} value={p}>{p}</option>)}
+              </select>
+            </label>
+
+            <div>
+              <div style={{ fontSize:12,color:"#666",fontWeight:500,marginBottom:4 }}>Responsable</div>
+              <AssigneesPickerLocal selectedIds={form.assigneeIds} allUsers={allUsers} onChange={ids=>setForm(f=>({...f,assigneeIds:ids}))}/>
             </div>
 
             <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Descripción
@@ -3507,12 +3522,10 @@ function TasksView({ tasks, comments, currentUserEmail, onRefresh }) {
               </label>
             </div>
 
-            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Responsable
-              <select className="spicy-select" value={detail.assigned_to||""} onChange={e=>updateTask(detail,{assigned_to:e.target.value||null})} style={{ width:"100%",marginTop:4 }}>
-                <option value="">Sin asignar</option>
-                {TICKET_TEAM.map(n=><option key={n} value={n}>{n}</option>)}
-              </select>
-            </label>
+            <div>
+              <div style={{ fontSize:12,color:"#666",fontWeight:500,marginBottom:6 }}>Asignados</div>
+              <AssigneesPicker entityType="task" entityId={detail.id} assignees={assignees} allUsers={allUsers} onChange={onRefresh}/>
+            </div>
 
             <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Descripción
               <textarea key={detail.id} defaultValue={detail.description||""} onBlur={e=>updateTask(detail,{description:e.target.value||null})} className="spicy-input" rows={3} style={{ width:"100%",marginTop:4,resize:"vertical" }}/>
@@ -3520,25 +3533,12 @@ function TasksView({ tasks, comments, currentUserEmail, onRefresh }) {
 
             <div>
               <div style={{ fontSize:12,color:"#666",fontWeight:500,marginBottom:6 }}>Comentarios</div>
-              <div style={{ display:"flex",flexDirection:"column",gap:6,maxHeight:180,overflowY:"auto",marginBottom:8 }}>
-                {getComments(detail.id).map(c=>(
-                  <div key={c.id} style={{ background:"#F7F7F8",borderRadius:8,padding:"7px 10px" }}>
-                    <div style={{ display:"flex",justifyContent:"space-between",fontSize:11,color:"#999",marginBottom:2 }}>
-                      <span style={{ fontWeight:600,color:"#666" }}>{c.author}</span>
-                      <span>{new Date(c.created_at).toLocaleString("es-UY",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</span>
-                    </div>
-                    <div style={{ fontSize:13,color:"#333" }}>{c.text}</div>
-                  </div>
-                ))}
-                {getComments(detail.id).length===0 && <div style={{ fontSize:12,color:"#ccc" }}>Sin comentarios todavía.</div>}
-              </div>
-              <div style={{ display:"flex",gap:8 }}>
-                <input className="spicy-input" placeholder="Agregar comentario..." value={newComment}
-                  onChange={e=>setNewComment(e.target.value)}
-                  onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); addComment(detail); } }}
-                  style={{ flex:1 }}/>
-                <button className="spicy-btn-primary" onClick={()=>addComment(detail)} disabled={!newComment.trim()}>Enviar</button>
-              </div>
+              <CommentsThread entityType="task" entityId={detail.id} comments={comments} currentUserId={currentUserId} currentUserEmail={currentUserEmail} onChange={onRefresh}/>
+            </div>
+
+            <div>
+              <div style={{ fontSize:12,color:"#666",fontWeight:500,marginBottom:6 }}>Adjuntos</div>
+              <AttachmentsList entityType="task" entityId={detail.id} attachments={attachments} currentUserEmail={currentUserEmail} onChange={onRefresh}/>
             </div>
 
             <div style={{ display:"flex",justifyContent:"space-between",marginTop:4 }}>
@@ -3924,7 +3924,6 @@ export default function SpicyFinanzas() {
   const [tickets,     setTickets]     = useState([]);
   const [ticketStatusHistory, setTicketStatusHistory] = useState([]);
   const [tasks,       setTasks]       = useState([]);
-  const [taskComments,setTaskComments]= useState([]);
   const [allUsers,        setAllUsers]        = useState([]);
   const [allowedSections, setAllowedSections] = useState([]);
   const [onboarding,        setOnboarding]        = useState([]);
@@ -3966,7 +3965,7 @@ export default function SpicyFinanzas() {
     // cada acción chica (agregar un asignado, comentar, etc.) y si tira abajo
     // dataLoaded, el gate de "Cargando datos..." desmonta toda la vista actual
     // (y con ella, el modal de detalle abierto) en cada una de esas acciones.
-    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,ticketHistoryRes,tasksRes,taskCommentsRes,usersRes,allowedRes,onboardingRes,onboardingHistoryRes,devTasksRes,devTaskHistoryRes,assigneesRes,commentsRes,attachmentsRes]=await Promise.all([
+    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,ticketHistoryRes,tasksRes,usersRes,allowedRes,onboardingRes,onboardingHistoryRes,devTasksRes,devTaskHistoryRes,assigneesRes,commentsRes,attachmentsRes]=await Promise.all([
       sb.from("user_roles").select("role").eq("user_id",session.user.id).single(),
       sb.from("transactions").select("*").order("date",{ascending:false}),
       sb.from("accounts").select("*").order("created_at"),
@@ -3977,7 +3976,6 @@ export default function SpicyFinanzas() {
       sb.from("tickets").select("*").order("created_at",{ascending:false}),
       sb.from("ticket_status_history").select("*"),
       sb.from("tasks").select("*").order("start_date"),
-      sb.from("task_comments").select("*").order("created_at"),
       sb.from("user_roles").select("user_id,email,role,first_name,last_name").order("email"),
       sb.from("allowed_sections").select("*"),
       sb.from("onboarding").select("*").order("created_at",{ascending:false}),
@@ -3999,7 +3997,6 @@ export default function SpicyFinanzas() {
     setTickets(ticketsRes.data||[]);
     setTicketStatusHistory(ticketHistoryRes.data||[]);
     setTasks(tasksRes.data||[]);
-    setTaskComments(taskCommentsRes.data||[]);
     setAllUsers(usersRes.data||[]);
     setAllowedSections(allowedRes.data||[]);
     setOnboarding(onboardingRes.data||[]);
@@ -4147,9 +4144,11 @@ export default function SpicyFinanzas() {
 
   const myAssignedTicketIds = new Set(entityAssignees.filter(a=>a.entity_type==="ticket" && a.user_id===session.user.id).map(a=>a.entity_id));
   const myAssignedDevTaskIds = new Set(entityAssignees.filter(a=>a.entity_type==="dev_task" && a.user_id===session.user.id).map(a=>a.entity_id));
+  const myAssignedTaskIds = new Set(entityAssignees.filter(a=>a.entity_type==="task" && a.user_id===session.user.id).map(a=>a.entity_id));
   const myOpenTickets  = tickets.filter(t=>myAssignedTicketIds.has(t.id) && statusGroup(t.status)!=="Cerrados");
   const myOpenDevTasks = devTasks.filter(t=>myAssignedDevTaskIds.has(t.id) && !DEV_TASK_STAGES_CERRADOS.includes(t.stage));
-  const myAssignedCount = myOpenTickets.length + myOpenDevTasks.length;
+  const myOpenTasks    = tasks.filter(t=>myAssignedTaskIds.has(t.id) && !["Finalizado","Archivado"].includes(t.stage));
+  const myAssignedCount = myOpenTickets.length + myOpenDevTasks.length + myOpenTasks.length;
 
   const sourceBadge=(t)=>{
     if(t.source)return <span style={{ fontSize:10,padding:"1px 5px",borderRadius:4,marginLeft:5,background:t.source==="mercury"?"var(--color-background-info)":"var(--color-background-success)",color:t.source==="mercury"?"var(--color-text-info)":"var(--color-text-success)" }}>{t.source}</span>;
@@ -4374,10 +4373,10 @@ export default function SpicyFinanzas() {
       {view==="referrals"&&<ReferralDashboard txns={txns} referrers={referrers} referredClients={referredClients} payments={referredClientPayments} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="runway"&&<RunwayView txns={txns} accounts={accounts}/>}
       {view==="pnl"&&<PnLView txns={txns}/>}
-      {view==="inicio"&&<InicioView myOpenTickets={myOpenTickets} myOpenDevTasks={myOpenDevTasks} ticketHistory={ticketStatusHistory} devTaskHistory={devTaskStatusHistory} comments={comments} currentUserEmail={session.user.email} setView={setView}/>}
+      {view==="inicio"&&<InicioView myOpenTickets={myOpenTickets} myOpenDevTasks={myOpenDevTasks} myOpenTasks={myOpenTasks} ticketHistory={ticketStatusHistory} devTaskHistory={devTaskStatusHistory} comments={comments} currentUserEmail={session.user.email} setView={setView}/>}
       {view==="opsdash"&&<OperationsSummaryView tickets={tickets} tasks={tasks} statusHistory={ticketStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
       {view==="tickets"&&<TicketsView tickets={tickets} statusHistory={ticketStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} canEditFibonacci={canEditFibonacci} assignees={entityAssignees} comments={comments} attachments={attachments} devTasks={devTasks} setView={setView} onRefresh={loadAll}/>}
-      {view==="tasks"&&<TasksView tasks={tasks} comments={taskComments} currentUserEmail={session.user.email} onRefresh={loadAll}/>}
+      {view==="tasks"&&<TasksView tasks={tasks} allUsers={allUsers} assignees={entityAssignees} comments={comments} attachments={attachments} currentUserEmail={session.user.email} currentUserId={session.user.id} onRefresh={loadAll}/>}
       {view==="onboarding"&&<OnboardingView onboarding={onboarding} history={onboardingHistory} onRefresh={loadAll}/>}
       {view==="devdash"&&<DevsMetricsView tickets={tickets} ticketHistory={ticketStatusHistory} devTasks={devTasks} devTaskHistory={devTaskStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
       {view==="devtasks"&&<DevTasksView devTasks={devTasks} statusHistory={devTaskStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} canEditFibonacci={canEditFibonacci} assignees={entityAssignees} comments={comments} attachments={attachments} tickets={tickets} onRefresh={loadAll}/>}
