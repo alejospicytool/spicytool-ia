@@ -2176,6 +2176,70 @@ function AssigneesPicker({ entityType, entityId, assignees, allUsers, onChange }
   );
 }
 
+// Misma UI que AssigneesPicker pero sobre estado local de un formulario (para
+// poder elegir responsables al crear un ticket/tarea, antes de que exista la fila
+// en la base con la que AssigneesPicker necesita trabajar).
+function AssigneesPickerLocal({ selectedIds, allUsers, onChange }) {
+  const available = allUsers.filter(u=>!selectedIds.includes(u.user_id));
+  return (
+    <div style={{ display:"flex",flexWrap:"wrap",gap:8,alignItems:"center" }}>
+      {selectedIds.map(id=>{
+        const u = allUsers.find(x=>x.user_id===id);
+        if (!u) return null;
+        const name = userDisplayName(u);
+        return (
+          <div key={id} style={{ display:"flex",alignItems:"center",gap:5,background:"#F7F7F8",borderRadius:20,padding:"3px 8px 3px 3px" }}>
+            <Avatar name={name} size={22}/>
+            <span style={{ fontSize:12,color:"#333" }}>{name}</span>
+            <button type="button" onClick={()=>onChange(selectedIds.filter(x=>x!==id))} style={{ background:"none",border:"none",cursor:"pointer",color:"#bbb",fontSize:14,lineHeight:1,padding:0 }}>×</button>
+          </div>
+        );
+      })}
+      {selectedIds.length===0 && <span style={{ fontSize:12,color:"#aaa" }}>Sin asignar</span>}
+      {available.length>0 && (
+        <select value="" onChange={e=>onChange([...selectedIds, e.target.value])} className="spicy-select" style={{ fontSize:12,padding:"3px 6px" }}>
+          <option value="" disabled>+ agregar</option>
+          {available.map(u=><option key={u.user_id} value={u.user_id}>{userDisplayName(u)}</option>)}
+        </select>
+      )}
+    </div>
+  );
+}
+
+// Combobox con búsqueda: input de texto que filtra una lista de opciones al tipear.
+function SearchSelect({ options, value, onChange, placeholder }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const selected = options.find(o=>o.value===value);
+  const filtered = query.trim()
+    ? options.filter(o=>o.label.toLowerCase().includes(query.trim().toLowerCase()))
+    : options;
+
+  return (
+    <div style={{ position:"relative" }}>
+      <input
+        className="spicy-input"
+        placeholder={placeholder}
+        value={open ? query : (selected ? selected.label : "")}
+        onFocus={()=>setQuery("")}
+        onChange={e=>{ setOpen(true); setQuery(e.target.value); }}
+        onClick={()=>setOpen(true)}
+        onBlur={()=>setTimeout(()=>setOpen(false), 150)}
+        style={{ width:"100%" }}
+      />
+      {open && (
+        <div style={{ position:"absolute",top:"calc(100% + 4px)",left:0,right:0,background:"white",border:"1px solid #EBEBEB",borderRadius:8,maxHeight:180,overflowY:"auto",zIndex:20,boxShadow:"0 4px 12px rgba(0,0,0,0.08)" }}>
+          <div onMouseDown={()=>{ onChange(null); setOpen(false); }} style={{ padding:"7px 10px",fontSize:12,color:"#aaa",cursor:"pointer" }}>Ninguno</div>
+          {filtered.map(o=>(
+            <div key={o.value} onMouseDown={()=>{ onChange(o.value); setOpen(false); }} style={{ padding:"7px 10px",fontSize:13,color:"#333",cursor:"pointer" }}>{o.label}</div>
+          ))}
+          {filtered.length===0 && <div style={{ padding:"7px 10px",fontSize:12,color:"#ccc" }}>Sin resultados</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CommentsThread({ entityType, entityId, comments, currentUserId, currentUserEmail, onChange }) {
   const [newBody, setNewBody] = useState("");
   const [editingId, setEditingId] = useState(null);
@@ -2319,7 +2383,7 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
   const [detail,  setDetail]  = useState(null);
   const [dragOverStatus, setDragOverStatus] = useState(null);
   const [filterCategory, setFilterCategory] = useState("");
-  const [form, setForm] = useState({ client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"" });
+  const [form, setForm] = useState({ client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigneeIds:[] });
   const [saving, setSaving] = useState(false);
   const [statusError, setStatusError] = useState("");
 
@@ -2345,8 +2409,11 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
       status,
     });
     await sb.from("ticket_status_history").insert({ id:"tsh_"+Date.now(), ticket_id:id, status, changed_by:currentUserEmail });
+    if (form.assigneeIds.length) {
+      await sb.from("entity_assignees").insert(form.assigneeIds.map(userId=>({ id:"ea_"+Date.now()+"_"+Math.random().toString(36).slice(2,6), entity_type:"ticket", entity_id:id, user_id:userId })));
+    }
     setSaving(false);
-    setForm({ client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"" });
+    setForm({ client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigneeIds:[] });
     setShowNew(false);
     onRefresh();
   }
@@ -2487,6 +2554,11 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
               <textarea value={form.message} onChange={e=>setForm(f=>({...f,message:e.target.value}))} className="spicy-input" rows={3} style={{ width:"100%",marginTop:4,resize:"vertical" }}/>
             </label>
 
+            <div>
+              <div style={{ fontSize:12,color:"#666",fontWeight:500,marginBottom:4 }}>Responsable</div>
+              <AssigneesPickerLocal selectedIds={form.assigneeIds} allUsers={allUsers} onChange={ids=>setForm(f=>({...f,assigneeIds:ids}))}/>
+            </div>
+
             <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:4 }}>
               <button type="button" className="spicy-btn-secondary" onClick={()=>setShowNew(false)}>Cancelar</button>
               <button type="submit" className="spicy-btn-primary" disabled={saving||!form.client_name.trim()||!form.category}>Crear ticket</button>
@@ -2599,7 +2671,7 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
   const [showNew, setShowNew] = useState(false);
   const [detail,  setDetail]  = useState(null);
   const [dragOverStage, setDragOverStage] = useState(null);
-  const [form, setForm] = useState({ title:"", description:"" });
+  const [form, setForm] = useState({ title:"", description:"", assigneeIds:[] });
   const [saving, setSaving] = useState(false);
   const [stageError, setStageError] = useState("");
   const [filterAssignee, setFilterAssignee] = useState("");
@@ -2625,8 +2697,11 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
       id, title: form.title.trim(), description: form.description.trim()||null, stage,
     });
     await sb.from("dev_task_status_history").insert({ id:"dth_"+Date.now(), dev_task_id:id, stage, changed_by:currentUserEmail });
+    if (form.assigneeIds.length) {
+      await sb.from("entity_assignees").insert(form.assigneeIds.map(userId=>({ id:"ea_"+Date.now()+"_"+Math.random().toString(36).slice(2,6), entity_type:"dev_task", entity_id:id, user_id:userId })));
+    }
     setSaving(false);
-    setForm({ title:"", description:"" });
+    setForm({ title:"", description:"", assigneeIds:[] });
     setShowNew(false);
     onRefresh();
   }
@@ -2734,7 +2809,10 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
             <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Descripción
               <textarea value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} className="spicy-input" rows={3} style={{ width:"100%",marginTop:4,resize:"vertical" }}/>
             </label>
-            <div style={{ fontSize:11,color:"#aaa" }}>Los asignados se eligen desde el detalle, una vez creada la tarea.</div>
+            <div>
+              <div style={{ fontSize:12,color:"#666",fontWeight:500,marginBottom:4 }}>Responsable</div>
+              <AssigneesPickerLocal selectedIds={form.assigneeIds} allUsers={allUsers} onChange={ids=>setForm(f=>({...f,assigneeIds:ids}))}/>
+            </div>
             <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:4 }}>
               <button type="button" className="spicy-btn-secondary" onClick={()=>setShowNew(false)}>Cancelar</button>
               <button type="submit" className="spicy-btn-primary" disabled={saving||!form.title.trim()}>Crear tarea</button>
@@ -2769,12 +2847,14 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
               <AssigneesPicker entityType="dev_task" entityId={detail.id} assignees={assignees} allUsers={allUsers} onChange={onRefresh}/>
             </div>
 
-            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Ticket relacionado
-              <select value={detail.ticket_id||""} onChange={e=>updateDevTask(detail,{ticket_id:e.target.value||null})} className="spicy-select" style={{ width:"100%",marginTop:4 }}>
-                <option value="">Ninguno</option>
-                {tickets.map(t=><option key={t.id} value={t.id}>{t.client_name} — {t.category}</option>)}
-              </select>
-            </label>
+            <div>
+              <div style={{ fontSize:12,color:"#666",fontWeight:500,marginBottom:4 }}>Ticket relacionado</div>
+              <SearchSelect
+                options={tickets.map(t=>({ value:t.id, label:`${t.client_name} — ${t.category}` }))}
+                value={detail.ticket_id||null}
+                onChange={id=>updateDevTask(detail,{ticket_id:id})}
+                placeholder="Buscar ticket por cliente..."/>
+            </div>
 
             <div>
               <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Puntaje Fibonacci (esfuerzo)
@@ -3785,7 +3865,10 @@ export default function SpicyFinanzas() {
   },[session]);
 
   async function loadAll() {
-    setDataLoaded(false);
+    // No reseteamos dataLoaded a false acá: este refresh se llama después de
+    // cada acción chica (agregar un asignado, comentar, etc.) y si tira abajo
+    // dataLoaded, el gate de "Cargando datos..." desmonta toda la vista actual
+    // (y con ella, el modal de detalle abierto) en cada una de esas acciones.
     const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,ticketHistoryRes,tasksRes,taskCommentsRes,usersRes,allowedRes,onboardingRes,onboardingHistoryRes,devTasksRes,devTaskHistoryRes,assigneesRes,commentsRes,attachmentsRes]=await Promise.all([
       sb.from("user_roles").select("role").eq("user_id",session.user.id).single(),
       sb.from("transactions").select("*").order("date",{ascending:false}),
