@@ -10,18 +10,19 @@
 // Body esperado (JSON):
 // {
 //   "client_name": "Nombre del cliente" (obligatorio),
-//   "category": "Error bloqueante" | "Error funcional" | "Duda de uso" | "Mejora" | "Administrativo" (obligatorio),
+//   "category": "Bloqueante" | "Funcional" | "Duda de uso" | "Mejora" | "Administrativo" (obligatorio),
 //   "channel": "WhatsApp" | "Email" (default: "WhatsApp"),
 //   "priority": "Alta" | "Media" | "Baja" (default: "Media"),
 //   "message": "texto libre" (opcional),
-//   "assigned_to": "Nico" | "Ticiana" | "Lucas" (opcional)
+//   "assigned_to": nombre del responsable (opcional, texto libre)
 // }
+// El ticket nace sin puntaje Fibonacci (fibonacci_score), como cualquier ticket nuevo.
 // Header: x-webhook-secret: <WEBHOOK_SECRET>
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const WEBHOOK_SECRET = "REPLACE_WITH_YOUR_SECRET";
-const CATEGORIES = ["Error bloqueante", "Error funcional", "Duda de uso", "Mejora", "Administrativo"];
+const CATEGORIES = ["Bloqueante", "Funcional", "Duda de uso", "Mejora", "Administrativo"];
 const PRIORITIES = ["Alta", "Media", "Baja"];
 const CHANNELS = ["WhatsApp", "Email"];
 
@@ -83,5 +84,13 @@ Deno.serve(async (req: Request) => {
     .single();
 
   if (error) return json({ error: error.message }, 500, cors);
+
+  await supabase.from("ticket_status_history").insert({
+    id: "tsh_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8),
+    ticket_id: data.id,
+    status: "Inicio por OPS",
+    changed_by: "webhook",
+  });
+
   return json({ ok: true, ticket: data }, 200, cors);
 });
