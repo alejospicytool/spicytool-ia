@@ -277,7 +277,7 @@ function LoginScreen() {
       <div style={{ width:"100%", maxWidth:380, padding:"0 20px" }}>
         <div style={{ textAlign:"center", marginBottom:32 }}>
           <div style={{ width:52, height:52, background:ST_RED, borderRadius:14, display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 16px", fontSize:24, color:"white", fontWeight:700 }}>S</div>
-          <div style={{ fontSize:22, fontWeight:700, color:"#111", marginBottom:6 }}>Control financiero</div>
+          <div style={{ fontSize:22, fontWeight:700, color:"#111", marginBottom:6 }}>Back Office SpicyTool</div>
           <div style={{ fontSize:14, color:"#888" }}>Ingresá con tu cuenta de SpicyTool</div>
         </div>
         <div style={{ background:"white", borderRadius:14, border:"1px solid #EBEBEB", padding:"28px 28px" }}>
