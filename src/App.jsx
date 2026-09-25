@@ -2087,7 +2087,7 @@ function fmtDuration(ms) {
 // ── Inicio (landing personal) ───────────────────────────────────────────────
 const INICIO_LAST_VISIT_KEY = "spicy_inicio_last_visit";
 
-function InicioView({ myOpenTickets, myOpenDevTasks, myOpenTasks, ticketHistory, devTaskHistory, comments, currentUserEmail, setView }) {
+function InicioView({ myOpenTickets, myOpenDevTasks, myOpenTasks, ticketHistory, devTaskHistory, comments, currentUserEmail, canSeeOperaciones, canSeeDevs, setView }) {
   // Se lee la visita anterior UNA sola vez (antes de pisarla) para poder marcar
   // qué cambió desde la última vez que el usuario entró a Inicio.
   const [lastVisit] = useState(() => {
@@ -2109,13 +2109,13 @@ function InicioView({ myOpenTickets, myOpenDevTasks, myOpenTasks, ticketHistory,
     return times.reduce((max,t)=> t>max?t:max, times[0]);
   };
 
-  const ticketRows = myOpenTickets
+  const ticketRows = (canSeeOperaciones ? myOpenTickets : [])
     .map(t=>({ t, last: lastActivityFor("ticket", t.id, ticketHistory, "ticket_id", t.created_at) }))
     .sort((a,b)=>b.last.localeCompare(a.last));
-  const devTaskRows = myOpenDevTasks
+  const devTaskRows = (canSeeDevs ? myOpenDevTasks : [])
     .map(t=>({ t, last: lastActivityFor("dev_task", t.id, devTaskHistory, "dev_task_id", t.created_at) }))
     .sort((a,b)=>b.last.localeCompare(a.last));
-  const taskRows = myOpenTasks
+  const taskRows = (canSeeOperaciones ? myOpenTasks : [])
     .map(t=>({ t, last: lastActivityFor("task", t.id, [], "", t.created_at) }))
     .sort((a,b)=>b.last.localeCompare(a.last));
 
@@ -2134,6 +2134,7 @@ function InicioView({ myOpenTickets, myOpenDevTasks, myOpenTasks, ticketHistory,
       </div>
 
       <div style={{ display:"flex",gap:16,flexWrap:"wrap" }}>
+        {canSeeOperaciones && (
         <div className="spicy-card" style={{ flex:"1 1 380px" }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
             <span style={{ fontSize:14,fontWeight:600,color:"#111" }}>Tickets asignados a mí</span>
@@ -2153,7 +2154,9 @@ function InicioView({ myOpenTickets, myOpenDevTasks, myOpenTasks, ticketHistory,
             );
           })}
         </div>
+        )}
 
+        {canSeeDevs && (
         <div className="spicy-card" style={{ flex:"1 1 380px" }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
             <span style={{ fontSize:14,fontWeight:600,color:"#111" }}>Tareas de dev asignadas a mí</span>
@@ -2169,7 +2172,9 @@ function InicioView({ myOpenTickets, myOpenDevTasks, myOpenTasks, ticketHistory,
             </div>
           ))}
         </div>
+        )}
 
+        {canSeeOperaciones && (
         <div className="spicy-card" style={{ flex:"1 1 380px" }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
             <span style={{ fontSize:14,fontWeight:600,color:"#111" }}>Tareas asignadas a mí</span>
@@ -2184,6 +2189,13 @@ function InicioView({ myOpenTickets, myOpenDevTasks, myOpenTasks, ticketHistory,
             </div>
           ))}
         </div>
+        )}
+
+        {!canSeeOperaciones && !canSeeDevs && (
+          <div className="spicy-card" style={{ flex:"1 1 380px" }}>
+            <div style={{ fontSize:13,color:"#bbb",textAlign:"center",padding:"1rem" }}>Todavía no tenés acceso a ninguna sección con tareas o tickets asignables. Pedile a un admin que te habilite Operaciones o Devs.</div>
+          </div>
+        )}
       </div>
     </>
   );
@@ -4436,7 +4448,7 @@ export default function SpicyFinanzas() {
       {view==="referrals"&&<ReferralDashboard txns={txns} referrers={referrers} referredClients={referredClients} payments={referredClientPayments} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="runway"&&<RunwayView txns={txns} accounts={accounts}/>}
       {view==="pnl"&&<PnLView txns={txns}/>}
-      {view==="inicio"&&<InicioView myOpenTickets={myOpenTickets} myOpenDevTasks={myOpenDevTasks} myOpenTasks={myOpenTasks} ticketHistory={ticketStatusHistory} devTaskHistory={devTaskStatusHistory} comments={comments} currentUserEmail={session.user.email} setView={setView}/>}
+      {view==="inicio"&&<InicioView myOpenTickets={myOpenTickets} myOpenDevTasks={myOpenDevTasks} myOpenTasks={myOpenTasks} ticketHistory={ticketStatusHistory} devTaskHistory={devTaskStatusHistory} comments={comments} currentUserEmail={session.user.email} canSeeOperaciones={canSeeSection("Operaciones")} canSeeDevs={canSeeSection("Devs")} setView={setView}/>}
       {view==="opsdash"&&<OperationsSummaryView tickets={tickets} tasks={tasks} statusHistory={ticketStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
       {view==="tickets"&&<TicketsView tickets={tickets} statusHistory={ticketStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} canEditFibonacci={canEditFibonacci} assignees={entityAssignees} comments={comments} attachments={attachments} devTasks={devTasks} setView={setView} onRefresh={loadAll}/>}
       {view==="tasks"&&<TasksView tasks={tasks} allUsers={allUsers} assignees={entityAssignees} comments={comments} attachments={attachments} currentUserEmail={session.user.email} currentUserId={session.user.id} onRefresh={loadAll}/>}
