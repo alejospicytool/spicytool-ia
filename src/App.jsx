@@ -61,7 +61,7 @@ function BrandStyles() {
         display: flex; align-items: center; justify-content: center;
         font-size: 13px; font-weight: 600; color: white; flex-shrink: 0;
       }
-      .spicy-main { margin-left: 220px; padding: 28px 32px; max-width: 960px; }
+      .spicy-main { margin-left: 220px; padding: 28px 32px; }
       .spicy-page-title { font-size: 22px; font-weight: 600; color: #111; margin-bottom: 24px; }
       .spicy-card {
         background: white; border-radius: 12px; border: 1px solid #EBEBEB;
