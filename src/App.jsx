@@ -558,16 +558,37 @@ function CategoriesPanel({ catsIncome, catsExpense, isAdmin, onRefresh }) {
 
 // ── User Permissions Panel ───────────────────────────────────────────────────
 function UserPermissionsPanel({ users, allowedSections, onRefresh }) {
-  const sections = NAV_SECTIONS.map(s=>s.label);
+  const sections = NAV_SECTIONS.map(s=>s.label).filter(l=>!ALWAYS_VISIBLE_SECTIONS.includes(l));
   const emptyForm = () => ({ email:"", first_name:"", last_name:"", role:"reader" });
 
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState(emptyForm());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [editingUser, setEditingUser] = useState(null);
+  const [editForm, setEditForm] = useState(null);
+  const [editSaving, setEditSaving] = useState(false);
 
   const isAllowed = (userId, section) => allowedSections.some(a=>a.user_id===userId && a.section===section);
   const displayName = (u) => (u.first_name||u.last_name) ? `${u.first_name||""} ${u.last_name||""}`.trim() : u.email;
+
+  function openEdit(u) {
+    setEditingUser(u);
+    setEditForm({ first_name: u.first_name||"", last_name: u.last_name||"", role: u.role });
+  }
+
+  async function saveEdit(e) {
+    e.preventDefault();
+    setEditSaving(true);
+    await sb.from("user_roles").update({
+      first_name: editForm.first_name.trim() || null,
+      last_name: editForm.last_name.trim() || null,
+      role: editForm.role,
+    }).eq("user_id", editingUser.user_id);
+    setEditSaving(false);
+    setEditingUser(null);
+    onRefresh();
+  }
 
   async function toggle(userId, section, allow) {
     if (allow) await sb.from("allowed_sections").insert({ user_id:userId, section });
@@ -620,9 +641,15 @@ function UserPermissionsPanel({ users, allowedSections, onRefresh }) {
             {users.map(u=>(
               <tr key={u.user_id}>
                 <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5" }}>
-                  <div style={{ fontSize:13,color:"#111",fontWeight:500 }}>{displayName(u)}</div>
-                  {(u.first_name||u.last_name)&&<div style={{ fontSize:11,color:"#aaa" }}>{u.email}</div>}
-                  <span className={u.role==="admin"?"spicy-badge-green":"spicy-badge-gray"}>{u.role}</span>
+                  <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+                    <Avatar name={displayName(u)} size={32}/>
+                    <div style={{ flex:1,minWidth:0 }}>
+                      <div style={{ fontSize:13,color:"#111",fontWeight:600 }}>{displayName(u)}</div>
+                      {(u.first_name||u.last_name)&&<div style={{ fontSize:11,color:"#aaa" }}>{u.email}</div>}
+                      <span className={u.role==="admin"?"spicy-badge-green":u.role==="dev"?"spicy-badge-amber":"spicy-badge-gray"}>{u.role}</span>
+                    </div>
+                    <button onClick={()=>openEdit(u)} title="Editar" style={{ background:"none",border:"none",cursor:"pointer",color:"#bbb",fontSize:13,padding:4 }}>✎</button>
+                  </div>
                 </td>
                 {sections.map(s=>(
                   <td key={s} style={{ textAlign:"center",padding:"10px 8px",borderBottom:"1px solid #F5F5F5" }}>
@@ -674,6 +701,42 @@ function UserPermissionsPanel({ users, allowedSections, onRefresh }) {
             <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:4 }}>
               <button type="button" className="spicy-btn-secondary" onClick={()=>setShowAdd(false)}>Cancelar</button>
               <button type="submit" className="spicy-btn-primary" disabled={saving||!form.email.trim()}>Agregar</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {editingUser && (
+        <div onClick={()=>setEditingUser(null)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}>
+          <form onClick={e=>e.stopPropagation()} onSubmit={saveEdit} style={{ background:"white",borderRadius:16,width:"100%",maxWidth:420,padding:24,display:"flex",flexDirection:"column",gap:14 }}>
+            <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+              <Avatar name={displayName(editingUser)} size={36}/>
+              <div>
+                <div style={{ fontSize:16,fontWeight:700,color:"#111" }}>Editar usuario</div>
+                <div style={{ fontSize:12,color:"#888" }}>{editingUser.email}</div>
+              </div>
+            </div>
+
+            <div style={{ display:"flex",gap:12 }}>
+              <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Nombre
+                <input autoFocus className="spicy-input" value={editForm.first_name} onChange={e=>setEditForm(f=>({...f,first_name:e.target.value}))} style={{ width:"100%",marginTop:4 }}/>
+              </label>
+              <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Apellido
+                <input className="spicy-input" value={editForm.last_name} onChange={e=>setEditForm(f=>({...f,last_name:e.target.value}))} style={{ width:"100%",marginTop:4 }}/>
+              </label>
+            </div>
+
+            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Rol
+              <select className="spicy-select" value={editForm.role} onChange={e=>setEditForm(f=>({...f,role:e.target.value}))} style={{ width:"100%",marginTop:4 }}>
+                <option value="reader">reader</option>
+                <option value="dev">dev</option>
+                <option value="admin">admin</option>
+              </select>
+            </label>
+
+            <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:4 }}>
+              <button type="button" className="spicy-btn-secondary" onClick={()=>setEditingUser(null)}>Cancelar</button>
+              <button type="submit" className="spicy-btn-primary" disabled={editSaving}>Guardar</button>
             </div>
           </form>
         </div>
