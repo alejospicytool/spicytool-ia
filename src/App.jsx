@@ -117,7 +117,7 @@ function BrandStyles() {
 
 // ── Nav icon map ───────────────────────────────────────────────────────────
 const NAV_ICONS = {
-  inicio:"🏠",
+  inicio:"🏠", notes:"📝",
   dashboard:"▦", accounts:"🏦", add:"+", history:"☰", runway:"📈", pnl:"📊",
   referrals:"🤝",
   services:"⚡", categories:"⊞",
@@ -125,7 +125,7 @@ const NAV_ICONS = {
   devdash:"📈", devtasks:"🛠️",
 };
 const NAV_LABELS = {
-  inicio:"Inicio",
+  inicio:"Inicio", notes:"Notas",
   dashboard:"Resumen", accounts:"Cuentas", add:"Registrar", history:"Historial", runway:"Runway", pnl:"P&L",
   referrals:"Referidos",
   services:"Servicios", categories:"Categorías",
@@ -133,14 +133,20 @@ const NAV_LABELS = {
   devdash:"Resumen", devtasks:"Tareas",
 };
 const ADMIN_ONLY_VIEWS = ["add","usuarios"];
-// La sección Inicio es la única visible para todos sin pasar por allowed_sections —
-// es la landing personal de cada usuario, no un módulo con permisos propios.
-const ALWAYS_VISIBLE_SECTIONS = ["Inicio"];
+// Inicio y Notas son visibles para todos sin pasar por allowed_sections — Inicio
+// es la landing personal, Notas es información de equipo que cualquiera puede
+// ver y crear (según el pedido), ninguna de las dos es un módulo con permisos propios.
+const ALWAYS_VISIBLE_SECTIONS = ["Inicio","Notas"];
 
 const NAV_SECTIONS = [
   {
     label: "Inicio",
     views: ["inicio"],
+    adminOnly: false,
+  },
+  {
+    label: "Notas",
+    views: ["notes"],
     adminOnly: false,
   },
   {
@@ -216,6 +222,39 @@ function Avatar({ name, size=26 }) {
       {initials(name)}
     </div>
   );
+}
+
+// Convierte URLs y emails de un texto plano en links clickeables, preservando
+// saltos de línea (el contenedor debe tener whiteSpace:"pre-wrap").
+function linkifyText(text) {
+  if (!text) return null;
+  const re = /(https?:\/\/[^\s]+)|([\w.+-]+@[\w-]+\.[\w.-]+)/g;
+  const parts = [];
+  let lastIndex = 0, match, key = 0;
+  while ((match = re.exec(text))) {
+    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
+    const value = match[0];
+    const href = match[1] ? value : `mailto:${value}`;
+    parts.push(<a key={key++} href={href} target={match[1]?"_blank":undefined} rel={match[1]?"noopener noreferrer":undefined} style={{ color:ST_RED }}>{value}</a>);
+    lastIndex = match.index + value.length;
+  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return parts;
+}
+
+// Detección básica de contraseñas/tokens/API keys en texto libre, para avisar
+// antes de guardar una nota (no bloquea, solo sugiere el gestor de contraseñas).
+const SECRET_PATTERNS = [
+  /\b(password|contraseñ?a|pass|pwd)\s*[:=]/i,
+  /\bsk_(live|test)_[A-Za-z0-9]{10,}/,
+  /\bAKIA[0-9A-Z]{16}/,
+  /\bEAAG[A-Za-z0-9]{20,}/,
+  /\bgh[pousr]_[A-Za-z0-9]{20,}/,
+  /\b(api[_-]?key|apikey|secret|token)\s*[:=]\s*\S{8,}/i,
+  /\bBearer\s+[A-Za-z0-9\-_.]{20,}/,
+];
+function looksLikeSecret(text) {
+  return !!text && SECRET_PATTERNS.some(re=>re.test(text));
 }
 
 const FIBONACCI_SCALE = [
@@ -3627,6 +3666,176 @@ function TasksView({ tasks, allUsers, assignees, comments, attachments, currentU
   );
 }
 
+// ── Notas ─────────────────────────────────────────────────────────────────
+function NotesView({ notes, currentUserId, currentUserEmail, isAdmin, onRefresh }) {
+  const [search, setSearch] = useState("");
+  const [showNew, setShowNew] = useState(false);
+  const [newForm, setNewForm] = useState({ title:"", content:"" });
+  const [newWarned, setNewWarned] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const [detail, setDetail] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [editForm, setEditForm] = useState({ title:"", content:"" });
+  const [editWarned, setEditWarned] = useState(false);
+
+  const q = search.trim().toLowerCase();
+  const visible = notes.filter(n => !q || n.title.toLowerCase().includes(q) || (n.content||"").toLowerCase().includes(q));
+
+  function canEdit(note) { return !!note && (note.author_id===currentUserId || isAdmin); }
+
+  const fmtDate = (iso) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+  };
+
+  const warningBanner = (onConfirm) => (
+    <div style={{ background:"#FFF7E6",border:"1px solid #FBBF24",borderRadius:8,padding:"10px 12px",fontSize:12.5,color:"#92400E",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10 }}>
+      <span>⚠️ Esto parece una contraseña, token o API key. No la guardes acá — usá el gestor de contraseñas del equipo.</span>
+      <button type="button" onClick={onConfirm} style={{ background:"none",border:"1px solid #92400E",color:"#92400E",borderRadius:6,padding:"4px 10px",fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap" }}>Guardar igual</button>
+    </div>
+  );
+
+  async function createNote(e) {
+    e.preventDefault();
+    if (!newForm.title.trim()) return;
+    if (looksLikeSecret(newForm.content) && !newWarned) { setNewWarned(true); return; }
+    setSaving(true);
+    await sb.from("notes").insert({
+      id: "note_"+Date.now(),
+      title: newForm.title.trim(),
+      content: newForm.content.trim() || null,
+      author_id: currentUserId,
+      author_email: currentUserEmail,
+    });
+    setSaving(false);
+    setNewForm({ title:"", content:"" });
+    setNewWarned(false);
+    setShowNew(false);
+    onRefresh();
+  }
+
+  function openDetail(note) {
+    setDetail(note);
+    setEditing(false);
+    setEditForm({ title:note.title, content:note.content||"" });
+    setEditWarned(false);
+  }
+
+  async function saveEdit() {
+    if (!editForm.title.trim()) return;
+    if (looksLikeSecret(editForm.content) && !editWarned) { setEditWarned(true); return; }
+    const patch = { title: editForm.title.trim(), content: editForm.content.trim() || null, updated_at: new Date().toISOString() };
+    await sb.from("notes").update(patch).eq("id", detail.id);
+    setDetail(d => ({ ...d, ...patch }));
+    setEditing(false);
+    setEditWarned(false);
+    onRefresh();
+  }
+
+  async function deleteNote(note) {
+    await sb.from("notes").delete().eq("id", note.id);
+    setDetail(null);
+    onRefresh();
+  }
+
+  return (
+    <>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,gap:12,flexWrap:"wrap" }}>
+        <div>
+          <div style={{ fontSize:20,fontWeight:700,color:"#111" }}>Notas</div>
+          <div style={{ fontSize:13,color:"#888",marginTop:4 }}>{notes.length} notas del equipo</div>
+        </div>
+        <div style={{ display:"flex",gap:8,alignItems:"center",flexWrap:"wrap" }}>
+          <input className="spicy-input" placeholder="Buscar por título o contenido…" value={search} onChange={e=>setSearch(e.target.value)} style={{ width:260 }}/>
+          <button className="spicy-btn-primary" onClick={()=>{ setNewForm({title:"",content:""}); setNewWarned(false); setShowNew(true); }}>+ Nueva nota</button>
+        </div>
+      </div>
+
+      {visible.length===0 ? (
+        <div className="spicy-card" style={{ padding:32,textAlign:"center",color:"#999",fontSize:14 }}>
+          {notes.length===0 ? "Todavía no hay notas. Creá la primera." : "No hay notas que coincidan con la búsqueda."}
+        </div>
+      ) : (
+        <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+          {visible.map(n=>(
+            <div key={n.id} className="spicy-card" onClick={()=>openDetail(n)} style={{ padding:16,cursor:"pointer",display:"flex",flexDirection:"column",gap:4 }}>
+              <div style={{ fontSize:15,fontWeight:700,color:"#111" }}>{n.title}</div>
+              {n.content && <div style={{ fontSize:13,color:"#666",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{n.content}</div>}
+              <div style={{ fontSize:11,color:"#999",marginTop:2 }}>{n.author_email} · {fmtDate(n.updated_at)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showNew && (
+        <div onClick={()=>setShowNew(false)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:"white",borderRadius:16,width:"100%",maxWidth:520,maxHeight:"85vh",overflowY:"auto",padding:24 }}>
+            <div style={{ fontSize:16,fontWeight:700,color:"#111",marginBottom:16 }}>Nueva nota</div>
+            <form onSubmit={createNote} style={{ display:"flex",flexDirection:"column",gap:12 }}>
+              <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Título
+                <input className="spicy-input" value={newForm.title} onChange={e=>{ setNewForm(f=>({...f,title:e.target.value})); setNewWarned(false); }} style={{ width:"100%",marginTop:4 }} autoFocus required/>
+              </label>
+              <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Contenido
+                <textarea className="spicy-input" rows={8} value={newForm.content} onChange={e=>{ setNewForm(f=>({...f,content:e.target.value})); setNewWarned(false); }} style={{ width:"100%",marginTop:4,resize:"vertical" }}/>
+              </label>
+              {newWarned && warningBanner(createNote)}
+              <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:4 }}>
+                <button type="button" className="spicy-btn-secondary" onClick={()=>setShowNew(false)}>Cancelar</button>
+                <button type="submit" className="spicy-btn-primary" disabled={saving||!newForm.title.trim()}>{newWarned ? "Guardar igual" : "Crear nota"}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {detail && (
+        <div onClick={()=>setDetail(null)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:"white",borderRadius:16,width:"100%",maxWidth:560,maxHeight:"85vh",overflowY:"auto",padding:24,display:"flex",flexDirection:"column",gap:12 }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
+              {editing ? (
+                <input value={editForm.title} onChange={e=>{ setEditForm(f=>({...f,title:e.target.value})); setEditWarned(false); }}
+                  style={{ fontSize:16,fontWeight:700,color:"#111",border:"none",outline:"none",flex:1,padding:0,fontFamily:"inherit",background:"transparent" }} autoFocus/>
+              ) : (
+                <div style={{ fontSize:16,fontWeight:700,color:"#111" }}>{detail.title}</div>
+              )}
+              <button onClick={()=>setDetail(null)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#ccc",lineHeight:1 }}>×</button>
+            </div>
+            <div style={{ fontSize:11,color:"#999" }}>{detail.author_email} · última edición {fmtDate(detail.updated_at)}</div>
+
+            {editing ? (
+              <textarea value={editForm.content} onChange={e=>{ setEditForm(f=>({...f,content:e.target.value})); setEditWarned(false); }} className="spicy-input" rows={10} style={{ width:"100%",resize:"vertical" }}/>
+            ) : (
+              <div style={{ fontSize:14,color:"#333",whiteSpace:"pre-wrap",lineHeight:1.5 }}>
+                {detail.content ? linkifyText(detail.content) : <span style={{ color:"#bbb" }}>Sin contenido.</span>}
+              </div>
+            )}
+
+            {editing && editWarned && warningBanner(saveEdit)}
+
+            <div style={{ display:"flex",justifyContent:"space-between",marginTop:4 }}>
+              {canEdit(detail) ? (
+                <button className="spicy-btn-secondary" style={{ color:ST_RED,borderColor:ST_RED_BG }} onClick={()=>deleteNote(detail)}>Eliminar nota</button>
+              ) : <span/>}
+              <div style={{ display:"flex",gap:8 }}>
+                {editing ? (
+                  <>
+                    <button className="spicy-btn-secondary" onClick={()=>{ setEditing(false); setEditForm({title:detail.title,content:detail.content||""}); setEditWarned(false); }}>Cancelar</button>
+                    <button className="spicy-btn-primary" onClick={saveEdit} disabled={!editForm.title.trim()}>{editWarned?"Guardar igual":"Guardar"}</button>
+                  </>
+                ) : (
+                  canEdit(detail) && <button className="spicy-btn-primary" onClick={()=>setEditing(true)}>Editar</button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // ── Onboarding View (Kanban + Tabla) ─────────────────────────────────────────
 function OnboardingView({ onboarding, history, onRefresh }) {
   const todayISO = new Date().toISOString().split("T")[0];
@@ -4008,6 +4217,7 @@ export default function SpicyFinanzas() {
   const [entityAssignees, setEntityAssignees] = useState([]);
   const [comments,        setComments]        = useState([]);
   const [attachments,     setAttachments]     = useState([]);
+  const [notes,           setNotes]           = useState([]);
   const [dataLoaded, setDataLoaded]   = useState(false);
 
   const [view,      setView]      = useState("inicio");
@@ -4040,7 +4250,7 @@ export default function SpicyFinanzas() {
     // cada acción chica (agregar un asignado, comentar, etc.) y si tira abajo
     // dataLoaded, el gate de "Cargando datos..." desmonta toda la vista actual
     // (y con ella, el modal de detalle abierto) en cada una de esas acciones.
-    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,ticketHistoryRes,tasksRes,usersRes,allowedRes,onboardingRes,onboardingHistoryRes,devTasksRes,devTaskHistoryRes,assigneesRes,commentsRes,attachmentsRes]=await Promise.all([
+    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,ticketHistoryRes,tasksRes,usersRes,allowedRes,onboardingRes,onboardingHistoryRes,devTasksRes,devTaskHistoryRes,assigneesRes,commentsRes,attachmentsRes,notesRes]=await Promise.all([
       sb.from("user_roles").select("role").eq("user_id",session.user.id).single(),
       sb.from("transactions").select("*").order("date",{ascending:false}),
       sb.from("accounts").select("*").order("created_at"),
@@ -4060,6 +4270,7 @@ export default function SpicyFinanzas() {
       sb.from("entity_assignees").select("*"),
       sb.from("comments").select("*"),
       sb.from("attachments").select("*"),
+      sb.from("notes").select("*").order("updated_at",{ascending:false}),
     ]);
     setRole(roleRes.data?.role||"reader");
     setTxns(txRes.data||[]);
@@ -4081,6 +4292,7 @@ export default function SpicyFinanzas() {
     setEntityAssignees(assigneesRes.data||[]);
     setComments(commentsRes.data||[]);
     setAttachments(attachmentsRes.data||[]);
+    setNotes(notesRes.data||[]);
     setDataLoaded(true);
   }
 
@@ -4458,6 +4670,7 @@ export default function SpicyFinanzas() {
       {view==="services"&&<ServicesView/>}
       {view==="categories"&&<CategoriesPanel catsIncome={catsIncome} catsExpense={catsExpense} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="usuarios"&&isAdmin&&<UserPermissionsPanel users={allUsers} allowedSections={allowedSections} onRefresh={loadAll}/>}
+      {view==="notes"&&<NotesView notes={notes} currentUserId={session.user.id} currentUserEmail={session.user.email} isAdmin={isAdmin} onRefresh={loadAll}/>}
 
       {/* ADD */}
       {view==="add"&&isAdmin&&(
