@@ -2607,7 +2607,7 @@ function HistoryList({ entries, labelKey }) {
   );
 }
 
-function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, currentUserId, canEditFibonacci, assignees, comments, attachments, devTasks, setView, onRefresh }) {
+function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, currentUserId, assignees, comments, attachments, devTasks, setView, onRefresh }) {
   const [showNew, setShowNew] = useState(false);
   const [detail,  setDetail]  = useState(null);
   const [dragOverStatus, setDragOverStatus] = useState(null);
@@ -2840,14 +2840,13 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
 
               <div>
                 <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Puntaje Fibonacci (esfuerzo)
-                  <select value={detail.fibonacci_score||""} disabled={!canEditFibonacci}
+                  <select value={detail.fibonacci_score||""}
                     onChange={e=>updateTicket(detail,{fibonacci_score:e.target.value?Number(e.target.value):null})}
                     className="spicy-select" style={{ width:"100%",marginTop:4 }}>
                     <option value="">Sin estimar</option>
                     {FIBONACCI_SCALE.map(f=><option key={f.value} value={f.value}>{f.value} — {f.label}</option>)}
                   </select>
                 </label>
-                {!canEditFibonacci && <div style={{ fontSize:11,color:"#aaa",marginTop:3 }}>Solo usuarios dev o admin pueden editar el puntaje.</div>}
                 <div style={{ fontSize:11,color:"#aaa",marginTop:6,lineHeight:1.5 }}>
                   {FIBONACCI_SCALE.map(f=><div key={f.value}><b>{f.value}</b>: {f.help}</div>)}
                 </div>
@@ -2896,7 +2895,7 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
 }
 
 // ── Dev Tasks View (Kanban, tareas de desarrollo de producto) ──────────────
-function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, currentUserId, canEditFibonacci, assignees, comments, attachments, tickets, onRefresh }) {
+function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, currentUserId, assignees, comments, attachments, tickets, onRefresh }) {
   const [showNew, setShowNew] = useState(false);
   const [detail,  setDetail]  = useState(null);
   const [dragOverStage, setDragOverStage] = useState(null);
@@ -3087,14 +3086,13 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
 
             <div>
               <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Puntaje Fibonacci (esfuerzo)
-                <select value={detail.fibonacci_score||""} disabled={!canEditFibonacci}
+                <select value={detail.fibonacci_score||""}
                   onChange={e=>updateDevTask(detail,{fibonacci_score:e.target.value?Number(e.target.value):null})}
                   className="spicy-select" style={{ width:"100%",marginTop:4 }}>
                   <option value="">Sin estimar</option>
                   {FIBONACCI_SCALE.map(f=><option key={f.value} value={f.value}>{f.value} — {f.label}</option>)}
                 </select>
               </label>
-              {!canEditFibonacci && <div style={{ fontSize:11,color:"#aaa",marginTop:3 }}>Solo usuarios dev o admin pueden editar el puntaje.</div>}
               <div style={{ fontSize:11,color:"#aaa",marginTop:6,lineHeight:1.5 }}>
                 {FIBONACCI_SCALE.map(f=><div key={f.value}><b>{f.value}</b>: {f.help}</div>)}
               </div>
@@ -4297,8 +4295,6 @@ export default function SpicyFinanzas() {
   }
 
   const isAdmin = role==="admin";
-  const isDev = role==="dev";
-  const canEditFibonacci = isAdmin || isDev;
   const myAllowedSections = new Set(session ? allowedSections.filter(a=>a.user_id===session.user.id).map(a=>a.section) : []);
   const canSeeSection = (label) => ALWAYS_VISIBLE_SECTIONS.includes(label) || isAdmin || myAllowedSections.has(label);
   const currentSection = NAV_SECTIONS.find(s=>s.views.includes(view));
@@ -4662,11 +4658,11 @@ export default function SpicyFinanzas() {
       {view==="pnl"&&<PnLView txns={txns}/>}
       {view==="inicio"&&<InicioView myOpenTickets={myOpenTickets} myOpenDevTasks={myOpenDevTasks} myOpenTasks={myOpenTasks} ticketHistory={ticketStatusHistory} devTaskHistory={devTaskStatusHistory} comments={comments} currentUserEmail={session.user.email} canSeeOperaciones={canSeeSection("Operaciones")} canSeeDevs={canSeeSection("Devs")} setView={setView}/>}
       {view==="opsdash"&&<OperationsSummaryView tickets={tickets} tasks={tasks} statusHistory={ticketStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
-      {view==="tickets"&&<TicketsView tickets={tickets} statusHistory={ticketStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} canEditFibonacci={canEditFibonacci} assignees={entityAssignees} comments={comments} attachments={attachments} devTasks={devTasks} setView={setView} onRefresh={loadAll}/>}
+      {view==="tickets"&&<TicketsView tickets={tickets} statusHistory={ticketStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} devTasks={devTasks} setView={setView} onRefresh={loadAll}/>}
       {view==="tasks"&&<TasksView tasks={tasks} allUsers={allUsers} assignees={entityAssignees} comments={comments} attachments={attachments} currentUserEmail={session.user.email} currentUserId={session.user.id} onRefresh={loadAll}/>}
       {view==="onboarding"&&<OnboardingView onboarding={onboarding} history={onboardingHistory} onRefresh={loadAll}/>}
       {view==="devdash"&&<DevsMetricsView tickets={tickets} ticketHistory={ticketStatusHistory} devTasks={devTasks} devTaskHistory={devTaskStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
-      {view==="devtasks"&&<DevTasksView devTasks={devTasks} statusHistory={devTaskStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} canEditFibonacci={canEditFibonacci} assignees={entityAssignees} comments={comments} attachments={attachments} tickets={tickets} onRefresh={loadAll}/>}
+      {view==="devtasks"&&<DevTasksView devTasks={devTasks} statusHistory={devTaskStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} tickets={tickets} onRefresh={loadAll}/>}
       {view==="services"&&<ServicesView/>}
       {view==="categories"&&<CategoriesPanel catsIncome={catsIncome} catsExpense={catsExpense} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="usuarios"&&isAdmin&&<UserPermissionsPanel users={allUsers} allowedSections={allowedSections} onRefresh={loadAll}/>}
