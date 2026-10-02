@@ -2187,7 +2187,7 @@ function InicioView({ myOpenTickets, myOpenDevTasks, myOpenTasks, ticketHistory,
               <div key={t.id} onClick={()=>setView("tickets")} className="spicy-table-row" style={{ cursor:"pointer" }}>
                 {isNew(last) && <NewDot/>}
                 <span style={{ fontSize:12,marginRight:8 }}>{c?.emoji}</span>
-                <span style={{ flex:1,fontSize:13,color:blocking?ST_RED:"#111",fontWeight:blocking?600:400 }}>{t.client_name}</span>
+                <span style={{ flex:1,fontSize:13,color:blocking?ST_RED:"#111",fontWeight:blocking?600:400 }}>{t.title}</span>
                 <span className="spicy-badge-gray">{t.status}</span>
               </div>
             );
@@ -2612,7 +2612,7 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
   const [detail,  setDetail]  = useState(null);
   const [dragOverStatus, setDragOverStatus] = useState(null);
   const [filterCategory, setFilterCategory] = useState("");
-  const [form, setForm] = useState({ client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigneeIds:[] });
+  const [form, setForm] = useState({ title:"", client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigneeIds:[] });
   const [saving, setSaving] = useState(false);
   const [statusError, setStatusError] = useState("");
 
@@ -2624,13 +2624,14 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
 
   async function createTicket(e) {
     e.preventDefault();
-    if (!form.client_name.trim() || !form.category || !form.channel) return;
+    if (!form.title.trim() || !form.category || !form.channel) return;
     setSaving(true);
     const id = "tk_"+Date.now();
     const status = "Inicio por OPS";
     await sb.from("tickets").insert({
       id,
-      client_name: form.client_name.trim(),
+      title: form.title.trim(),
+      client_name: form.client_name.trim() || null,
       category: form.category,
       priority: form.priority,
       channel: form.channel,
@@ -2642,7 +2643,7 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
       await sb.from("entity_assignees").insert(form.assigneeIds.map(userId=>({ id:"ea_"+Date.now()+"_"+Math.random().toString(36).slice(2,6), entity_type:"ticket", entity_id:id, user_id:userId })));
     }
     setSaving(false);
-    setForm({ client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigneeIds:[] });
+    setForm({ title:"", client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigneeIds:[] });
     setShowNew(false);
     onRefresh();
   }
@@ -2725,7 +2726,8 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
                         <span style={{ fontSize:12, fontWeight:blocking?700:400, color:blocking?ST_RED:"#111" }}>{c?.emoji} {t.category}</span>
                         <span className={prioClass(t.priority)}>{t.priority}</span>
                       </div>
-                      <div style={{ fontSize:13,fontWeight:600,color:"#111",marginBottom:4 }}>{t.client_name}</div>
+                      <div style={{ fontSize:13,fontWeight:600,color:"#111",marginBottom:t.client_name?2:4 }}>{t.title}</div>
+                      {t.client_name && <div style={{ fontSize:11,color:"#999",marginBottom:4 }}>{t.client_name}</div>}
                       {t.message && <div style={{ fontSize:12,color:"#888",overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical" }}>{t.message}</div>}
                       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8 }}>
                         <div style={{ display:"flex",gap:4 }}>
@@ -2755,8 +2757,8 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
           <form onClick={e=>e.stopPropagation()} onSubmit={createTicket} style={{ background:"white",borderRadius:16,width:"100%",maxWidth:480,padding:24,display:"flex",flexDirection:"column",gap:14,maxHeight:"85vh",overflowY:"auto" }}>
             <div style={{ fontSize:16,fontWeight:700,color:"#111" }}>Nuevo ticket</div>
 
-            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Cliente / Empresa
-              <input required autoFocus className="spicy-input" placeholder="Nombre del cliente o empresa" value={form.client_name} onChange={e=>setForm(f=>({...f,client_name:e.target.value}))} style={{ width:"100%",marginTop:4 }}/>
+            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Título
+              <input required autoFocus className="spicy-input" placeholder="Resumen corto del problema" value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))} style={{ width:"100%",marginTop:4 }}/>
             </label>
 
             <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Categoría
@@ -2764,6 +2766,10 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
                 <option value="" disabled>Seleccionar categoría...</option>
                 {TICKET_CATEGORIES.map(c=><option key={c.key} value={c.key}>{c.emoji} {c.key}</option>)}
               </select>
+            </label>
+
+            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Cliente
+              <input className="spicy-input" placeholder="Nombre del cliente o empresa" value={form.client_name} onChange={e=>setForm(f=>({...f,client_name:e.target.value}))} style={{ width:"100%",marginTop:4 }}/>
             </label>
 
             <div style={{ display:"flex",gap:12 }}>
@@ -2790,7 +2796,7 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
 
             <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:4 }}>
               <button type="button" className="spicy-btn-secondary" onClick={()=>setShowNew(false)}>Cancelar</button>
-              <button type="submit" className="spicy-btn-primary" disabled={saving||!form.client_name.trim()||!form.category}>Crear ticket</button>
+              <button type="submit" className="spicy-btn-primary" disabled={saving||!form.title.trim()||!form.category}>Crear ticket</button>
             </div>
           </form>
         </div>
@@ -2803,8 +2809,8 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
             <div onClick={e=>e.stopPropagation()} style={{ background:"white",borderRadius:16,width:"100%",maxWidth:520,maxHeight:"85vh",overflowY:"auto",padding:24,display:"flex",flexDirection:"column",gap:12 }}>
               <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
                 <div style={{ flex:1 }}>
-                  <input key={detail.id} defaultValue={detail.client_name}
-                    onBlur={e=>updateTicket(detail,{client_name:e.target.value.trim()||detail.client_name})}
+                  <input key={detail.id} defaultValue={detail.title}
+                    onBlur={e=>updateTicket(detail,{title:e.target.value.trim()||detail.title})}
                     style={{ fontSize:16,fontWeight:700,color:"#111",border:"none",outline:"none",width:"100%",padding:0,fontFamily:"inherit",background:"transparent" }}/>
                   <div style={{ fontSize:12,color:"#aaa",marginTop:3 }}>creado {new Date(detail.created_at).toLocaleDateString("es-UY")}</div>
                 </div>
@@ -2819,6 +2825,13 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
                     {TICKET_CATEGORIES.map(c=><option key={c.key} value={c.key}>{c.emoji} {c.key}</option>)}
                   </select>
                 </label>
+                <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Cliente
+                  <input key={detail.id} className="spicy-input" defaultValue={detail.client_name||""} placeholder="Sin cliente"
+                    onBlur={e=>updateTicket(detail,{client_name:e.target.value.trim()||null})} style={{ width:"100%",marginTop:4 }}/>
+                </label>
+              </div>
+
+              <div style={{ display:"flex",gap:12 }}>
                 <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Prioridad
                   <select value={detail.priority} onChange={e=>updateTicket(detail,{priority:e.target.value})} className="spicy-select" style={{ width:"100%",marginTop:4 }}>
                     {TICKET_PRIORITIES.map(p=><option key={p} value={p}>{p}</option>)}
@@ -3078,10 +3091,10 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
             <div>
               <div style={{ fontSize:12,color:"#666",fontWeight:500,marginBottom:4 }}>Ticket relacionado</div>
               <SearchSelect
-                options={tickets.map(t=>({ value:t.id, label:`${t.client_name} — ${t.category}` }))}
+                options={tickets.map(t=>({ value:t.id, label:`${t.title}${t.client_name?` (${t.client_name})`:""} — ${t.category}` }))}
                 value={detail.ticket_id||null}
                 onChange={id=>updateDevTask(detail,{ticket_id:id})}
-                placeholder="Buscar ticket por cliente..."/>
+                placeholder="Buscar ticket por título o cliente..."/>
             </div>
 
             <div>
@@ -3221,7 +3234,7 @@ function DevsMetricsView({ tickets, ticketHistory, devTasks, devTaskHistory, ass
   const maxByCategory = Math.max(1, ...ticketsByCategory.map(x=>x.count));
 
   const unestimated = [
-    ...(showTickets ? tickets.filter(t=>!t.fibonacci_score && statusGroup(t.status)!=="Sin empezar").map(t=>({ id:t.id, label:t.client_name, kind:"ticket" })) : []),
+    ...(showTickets ? tickets.filter(t=>!t.fibonacci_score && statusGroup(t.status)!=="Sin empezar").map(t=>({ id:t.id, label:t.title, kind:"ticket" })) : []),
     ...(showDev ? devTasks.filter(t=>!t.fibonacci_score && t.stage!=="Backlog").map(t=>({ id:t.id, label:t.title, kind:"dev" })) : []),
   ];
 

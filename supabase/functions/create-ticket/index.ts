@@ -9,7 +9,8 @@
 //
 // Body esperado (JSON):
 // {
-//   "client_name": "Nombre del cliente" (obligatorio),
+//   "title": "Título del ticket" (obligatorio),
+//   "client_name": "Nombre del cliente / empresa" (opcional),
 //   "category": "Bloqueante" | "Funcional" | "Duda de uso" | "Mejora" | "Administrativo" (obligatorio),
 //   "channel": "WhatsApp" | "Email" (default: "WhatsApp"),
 //   "priority": "Alta" | "Media" | "Baja" (default: "Media"),
@@ -53,12 +54,13 @@ Deno.serve(async (req: Request) => {
     return json({ error: "invalid json body" }, 400, cors);
   }
 
-  const client_name = typeof body?.client_name === "string" ? body.client_name.trim() : "";
+  const title = typeof body?.title === "string" ? body.title.trim() : "";
+  const client_name = typeof body?.client_name === "string" ? body.client_name.trim() || null : null;
   const category = body?.category;
   const channel = CHANNELS.includes(body?.channel) ? body.channel : "WhatsApp";
   const priority = PRIORITIES.includes(body?.priority) ? body.priority : "Media";
 
-  if (!client_name) return json({ error: "client_name es obligatorio" }, 400, cors);
+  if (!title) return json({ error: "title es obligatorio" }, 400, cors);
   if (!CATEGORIES.includes(category)) {
     return json({ error: `category debe ser una de: ${CATEGORIES.join(", ")}` }, 400, cors);
   }
@@ -72,6 +74,7 @@ Deno.serve(async (req: Request) => {
     .from("tickets")
     .insert({
       id: "tk_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8),
+      title,
       client_name,
       category,
       priority,
