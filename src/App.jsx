@@ -2364,7 +2364,7 @@ function OperationsSummaryView({ tickets, tasks, statusHistory, assignees, allUs
 // ── Tickets View (Kanban) ───────────────────────────────────────────────────
 // ── Reusable: Assignees / Comments / Attachments / History ─────────────────
 const ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024;
-const ATTACHMENT_MIME_TYPES = ["image/jpeg","image/png","image/gif","image/webp","application/pdf","video/mp4","video/webm","video/quicktime","text/plain"];
+const ATTACHMENT_MIME_TYPES = ["image/jpeg","image/png","image/gif","image/webp","application/pdf","video/mp4","video/webm","video/quicktime","text/plain","text/csv","application/msword","application/vnd.openxmlformats-officedocument.wordprocessingml.document","application/vnd.ms-excel","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet","application/vnd.ms-powerpoint","application/vnd.openxmlformats-officedocument.presentationml.presentation"];
 
 function AssigneesPicker({ entityType, entityId, assignees, allUsers, onChange }) {
   const mine = assignees.filter(a=>a.entity_type===entityType && a.entity_id===entityId);
@@ -2551,7 +2551,7 @@ function AttachmentsList({ entityType, entityId, attachments, currentUserEmail, 
     if (!file) return;
     setError("");
     if (file.size > ATTACHMENT_MAX_BYTES) { setError("El archivo supera el límite de 20MB."); return; }
-    if (!ATTACHMENT_MIME_TYPES.includes(file.type)) { setError("Tipo de archivo no permitido."); return; }
+    if (!ATTACHMENT_MIME_TYPES.includes(file.type)) { setError("Tipo de archivo no permitido. Se aceptan imágenes, PDF, video, Word, Excel, PowerPoint, CSV y TXT."); return; }
     setUploading(true);
     const path = `${entityType}/${entityId}/${Date.now()}-${file.name}`;
     const { error: upErr } = await sb.storage.from("attachments").upload(path, file, { contentType:file.type });

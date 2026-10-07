@@ -82,3 +82,21 @@ alter table public.dev_tasks add column if not exists ticket_id text references 
 -- cambio el único ticket real tenía assigned_to='Ticiana', que no coincide con ningún
 -- usuario registrado en user_roles (Alejo, Nico Eliceche, nicolas@spicytool.net) — no
 -- hay match, no se crea ninguna fila. dev_tasks no tenía filas.
+
+-- 2026-10-07: se amplían los tipos permitidos del bucket 'attachments' (ya
+-- aplicado vía Supabase MCP) para aceptar documentos de oficina. Tiene que
+-- coincidir con ATTACHMENT_MIME_TYPES en src/App.jsx.
+update storage.buckets
+set allowed_mime_types = array[
+  'image/jpeg','image/png','image/gif','image/webp',
+  'application/pdf',
+  'video/mp4','video/webm','video/quicktime',
+  'text/plain','text/csv',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+]
+where id = 'attachments';
