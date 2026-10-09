@@ -1,6 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { ONBOARDING_STAGES, ONBOARDING_LEAD_SOURCES, ONBOARDING_PAYMENT_STATUS, calcularEstado, calcularAvance, diasEntre, ESTADO_BADGE } from "./onboardingLogic.js";
+import {
+  formatClock, formatHM, formatHours, formatDiffHours, baDateISO, addDaysISO, weekRangeISO, monthRangeISO,
+  baTimeToISO, formatTimeBA, formatDateBA, formatDateTimeBA, formatISODateShort, weekdayShort, estadoUI, liveSeconds,
+  shouldSendHeartbeat, isIdleExpired, toCSV, DIAS_SEMANA, timeErrorMessage,
+} from "./timeTracking.js";
 
 // ── Supabase ───────────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://khuavhbraikzreyhptog.supabase.co";
@@ -117,7 +122,7 @@ function BrandStyles() {
 
 // ── Nav icon map ───────────────────────────────────────────────────────────
 const NAV_ICONS = {
-  inicio:"🏠", notes:"📝",
+  inicio:"🏠", notes:"📝", mytime:"⏱️", timeadmin:"🕒",
   dashboard:"▦", accounts:"🏦", add:"+", history:"☰", runway:"📈", pnl:"📊",
   referrals:"🤝",
   services:"⚡", categories:"⊞",
@@ -125,18 +130,19 @@ const NAV_ICONS = {
   devdash:"📈", devtasks:"🛠️",
 };
 const NAV_LABELS = {
-  inicio:"Inicio", notes:"Notas",
+  inicio:"Inicio", notes:"Notas", mytime:"Mi tiempo", timeadmin:"Control de jornada",
   dashboard:"Resumen", accounts:"Cuentas", add:"Registrar", history:"Historial", runway:"Runway", pnl:"P&L",
   referrals:"Referidos",
   services:"Servicios", categories:"Categorías",
   opsdash:"Resumen", tickets:"Tickets", tasks:"Tareas", onboarding:"Onboarding", usuarios:"Usuarios",
   devdash:"Resumen", devtasks:"Tareas",
 };
-const ADMIN_ONLY_VIEWS = ["add","usuarios"];
-// Inicio y Notas son visibles para todos sin pasar por allowed_sections — Inicio
+const ADMIN_ONLY_VIEWS = ["add","usuarios","timeadmin"];
+// Inicio, Notas y Tiempo son visibles para todos sin pasar por allowed_sections — Inicio
 // es la landing personal, Notas es información de equipo que cualquiera puede
-// ver y crear (según el pedido), ninguna de las dos es un módulo con permisos propios.
-const ALWAYS_VISIBLE_SECTIONS = ["Inicio","Notas"];
+// ver y crear (según el pedido), y Tiempo es el control de jornada de cada persona
+// ("Mi tiempo"); su vista de admin ("Control de jornada") está en ADMIN_ONLY_VIEWS.
+const ALWAYS_VISIBLE_SECTIONS = ["Inicio","Notas","Tiempo"];
 
 const NAV_SECTIONS = [
   {
@@ -147,6 +153,11 @@ const NAV_SECTIONS = [
   {
     label: "Notas",
     views: ["notes"],
+    adminOnly: false,
+  },
+  {
+    label: "Tiempo",
+    views: ["mytime","timeadmin"],
     adminOnly: false,
   },
   {
@@ -772,6 +783,8 @@ function UserPermissionsPanel({ users, allowedSections, onRefresh }) {
                 <option value="admin">admin</option>
               </select>
             </label>
+
+            <UserContractsEditor user={editingUser}/>
 
             <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:4 }}>
               <button type="button" className="spicy-btn-secondary" onClick={()=>setEditingUser(null)}>Cancelar</button>
@@ -3847,6 +3860,814 @@ function NotesView({ notes, currentUserId, currentUserEmail, isAdmin, onRefresh 
   );
 }
 
+// ── Control de jornada (tracker de tiempo) ─────────────────────────────────
+// El cálculo de horas y los permisos viven en la base (funciones SQL, ver
+// supabase_time_tracking.sql). Acá solo se muestra el estado y se mandan las
+// acciones/heartbeats.
+const TIME_SESSION_KEY = "spicy_time_session";
+function getTimeSessionId() {
+  const fallback = () => "tab-" + Math.random().toString(36).slice(2) + Date.now();
+  try {
+    let id = sessionStorage.getItem(TIME_SESSION_KEY);
+    if (!id) {
+      id = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : fallback();
+      sessionStorage.setItem(TIME_SESSION_KEY, id);
+    }
+    return id;
+  } catch { return fallback(); }
+}
+
+async function timeRpc(fn, args) {
+  const { data, error } = await sb.rpc(fn, args);
+  if (error) throw error;
+  return data;
+}
+async function timeQuery(builder) {
+  const { data, error } = await builder;
+  if (error) throw error;
+  return data || [];
+}
+const TIME_CHANGED_EVENT = "spicy-time-changed";
+
+const TIME_STATE_STYLE = {
+  sin_iniciar: { label: "Sin iniciar", color: "#9CA3AF" },
+  trabajando:  { label: "Trabajando",  color: "#16A34A" },
+  pausa:       { label: "En pausa",    color: "#D97706" },
+  finalizada:  { label: "Finalizada",  color: "#6B7280" },
+};
+
+function TimeTrackerBar() {
+  const [sessionId] = useState(getTimeSessionId);
+  const [estado, setEstado] = useState(null);
+  const [receivedAt, setReceivedAt] = useState(Date.now());
+  const [now, setNow] = useState(Date.now());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [idleDeadline, setIdleDeadline] = useState(null);
+  const [countdown, setCountdown] = useState(0);
+  const [confirmEnd, setConfirmEnd] = useState(false);
+  const lastInteraction = useRef(Date.now());
+  const estadoRef = useRef(null);
+  const idleModalRef = useRef(null);
+
+  const settings = estado?.settings || { inactivity_minutes: 20, modal_response_seconds: 120, heartbeat_seconds: 60 };
+  const ui = estadoUI(estado);
+  const jornada = estado?.jornada || null;
+  const otherSessionActive = jornada?.estado === "trabajando" && jornada.session_id !== sessionId && jornada.owner_vivo;
+  const st = TIME_STATE_STYLE[ui];
+
+  function applyEstado(p) {
+    if (!p) return;
+    estadoRef.current = p;
+    setEstado(p);
+    setReceivedAt(Date.now());
+  }
+  async function refresh() {
+    try { applyEstado(await timeRpc("time_estado")); } catch { /* se reintenta en el próximo ciclo */ }
+  }
+  async function act(fn, args) {
+    setBusy(true); setError("");
+    try {
+      lastInteraction.current = Date.now();
+      applyEstado(await timeRpc(fn, args));
+      window.dispatchEvent(new Event(TIME_CHANGED_EVENT));
+    } catch (e) {
+      setError(timeErrorMessage(e));
+      await refresh();
+    } finally { setBusy(false); }
+  }
+
+  // Estado inicial + sincronización periódica (otras pestañas, cierres automáticos del servidor)
+  useEffect(() => {
+    refresh();
+    const poll = setInterval(() => { if (document.visibilityState === "visible") refresh(); }, 60000);
+    const onVis = () => { if (document.visibilityState === "visible") refresh(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { clearInterval(poll); document.removeEventListener("visibilitychange", onVis); };
+  }, []);
+
+  // Interacción dentro del backoffice: solo click, teclado y scroll (nada de mouse ni capturas)
+  useEffect(() => {
+    const mark = () => { lastInteraction.current = Date.now(); };
+    const evs = ["click", "keydown", "scroll", "touchstart"];
+    evs.forEach(e => window.addEventListener(e, mark, { capture: true, passive: true }));
+    return () => evs.forEach(e => window.removeEventListener(e, mark, { capture: true }));
+  }, []);
+
+  // Reloj en vivo
+  useEffect(() => {
+    if (ui !== "trabajando") return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [ui]);
+
+  // Heartbeat: solo con la pestaña visible y actividad reciente
+  useEffect(() => {
+    const hb = settings.heartbeat_seconds;
+    const t = setInterval(async () => {
+      const e = estadoRef.current;
+      if (!e?.jornada || e.jornada.estado !== "trabajando") return;
+      const idleMs = Date.now() - lastInteraction.current;
+      if (!shouldSendHeartbeat({ visible: document.visibilityState === "visible", idleMs, heartbeatSeconds: hb })) return;
+      try {
+        const r = await timeRpc("heartbeat", { p_session: sessionId, p_idle_seconds: Math.floor(idleMs / 1000) });
+        if (r?.estado) applyEstado(r.estado);
+      } catch { /* sin red: el servidor corta en el último heartbeat recibido */ }
+    }, hb * 1000);
+    return () => clearInterval(t);
+  }, [settings.heartbeat_seconds, sessionId]);
+
+  // Detección de inactividad → modal "¿Seguís trabajando?"
+  useEffect(() => {
+    const t = setInterval(() => {
+      const e = estadoRef.current;
+      const j = e?.jornada;
+      if (!j || j.estado !== "trabajando" || j.session_id !== sessionId) {
+        if (idleModalRef.current) { idleModalRef.current = null; setIdleDeadline(null); }
+        return;
+      }
+      if (idleModalRef.current) return;
+      const idleMs = Date.now() - lastInteraction.current;
+      if (isIdleExpired({ idleMs, inactivityMinutes: e.settings.inactivity_minutes })) {
+        const deadline = Date.now() + e.settings.modal_response_seconds * 1000;
+        idleModalRef.current = deadline;
+        setIdleDeadline(deadline);
+      }
+    }, 5000);
+    return () => clearInterval(t);
+  }, [sessionId]);
+
+  // Cuenta regresiva del modal: sin respuesta → el servidor pausa en la última actividad
+  useEffect(() => {
+    if (!idleDeadline) return;
+    setCountdown(Math.max(0, Math.ceil((idleDeadline - Date.now()) / 1000)));
+    const t = setInterval(async () => {
+      const remain = Math.ceil((idleDeadline - Date.now()) / 1000);
+      setCountdown(Math.max(0, remain));
+      if (remain <= 0) {
+        clearInterval(t);
+        idleModalRef.current = null;
+        setIdleDeadline(null);
+        try {
+          applyEstado(await timeRpc("pausar_por_inactividad", { p_session: sessionId }));
+          window.dispatchEvent(new Event(TIME_CHANGED_EVENT));
+        } catch { /* lo resuelve el barrido del servidor */ }
+      }
+    }, 1000);
+    return () => clearInterval(t);
+  }, [idleDeadline]);
+
+  useEffect(() => {
+    if (!confirmEnd) return;
+    const t = setTimeout(() => setConfirmEnd(false), 4000);
+    return () => clearTimeout(t);
+  }, [confirmEnd]);
+
+  async function stillWorking() {
+    lastInteraction.current = Date.now();
+    idleModalRef.current = null;
+    setIdleDeadline(null);
+    try {
+      const r = await timeRpc("heartbeat", { p_session: sessionId, p_idle_seconds: 0 });
+      if (r?.estado) applyEstado(r.estado);
+    } catch { /* se reintenta en el próximo heartbeat */ }
+  }
+
+  const seconds = liveSeconds(estado, receivedAt, now);
+  const btn = { fontSize: 13 };
+
+  return (
+    <>
+      <div style={{ position: "sticky", top: 0, zIndex: 90, margin: "-28px -32px 24px", padding: "10px 32px", background: "white", borderBottom: "1px solid #EBEBEB", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, fontWeight: 600, color: "#111" }}>
+            <span style={{ width: 9, height: 9, borderRadius: "50%", background: st.color, boxShadow: ui === "trabajando" ? `0 0 0 3px ${st.color}33` : "none" }}/>
+            {st.label}
+          </span>
+          <span title="Tiempo trabajado hoy" style={{ fontSize: 20, fontWeight: 700, color: "#111", fontVariantNumeric: "tabular-nums" }}>{formatClock(seconds)}</span>
+          <span style={{ fontSize: 11, color: "#aaa" }}>trabajado hoy</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {error && <span style={{ fontSize: 12, color: ST_RED }}>{error}</span>}
+          {otherSessionActive && (
+            <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#92400E", background: "#FEF3C7", borderRadius: 8, padding: "5px 10px" }}>
+              Tu jornada está siendo seguida desde otra pestaña
+              <button className="spicy-btn-secondary" style={{ ...btn, padding: "3px 10px" }} disabled={busy} onClick={() => act("tomar_sesion", { p_session: sessionId })}>Usar esta pestaña</button>
+            </span>
+          )}
+          {(ui === "sin_iniciar" || ui === "finalizada") && (
+            <button className="spicy-btn-primary" disabled={busy || !estado} onClick={() => act("iniciar_jornada", { p_session: sessionId })}>
+              {ui === "finalizada" ? "Iniciar otra jornada" : "Iniciar jornada"}
+            </button>
+          )}
+          {ui === "trabajando" && (
+            <button className="spicy-btn-secondary" disabled={busy} onClick={() => act("pausar", { p_session: sessionId })}>Pausar</button>
+          )}
+          {ui === "pausa" && (
+            <button className="spicy-btn-primary" disabled={busy} onClick={() => act("reanudar", { p_session: sessionId })}>Reanudar</button>
+          )}
+          {(ui === "trabajando" || ui === "pausa") && (
+            <button className="spicy-btn-secondary" disabled={busy} style={{ color: ST_RED, borderColor: ST_RED_BG }}
+              onClick={() => { if (confirmEnd) { setConfirmEnd(false); act("terminar"); } else setConfirmEnd(true); }}>
+              {confirmEnd ? "¿Confirmar? Terminar jornada" : "Terminar jornada"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {idleDeadline && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ background: "white", borderRadius: 16, width: "100%", maxWidth: 380, padding: 24, textAlign: "center" }}>
+            <div style={{ fontSize: 32 }}>⏳</div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: "#111", marginTop: 8 }}>¿Seguís trabajando?</div>
+            <div style={{ fontSize: 13, color: "#666", margin: "8px 0 18px", lineHeight: 1.5 }}>
+              Hace {settings.inactivity_minutes} minutos que no hay actividad en el backoffice. Si no respondés, pausamos tu jornada en {countdown}s y el tiempo se corta en tu última actividad.
+            </div>
+            <button className="spicy-btn-primary" onClick={stillWorking}>Sí, sigo trabajando</button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// Datos del usuario actual: nunca pasamos otro user_id (el servidor igual lo ignoraría).
+function MiTiempoView({ currentUserId }) {
+  const hoy = baDateISO();
+  const semana = weekRangeISO(hoy);
+  const mes = monthRangeISO(hoy);
+  const [rep, setRep] = useState({ hoy: null, semana: null, mes: null });
+  const [jornadas, setJornadas] = useState([]);
+  const [solicitudes, setSolicitudes] = useState([]);
+  const [contrato, setContrato] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [expanded, setExpanded] = useState(null);
+  const [corr, setCorr] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+
+  async function load() {
+    try {
+      const [h, s, m, js, sols, cons] = await Promise.all([
+        timeRpc("time_reporte", { p_desde: hoy, p_hasta: hoy, p_user: currentUserId }),
+        timeRpc("time_reporte", { p_desde: semana.desde, p_hasta: semana.hasta, p_user: currentUserId }),
+        timeRpc("time_reporte", { p_desde: mes.desde, p_hasta: mes.hasta, p_user: currentUserId }),
+        timeRpc("time_jornadas", { p_desde: addDaysISO(hoy, -59), p_hasta: hoy, p_user: currentUserId }),
+        timeQuery(sb.from("solicitudes_correccion").select("*").eq("user_id", currentUserId).order("created_at", { ascending: false }).limit(30)),
+        timeQuery(sb.from("contratos_usuario").select("*").eq("user_id", currentUserId).lte("vigente_desde", hoy).order("vigente_desde", { ascending: false }).limit(1)),
+      ]);
+      setRep({ hoy: h?.[0] || null, semana: s?.[0] || null, mes: m?.[0] || null });
+      setJornadas(js || []);
+      setSolicitudes(sols);
+      setContrato(cons[0] || null);
+      setError("");
+    } catch (e) {
+      setError(timeErrorMessage(e));
+    } finally { setLoading(false); }
+  }
+
+  useEffect(() => {
+    load();
+    const poll = setInterval(load, 60000);
+    window.addEventListener(TIME_CHANGED_EVENT, load);
+    return () => { clearInterval(poll); window.removeEventListener(TIME_CHANGED_EVENT, load); };
+  }, [currentUserId]);
+
+  function openCorr(j) {
+    setFormError("");
+    setCorr(j
+      ? { jornada_id: j.id, fecha: j.fecha, desde: formatTimeBA(j.inicio), hasta: formatTimeBA(j.fin), motivo: "" }
+      : { jornada_id: null, fecha: hoy, desde: "09:00", hasta: "18:00", motivo: "" });
+  }
+
+  async function sendCorr(e) {
+    e.preventDefault();
+    setFormError("");
+    if (corr.hasta <= corr.desde) { setFormError("El horario de fin tiene que ser posterior al de inicio."); return; }
+    if (corr.fecha > hoy) { setFormError("No podés pedir correcciones de fechas futuras."); return; }
+    setSaving(true);
+    try {
+      await timeRpc("solicitar_correccion", {
+        p_jornada: corr.jornada_id, p_fecha: corr.fecha,
+        p_inicio: baTimeToISO(corr.fecha, corr.desde), p_fin: baTimeToISO(corr.fecha, corr.hasta),
+        p_motivo: corr.motivo.trim(),
+      });
+      setCorr(null);
+      load();
+    } catch (err) { setFormError(timeErrorMessage(err)); }
+    setSaving(false);
+  }
+
+  const diasLabel = (dias) => {
+    const set = [...dias].sort();
+    const isRange = set.every((d, i) => i === 0 || d === set[i - 1] + 1);
+    const name = (n) => DIAS_SEMANA.find(x => x.iso === n).label;
+    return isRange && set.length > 1 ? `${name(set[0])}–${name(set[set.length - 1])}` : set.map(name).join(", ");
+  };
+
+  const kpi = (label, r, extra) => {
+    const esperadas = r ? Number(r.horas_esperadas_a_hoy) : 0;
+    const diff = r ? Number(r.diferencia) : 0;
+    return (
+      <div className="spicy-kpi">
+        <div className="spicy-kpi-label">{label}</div>
+        <div className="spicy-kpi-value">{formatHours(r ? Number(r.horas_registradas) : 0)}</div>
+        <div className="spicy-kpi-sub">
+          {esperadas > 0 ? `de ${formatHours(esperadas)} esperadas` : "sin horas esperadas"}
+          {extra}
+        </div>
+        {esperadas > 0 && <div style={{ fontSize: 12, marginTop: 4, color: diff >= 0 ? "#16A34A" : ST_RED, fontWeight: 600 }}>{formatDiffHours(diff)}</div>}
+      </div>
+    );
+  };
+
+  const statusBadge = { pendiente: "spicy-badge-amber", aprobada: "spicy-badge-green", rechazada: "spicy-badge-red" };
+
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20, gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: "#111" }}>Mi tiempo</div>
+          <div style={{ fontSize: 13, color: "#888", marginTop: 4 }}>
+            {contrato ? <>Contrato vigente: {formatHours(Number(contrato.horas_diarias))} por día · {diasLabel(contrato.dias_laborales)} · desde {formatISODateShort(contrato.vigente_desde)}</> : "Todavía no tenés un contrato cargado: se registra tu tiempo pero no hay horas esperadas."}
+          </div>
+        </div>
+        <button className="spicy-btn-secondary" onClick={() => openCorr(null)}>Pedir corrección de un día</button>
+      </div>
+
+      {error && <div style={{ fontSize: 13, color: ST_RED, background: ST_RED_BG, borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>{error}</div>}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, marginBottom: 20 }}>
+        {kpi("Hoy", rep.hoy)}
+        {kpi(`Esta semana (${formatISODateShort(semana.desde).slice(0, 5)}–${formatISODateShort(semana.hasta).slice(0, 5)})`, rep.semana)}
+        {kpi("Este mes", rep.mes)}
+      </div>
+
+      <div className="spicy-card">
+        <div style={{ fontSize: 14, fontWeight: 600, color: "#111", marginBottom: 12 }}>Historial de jornadas (últimos 60 días)</div>
+        {loading && <div style={{ fontSize: 13, color: "#aaa" }}>Cargando...</div>}
+        {!loading && jornadas.length === 0 && <div style={{ fontSize: 13, color: "#ccc", padding: "12px 0" }}>Todavía no hay jornadas registradas.</div>}
+        {jornadas.map(j => (
+          <div key={j.id} style={{ borderBottom: "1px solid #F5F5F5", padding: "10px 0" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <button onClick={() => setExpanded(expanded === j.id ? null : j.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#bbb", fontSize: 12, padding: 0, width: 14 }}>{expanded === j.id ? "▾" : "▸"}</button>
+              <div style={{ minWidth: 88, fontSize: 13, fontWeight: 600, color: "#111" }}>{weekdayShort(j.fecha)} {formatISODateShort(j.fecha).slice(0, 5)}</div>
+              <div style={{ fontSize: 13, color: "#555", minWidth: 110 }}>{formatTimeBA(j.inicio)} → {j.estado === "finalizada" ? formatTimeBA(j.fin) : "en curso"}</div>
+              <div style={{ fontSize: 12, color: "#999", minWidth: 80 }}>pausas {formatHM(j.pausa_segundos)}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#111", minWidth: 64 }}>{formatHM(j.total_segundos)}</div>
+              {j.auto_cerrada && <span className="spicy-badge-amber" title="Se olvidó de terminar: el sistema la cerró en tu última actividad">auto-cerrada</span>}
+              {j.auto_cerrada && j.revisada_at && <span className="spicy-badge-gray">revisada</span>}
+              {j.estado !== "finalizada" && <span className="spicy-badge-green">abierta</span>}
+              <span style={{ flex: 1 }}/>
+              {j.estado === "finalizada" && <button className="spicy-btn-secondary" style={{ fontSize: 12, padding: "4px 10px" }} onClick={() => openCorr(j)}>Pedir corrección</button>}
+            </div>
+            {expanded === j.id && (
+              <div style={{ margin: "8px 0 0 26px", display: "flex", flexDirection: "column", gap: 3 }}>
+                {j.tramos.map(t => (
+                  <div key={t.id} style={{ fontSize: 12, color: t.tipo === "trabajo" ? "#444" : "#D97706" }}>
+                    {t.tipo === "trabajo" ? "Trabajo" : "Pausa"} · {formatTimeBA(t.inicio)} → {t.fin ? formatTimeBA(t.fin) : "ahora"}
+                    {t.origen_cierre && t.origen_cierre !== "manual" && <span style={{ color: "#aaa" }}> ({t.origen_cierre.replace("_", " ")})</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="spicy-card">
+        <div style={{ fontSize: 14, fontWeight: 600, color: "#111", marginBottom: 12 }}>Mis solicitudes de corrección</div>
+        {solicitudes.length === 0 && <div style={{ fontSize: 13, color: "#ccc" }}>No pediste ninguna corrección.</div>}
+        {solicitudes.map(s => (
+          <div key={s.id} style={{ borderBottom: "1px solid #F5F5F5", padding: "8px 0", fontSize: 13 }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <span className={statusBadge[s.estado]}>{s.estado}</span>
+              <span style={{ fontWeight: 600, color: "#111" }}>{formatISODateShort(s.fecha)}</span>
+              <span style={{ color: "#555" }}>{formatTimeBA(s.inicio_propuesto)} → {formatTimeBA(s.fin_propuesto)}</span>
+            </div>
+            <div style={{ fontSize: 12, color: "#888", marginTop: 3 }}>{s.motivo}</div>
+            {s.resolucion_motivo && <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>Respuesta: {s.resolucion_motivo}</div>}
+          </div>
+        ))}
+      </div>
+
+      {corr && (
+        <div onClick={() => setCorr(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <form onClick={e => e.stopPropagation()} onSubmit={sendCorr} style={{ background: "white", borderRadius: 16, width: "100%", maxWidth: 420, padding: 24, display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#111" }}>Pedir corrección</div>
+            <div style={{ fontSize: 12, color: "#888", marginTop: -8 }}>Proponé el horario correcto de ese día. Un admin lo revisa y lo aprueba o rechaza; no se modifica nada hasta entonces.</div>
+            <label style={{ fontSize: 12, color: "#666", fontWeight: 500 }}>Fecha
+              <input type="date" required max={hoy} className="spicy-input" value={corr.fecha} disabled={!!corr.jornada_id} onChange={e => setCorr(c => ({ ...c, fecha: e.target.value }))} style={{ width: "100%", marginTop: 4 }}/>
+            </label>
+            <div style={{ display: "flex", gap: 12 }}>
+              <label style={{ fontSize: 12, color: "#666", fontWeight: 500, flex: 1 }}>Desde
+                <input type="time" required className="spicy-input" value={corr.desde} onChange={e => setCorr(c => ({ ...c, desde: e.target.value }))} style={{ width: "100%", marginTop: 4 }}/>
+              </label>
+              <label style={{ fontSize: 12, color: "#666", fontWeight: 500, flex: 1 }}>Hasta
+                <input type="time" required className="spicy-input" value={corr.hasta} onChange={e => setCorr(c => ({ ...c, hasta: e.target.value }))} style={{ width: "100%", marginTop: 4 }}/>
+              </label>
+            </div>
+            <label style={{ fontSize: 12, color: "#666", fontWeight: 500 }}>Motivo
+              <textarea required rows={3} maxLength={1000} className="spicy-input" value={corr.motivo} onChange={e => setCorr(c => ({ ...c, motivo: e.target.value }))} style={{ width: "100%", marginTop: 4, resize: "vertical" }}/>
+            </label>
+            {formError && <div style={{ fontSize: 12, color: ST_RED, background: ST_RED_BG, borderRadius: 8, padding: "8px 10px" }}>{formError}</div>}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button type="button" className="spicy-btn-secondary" onClick={() => setCorr(null)}>Cancelar</button>
+              <button type="submit" className="spicy-btn-primary" disabled={saving || !corr.motivo.trim()}>Enviar solicitud</button>
+            </div>
+          </form>
+        </div>
+      )}
+    </>
+  );
+}
+
+function downloadCSV(filename, csv) {
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function ControlJornadaView({ allUsers }) {
+  const hoy = baDateISO();
+  const [tab, setTab] = useState("resumen");
+  const [range, setRange] = useState(weekRangeISO(hoy));
+  const [rows, setRows] = useState([]);
+  const [detailUser, setDetailUser] = useState(null);
+  const [jornadas, setJornadas] = useState([]);
+  const [solicitudes, setSolicitudes] = useState([]);
+  const [solJornadas, setSolJornadas] = useState({});
+  const [resolveNote, setResolveNote] = useState({});
+  const [dias, setDias] = useState([]);
+  const [diaForm, setDiaForm] = useState({ fecha: hoy, user_id: "", motivo: "" });
+  const [auditoria, setAuditoria] = useState([]);
+  const [edit, setEdit] = useState(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const nameOf = (userId) => { const u = allUsers.find(x => x.user_id === userId); return u ? userDisplayName(u) : userId; };
+
+  async function run(fn) {
+    setError(""); setBusy(true);
+    try { await fn(); } catch (e) { setError(timeErrorMessage(e)); }
+    setBusy(false);
+  }
+
+  async function loadResumen() {
+    try { setRows(await timeRpc("time_reporte", { p_desde: range.desde, p_hasta: range.hasta, p_user: null })); setError(""); }
+    catch (e) { setError(timeErrorMessage(e)); }
+  }
+  async function loadDetail() {
+    if (!detailUser) return;
+    try { setJornadas(await timeRpc("time_jornadas", { p_desde: range.desde, p_hasta: range.hasta, p_user: detailUser })); setError(""); }
+    catch (e) { setError(timeErrorMessage(e)); }
+  }
+  async function loadSolicitudes() {
+    try {
+      const sols = await timeQuery(sb.from("solicitudes_correccion").select("*").order("created_at", { ascending: false }).limit(100));
+      setSolicitudes(sols);
+      const ids = sols.map(s => s.jornada_id).filter(Boolean);
+      if (ids.length) {
+        const js = await timeQuery(sb.from("jornadas").select("id,inicio,fin,total_segundos").in("id", ids));
+        setSolJornadas(Object.fromEntries(js.map(j => [j.id, j])));
+      }
+    } catch (e) { setError(timeErrorMessage(e)); }
+  }
+  async function loadDias() {
+    try { setDias(await timeQuery(sb.from("dias_no_laborables").select("*").order("fecha", { ascending: false }).limit(200))); }
+    catch (e) { setError(timeErrorMessage(e)); }
+  }
+  async function loadAuditoria() {
+    try { setAuditoria(await timeQuery(sb.from("auditoria_tiempo").select("*").order("fecha", { ascending: false }).limit(200))); }
+    catch (e) { setError(timeErrorMessage(e)); }
+  }
+
+  useEffect(() => { loadResumen(); if (detailUser) loadDetail(); }, [range.desde, range.hasta, detailUser]);
+  useEffect(() => {
+    if (tab === "solicitudes") loadSolicitudes();
+    if (tab === "feriados") loadDias();
+    if (tab === "auditoria") loadAuditoria();
+  }, [tab]);
+
+  const pendientes = solicitudes.filter(s => s.estado === "pendiente");
+
+  function exportCSV() {
+    const data = rows.map(r => ({
+      persona: r.nombre, email: r.email,
+      esperadas: Number(r.horas_esperadas_a_hoy), registradas: Number(r.horas_registradas), diferencia: Number(r.diferencia),
+      jornadas: r.jornadas, auto_cerradas: r.jornadas_auto_cerradas,
+    }));
+    downloadCSV(`control-jornada_${range.desde}_${range.hasta}.csv`, toCSV(data, [
+      { key: "persona", label: "Persona" }, { key: "email", label: "Email" },
+      { key: "esperadas", label: "Horas contratadas" }, { key: "registradas", label: "Horas registradas" },
+      { key: "diferencia", label: "Diferencia" }, { key: "jornadas", label: "Jornadas" }, { key: "auto_cerradas", label: "Auto-cerradas" },
+    ]));
+  }
+
+  function openEdit(kind, item) {
+    if (kind === "jornada") {
+      setEdit({ kind, id: item.id, fecha: item.fecha, desde: formatTimeBA(item.inicio), hasta: formatTimeBA(item.fin), motivo: "" });
+    } else {
+      const fecha = baDateISO(new Date(item.inicio));
+      setEdit({ kind, id: item.id, fecha, desde: formatTimeBA(item.inicio), hasta: formatTimeBA(item.fin), motivo: "" });
+    }
+  }
+  async function saveEdit(e) {
+    e.preventDefault();
+    if (edit.hasta <= edit.desde) { setError("El horario de fin tiene que ser posterior al de inicio."); return; }
+    await run(async () => {
+      const args = { p_inicio: baTimeToISO(edit.fecha, edit.desde), p_fin: baTimeToISO(edit.fecha, edit.hasta), p_motivo: edit.motivo.trim() };
+      if (edit.kind === "jornada") await timeRpc("admin_editar_jornada", { p_jornada: edit.id, ...args });
+      else await timeRpc("admin_editar_tramo", { p_tramo: edit.id, ...args });
+      setEdit(null);
+      await Promise.all([loadDetail(), loadResumen()]);
+    });
+  }
+
+  const tabBtn = (key, label, count) => (
+    <button onClick={() => setTab(key)} style={{ padding: "7px 14px", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", background: tab === key ? ST_RED : "white", color: tab === key ? "white" : "#666" }}>
+      {label}{count > 0 && <span style={{ marginLeft: 6, background: tab === key ? "rgba(255,255,255,0.25)" : "#F59E0B", color: "white", borderRadius: 10, padding: "0 6px", fontSize: 10 }}>{count}</span>}
+    </button>
+  );
+  const th = { textAlign: "left", fontSize: 12, color: "#888", fontWeight: 600, padding: "8px 12px", borderBottom: "1px solid #EBEBEB" };
+  const td = { padding: "10px 12px", borderBottom: "1px solid #F5F5F5", fontSize: 13, color: "#111" };
+  const presets = [
+    ["Esta semana", weekRangeISO(hoy)],
+    ["Semana anterior", weekRangeISO(addDaysISO(hoy, -7))],
+    ["Este mes", monthRangeISO(hoy)],
+    ["Mes anterior", monthRangeISO(addDaysISO(monthRangeISO(hoy).desde, -1))],
+  ];
+  const diffCell = (r) => Number(r.horas_esperadas_a_hoy) > 0
+    ? <span style={{ color: Number(r.diferencia) >= 0 ? "#16A34A" : ST_RED, fontWeight: 600 }}>{formatDiffHours(Number(r.diferencia))}</span>
+    : <span style={{ color: "#ccc" }}>—</span>;
+  const detailName = detailUser ? nameOf(detailUser) : "";
+
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: "#111" }}>Control de jornada</div>
+          <div style={{ fontSize: 13, color: "#888", marginTop: 4 }}>Horas contratadas vs. registradas · zona horaria Buenos Aires</div>
+        </div>
+        <div style={{ display: "flex", border: "1px solid #E0E0E0", borderRadius: 8, overflow: "hidden" }}>
+          {tabBtn("resumen", "Resumen", 0)}
+          {tabBtn("solicitudes", "Solicitudes", pendientes.length)}
+          {tabBtn("feriados", "Feriados y licencias", 0)}
+          {tabBtn("auditoria", "Auditoría", 0)}
+        </div>
+      </div>
+
+      {error && <div style={{ fontSize: 13, color: ST_RED, background: ST_RED_BG, borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>{error}</div>}
+
+      {tab === "resumen" && (
+        <>
+          <div className="spicy-card" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <input type="date" className="spicy-input" style={{ width: 150 }} value={range.desde} max={range.hasta} onChange={e => e.target.value && setRange(r => ({ ...r, desde: e.target.value }))}/>
+            <span style={{ color: "#aaa" }}>→</span>
+            <input type="date" className="spicy-input" style={{ width: 150 }} value={range.hasta} min={range.desde} onChange={e => e.target.value && setRange(r => ({ ...r, hasta: e.target.value }))}/>
+            {presets.map(([label, rg]) => <button key={label} className="spicy-btn-secondary" style={{ fontSize: 12, padding: "6px 12px" }} onClick={() => setRange(rg)}>{label}</button>)}
+            <span style={{ flex: 1 }}/>
+            <button className="spicy-btn-secondary" onClick={exportCSV} disabled={rows.length === 0}>Exportar CSV</button>
+          </div>
+
+          {!detailUser && (
+            <div className="spicy-card" style={{ padding: 0, overflowX: "auto" }}>
+              <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 640 }}>
+                <thead>
+                  <tr><th style={th}>Persona</th><th style={th}>Contratadas</th><th style={th}>Registradas</th><th style={th}>Diferencia</th><th style={th}>Jornadas</th><th style={th}>Auto-cerradas</th></tr>
+                </thead>
+                <tbody>
+                  {rows.map(r => (
+                    <tr key={r.usuario_id} onClick={() => setDetailUser(r.usuario_id)} style={{ cursor: "pointer" }}>
+                      <td style={td}><div style={{ display: "flex", alignItems: "center", gap: 8 }}><Avatar name={r.nombre} size={26}/>{r.nombre}</div></td>
+                      <td style={td}>{Number(r.horas_esperadas_a_hoy) > 0 ? formatHours(Number(r.horas_esperadas_a_hoy)) : <span style={{ color: "#ccc" }}>sin contrato</span>}</td>
+                      <td style={{ ...td, fontWeight: 600 }}>{formatHours(Number(r.horas_registradas))}</td>
+                      <td style={td}>{diffCell(r)}</td>
+                      <td style={td}>{r.jornadas}</td>
+                      <td style={td}>{r.jornadas_auto_cerradas > 0 ? <span className="spicy-badge-amber">{r.jornadas_auto_cerradas}</span> : <span style={{ color: "#ccc" }}>0</span>}</td>
+                    </tr>
+                  ))}
+                  {rows.length === 0 && <tr><td colSpan={6} style={{ ...td, textAlign: "center", color: "#ccc" }}>Sin datos para este rango.</td></tr>}
+                </tbody>
+              </table>
+              <div style={{ fontSize: 11, color: "#aaa", padding: "8px 12px" }}>Las horas contratadas se cuentan hasta hoy (inclusive), descontando feriados y licencias. Tocá una fila para ver el detalle.</div>
+            </div>
+          )}
+
+          {detailUser && (
+            <div className="spicy-card">
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                <button className="spicy-btn-secondary" style={{ fontSize: 12, padding: "4px 10px" }} onClick={() => { setDetailUser(null); setJornadas([]); }}>← Volver</button>
+                <Avatar name={detailName} size={28}/>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#111" }}>{detailName}</div>
+                <span style={{ fontSize: 12, color: "#aaa" }}>{formatISODateShort(range.desde)} → {formatISODateShort(range.hasta)}</span>
+              </div>
+              {jornadas.length === 0 && <div style={{ fontSize: 13, color: "#ccc", padding: "12px 0" }}>Sin jornadas en este rango.</div>}
+              {jornadas.map(j => (
+                <div key={j.id} style={{ borderBottom: "1px solid #F5F5F5", padding: "10px 0" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ minWidth: 88, fontSize: 13, fontWeight: 600, color: "#111" }}>{weekdayShort(j.fecha)} {formatISODateShort(j.fecha).slice(0, 5)}</div>
+                    <div style={{ fontSize: 13, color: "#555", minWidth: 110 }}>{formatTimeBA(j.inicio)} → {j.estado === "finalizada" ? formatTimeBA(j.fin) : "en curso"}</div>
+                    <div style={{ fontSize: 12, color: "#999", minWidth: 80 }}>pausas {formatHM(j.pausa_segundos)}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#111", minWidth: 64 }}>{formatHM(j.total_segundos)}</div>
+                    {j.auto_cerrada && <span className="spicy-badge-amber">auto-cerrada</span>}
+                    {j.auto_cerrada && j.revisada_at && <span className="spicy-badge-gray">revisada</span>}
+                    {j.estado !== "finalizada" && <span className="spicy-badge-green">abierta</span>}
+                    <span style={{ flex: 1 }}/>
+                    {j.auto_cerrada && !j.revisada_at && <button className="spicy-btn-secondary" style={{ fontSize: 12, padding: "4px 10px" }} disabled={busy} onClick={() => run(async () => { await timeRpc("admin_marcar_revisada", { p_jornada: j.id }); await loadDetail(); })}>Marcar revisada</button>}
+                    {j.estado === "finalizada" && <button className="spicy-btn-secondary" style={{ fontSize: 12, padding: "4px 10px" }} onClick={() => openEdit("jornada", j)}>Editar jornada</button>}
+                  </div>
+                  <div style={{ margin: "6px 0 0 100px", display: "flex", flexDirection: "column", gap: 3 }}>
+                    {j.tramos.map(t => (
+                      <div key={t.id} style={{ fontSize: 12, color: t.tipo === "trabajo" ? "#444" : "#D97706", display: "flex", gap: 8, alignItems: "center" }}>
+                        <span>{t.tipo === "trabajo" ? "Trabajo" : "Pausa"} · {formatTimeBA(t.inicio)} → {t.fin ? formatTimeBA(t.fin) : "ahora"}</span>
+                        {t.origen_cierre && <span style={{ color: "#aaa" }}>({t.origen_cierre.replace("_", " ")})</span>}
+                        {j.estado === "finalizada" && t.fin && <button onClick={() => openEdit("tramo", t)} style={{ background: "none", border: "none", cursor: "pointer", color: "#bbb", fontSize: 12, padding: 0 }}>✎</button>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {tab === "solicitudes" && (
+        <div className="spicy-card">
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#111", marginBottom: 12 }}>Solicitudes de corrección</div>
+          {solicitudes.length === 0 && <div style={{ fontSize: 13, color: "#ccc" }}>No hay solicitudes.</div>}
+          {solicitudes.map(s => {
+            const cur = s.jornada_id ? solJornadas[s.jornada_id] : null;
+            return (
+              <div key={s.id} style={{ borderBottom: "1px solid #F5F5F5", padding: "12px 0" }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontSize: 13 }}>
+                  <span className={s.estado === "pendiente" ? "spicy-badge-amber" : s.estado === "aprobada" ? "spicy-badge-green" : "spicy-badge-red"}>{s.estado}</span>
+                  <span style={{ fontWeight: 600, color: "#111" }}>{nameOf(s.user_id)}</span>
+                  <span style={{ color: "#555" }}>{formatISODateShort(s.fecha)} · propone {formatTimeBA(s.inicio_propuesto)} → {formatTimeBA(s.fin_propuesto)}</span>
+                  {cur ? <span style={{ color: "#999", fontSize: 12 }}>(registrado: {formatTimeBA(cur.inicio)} → {formatTimeBA(cur.fin)})</span> : <span style={{ color: "#999", fontSize: 12 }}>(sin jornada ese día)</span>}
+                </div>
+                <div style={{ fontSize: 12, color: "#777", marginTop: 4 }}>Motivo: {s.motivo}</div>
+                {s.estado !== "pendiente" && s.resolucion_motivo && <div style={{ fontSize: 12, color: "#999", marginTop: 2 }}>Resolución: {s.resolucion_motivo}</div>}
+                {s.estado === "pendiente" && (
+                  <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <input className="spicy-input" style={{ flex: 1, minWidth: 200 }} placeholder="Motivo (obligatorio para rechazar)" value={resolveNote[s.id] || ""} onChange={e => setResolveNote(n => ({ ...n, [s.id]: e.target.value }))}/>
+                    <button className="spicy-btn-primary" disabled={busy} onClick={() => run(async () => { await timeRpc("resolver_correccion", { p_id: s.id, p_aprobar: true, p_motivo: resolveNote[s.id] || null }); await loadSolicitudes(); })}>Aprobar</button>
+                    <button className="spicy-btn-secondary" style={{ color: ST_RED, borderColor: ST_RED_BG }} disabled={busy || !(resolveNote[s.id] || "").trim()} onClick={() => run(async () => { await timeRpc("resolver_correccion", { p_id: s.id, p_aprobar: false, p_motivo: resolveNote[s.id] }); await loadSolicitudes(); })}>Rechazar</button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === "feriados" && (
+        <div className="spicy-card">
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#111", marginBottom: 4 }}>Días no laborables</div>
+          <div style={{ fontSize: 12, color: "#888", marginBottom: 12 }}>No cuentan como horas esperadas. Para todos (feriado) o para una persona (licencia / vacaciones).</div>
+          <form onSubmit={e => { e.preventDefault(); run(async () => { await timeRpc("admin_set_dia_no_laborable", { p_fecha: diaForm.fecha, p_user: diaForm.user_id || null, p_motivo: diaForm.motivo }); setDiaForm(f => ({ ...f, motivo: "" })); await loadDias(); }); }}
+            style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
+            <input type="date" required className="spicy-input" style={{ width: 150 }} value={diaForm.fecha} onChange={e => setDiaForm(f => ({ ...f, fecha: e.target.value }))}/>
+            <select className="spicy-select" value={diaForm.user_id} onChange={e => setDiaForm(f => ({ ...f, user_id: e.target.value }))}>
+              <option value="">Todos (feriado)</option>
+              {allUsers.map(u => <option key={u.user_id} value={u.user_id}>{userDisplayName(u)}</option>)}
+            </select>
+            <input className="spicy-input" style={{ flex: 1, minWidth: 180 }} placeholder="Motivo (ej. Feriado nacional, Vacaciones)" value={diaForm.motivo} onChange={e => setDiaForm(f => ({ ...f, motivo: e.target.value }))}/>
+            <button type="submit" className="spicy-btn-primary" disabled={busy}>Agregar</button>
+          </form>
+          {dias.length === 0 && <div style={{ fontSize: 13, color: "#ccc" }}>No hay días cargados.</div>}
+          {dias.map(d => (
+            <div key={d.id} style={{ display: "flex", gap: 12, alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F5F5F5", fontSize: 13 }}>
+              <span style={{ fontWeight: 600, color: "#111", minWidth: 110 }}>{weekdayShort(d.fecha)} {formatISODateShort(d.fecha)}</span>
+              <span className={d.user_id ? "spicy-badge-amber" : "spicy-badge-gray"}>{d.user_id ? nameOf(d.user_id) : "Todos"}</span>
+              <span style={{ color: "#777", flex: 1 }}>{d.motivo || ""}</span>
+              <button className="spicy-btn-secondary" style={{ fontSize: 12, padding: "3px 10px", color: ST_RED, borderColor: ST_RED_BG }} disabled={busy} onClick={() => run(async () => { await timeRpc("admin_borrar_dia_no_laborable", { p_id: d.id }); await loadDias(); })}>Quitar</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === "auditoria" && (
+        <div className="spicy-card" style={{ padding: 0, overflowX: "auto" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 760 }}>
+            <thead><tr><th style={th}>Fecha</th><th style={th}>Quién</th><th style={th}>Entidad</th><th style={th}>Campo</th><th style={th}>Anterior</th><th style={th}>Nuevo</th><th style={th}>Motivo</th></tr></thead>
+            <tbody>
+              {auditoria.map(a => (
+                <tr key={a.id}>
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDateTimeBA(a.fecha)}</td>
+                  <td style={td}>{a.usuario_email || "—"}</td>
+                  <td style={td}>{a.entidad}</td>
+                  <td style={td}>{a.campo}</td>
+                  <td style={{ ...td, color: "#999", maxWidth: 160, wordBreak: "break-word" }}>{a.valor_anterior ?? "—"}</td>
+                  <td style={{ ...td, maxWidth: 160, wordBreak: "break-word" }}>{a.valor_nuevo ?? "—"}</td>
+                  <td style={{ ...td, color: "#777" }}>{a.motivo || ""}</td>
+                </tr>
+              ))}
+              {auditoria.length === 0 && <tr><td colSpan={7} style={{ ...td, textAlign: "center", color: "#ccc" }}>Todavía no hay ediciones registradas.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {edit && (
+        <div onClick={() => setEdit(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <form onClick={e => e.stopPropagation()} onSubmit={saveEdit} style={{ background: "white", borderRadius: 16, width: "100%", maxWidth: 400, padding: 24, display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#111" }}>{edit.kind === "jornada" ? "Editar jornada" : "Editar tramo"}</div>
+            <div style={{ fontSize: 12, color: "#888", marginTop: -8 }}>{formatISODateShort(edit.fecha)}. {edit.kind === "jornada" ? "La jornada pasa a ser un único tramo de trabajo (se pierden las pausas)." : "Se recalcula el total de la jornada."} Queda registrado en la auditoría.</div>
+            <div style={{ display: "flex", gap: 12 }}>
+              <label style={{ fontSize: 12, color: "#666", fontWeight: 500, flex: 1 }}>Desde
+                <input type="time" required className="spicy-input" value={edit.desde} onChange={e => setEdit(x => ({ ...x, desde: e.target.value }))} style={{ width: "100%", marginTop: 4 }}/>
+              </label>
+              <label style={{ fontSize: 12, color: "#666", fontWeight: 500, flex: 1 }}>Hasta
+                <input type="time" required className="spicy-input" value={edit.hasta} onChange={e => setEdit(x => ({ ...x, hasta: e.target.value }))} style={{ width: "100%", marginTop: 4 }}/>
+              </label>
+            </div>
+            <label style={{ fontSize: 12, color: "#666", fontWeight: 500 }}>Motivo (obligatorio)
+              <textarea required rows={2} className="spicy-input" value={edit.motivo} onChange={e => setEdit(x => ({ ...x, motivo: e.target.value }))} style={{ width: "100%", marginTop: 4, resize: "vertical" }}/>
+            </label>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button type="button" className="spicy-btn-secondary" onClick={() => setEdit(null)}>Cancelar</button>
+              <button type="submit" className="spicy-btn-primary" disabled={busy || !edit.motivo.trim()}>Guardar</button>
+            </div>
+          </form>
+        </div>
+      )}
+    </>
+  );
+}
+
+// Horas de contrato de un usuario (se muestra dentro de la edición de usuario, solo admins).
+function UserContractsEditor({ user }) {
+  const [list, setList] = useState([]);
+  const [horas, setHoras] = useState("8");
+  const [dias, setDias] = useState([1, 2, 3, 4, 5]);
+  const [desde, setDesde] = useState(baDateISO());
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const hoy = baDateISO();
+
+  async function load() {
+    try { setList(await timeQuery(sb.from("contratos_usuario").select("*").eq("user_id", user.user_id).order("vigente_desde", { ascending: false }))); }
+    catch (e) { setError(timeErrorMessage(e)); }
+  }
+  useEffect(() => { load(); }, [user.user_id]);
+
+  async function save() {
+    setError("");
+    const h = Number(String(horas).replace(",", "."));
+    if (!(h > 0 && h <= 24)) { setError("Las horas diarias tienen que estar entre 0 y 24."); return; }
+    if (dias.length === 0) { setError("Elegí al menos un día laboral."); return; }
+    setSaving(true);
+    try {
+      await timeRpc("admin_set_contrato", { p_user: user.user_id, p_horas: h, p_dias: dias, p_desde: desde });
+      await load();
+    } catch (e) { setError(timeErrorMessage(e)); }
+    setSaving(false);
+  }
+
+  const vigente = list.find(c => c.vigente_desde <= hoy);
+  const diasTxt = (arr) => DIAS_SEMANA.filter(d => arr.includes(d.iso)).map(d => d.label).join(" ");
+
+  return (
+    <div style={{ borderTop: "1px solid #F0F0F0", paddingTop: 14 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#111", marginBottom: 2 }}>Horas de contrato</div>
+      <div style={{ fontSize: 11, color: "#888", marginBottom: 8 }}>Cada contrato rige desde su fecha de vigencia; el historial anterior no se modifica.</div>
+      {list.length === 0 && <div style={{ fontSize: 12, color: "#bbb", marginBottom: 8 }}>Sin contrato cargado.</div>}
+      {list.map(c => (
+        <div key={c.id} style={{ fontSize: 12, color: "#555", padding: "3px 0", display: "flex", gap: 8, alignItems: "center" }}>
+          <span>{formatHours(Number(c.horas_diarias))} · {diasTxt(c.dias_laborales)} · desde {formatISODateShort(c.vigente_desde)}</span>
+          {vigente && vigente.id === c.id && <span className="spicy-badge-green">vigente</span>}
+          {c.vigente_desde > hoy && <span className="spicy-badge-gray">futuro</span>}
+        </div>
+      ))}
+      <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+        <label style={{ fontSize: 12, color: "#666", fontWeight: 500, flex: 1 }}>Horas por día
+          <input className="spicy-input" inputMode="decimal" value={horas} onChange={e => setHoras(e.target.value)} style={{ width: "100%", marginTop: 4 }}/>
+        </label>
+        <label style={{ fontSize: 12, color: "#666", fontWeight: 500, flex: 1 }}>Vigente desde
+          <input type="date" className="spicy-input" value={desde} onChange={e => setDesde(e.target.value)} style={{ width: "100%", marginTop: 4 }}/>
+        </label>
+      </div>
+      <div style={{ display: "flex", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
+        {DIAS_SEMANA.map(d => (
+          <label key={d.iso} style={{ fontSize: 12, color: "#555", display: "flex", alignItems: "center", gap: 4 }}>
+            <input type="checkbox" checked={dias.includes(d.iso)} onChange={e => setDias(prev => e.target.checked ? [...prev, d.iso].sort() : prev.filter(x => x !== d.iso))}/>{d.label}
+          </label>
+        ))}
+      </div>
+      {error && <div style={{ fontSize: 12, color: ST_RED, marginTop: 8 }}>{error}</div>}
+      <div style={{ marginTop: 10 }}>
+        <button type="button" className="spicy-btn-secondary" disabled={saving} onClick={save}>Guardar contrato</button>
+      </div>
+    </div>
+  );
+}
+
 // ── Onboarding View (Kanban + Tabla) ─────────────────────────────────────────
 function OnboardingView({ onboarding, history, onRefresh }) {
   const todayISO = new Date().toISOString().split("T")[0];
@@ -4512,6 +5333,7 @@ export default function SpicyFinanzas() {
 
       {/* Main content */}
       <div className="spicy-main">
+        <TimeTrackerBar/>
         {syncError&&<div style={{ fontSize:13,color:ST_RED,marginBottom:16,padding:"10px 14px",background:ST_RED_BG,borderRadius:10,border:`1px solid ${ST_RED}22` }}>{syncError}</div>}
 
       {currentViewBlocked ? (
@@ -4679,6 +5501,8 @@ export default function SpicyFinanzas() {
       {view==="services"&&<ServicesView/>}
       {view==="categories"&&<CategoriesPanel catsIncome={catsIncome} catsExpense={catsExpense} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="usuarios"&&isAdmin&&<UserPermissionsPanel users={allUsers} allowedSections={allowedSections} onRefresh={loadAll}/>}
+      {view==="mytime"&&<MiTiempoView currentUserId={session.user.id}/>}
+      {view==="timeadmin"&&isAdmin&&<ControlJornadaView allUsers={allUsers}/>}
       {view==="notes"&&<NotesView notes={notes} currentUserId={session.user.id} currentUserEmail={session.user.email} isAdmin={isAdmin} onRefresh={loadAll}/>}
 
       {/* ADD */}
