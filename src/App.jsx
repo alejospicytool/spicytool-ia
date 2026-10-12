@@ -3905,7 +3905,8 @@ function TimeTrackerBar() {
   const [error, setError] = useState("");
   const [idleDeadline, setIdleDeadline] = useState(null);
   const [countdown, setCountdown] = useState(0);
-  const [confirmEnd, setConfirmEnd] = useState(false);
+  const [endOpen, setEndOpen] = useState(false);
+  const [endText, setEndText] = useState("");
   const lastInteraction = useRef(Date.now());
   const estadoRef = useRef(null);
   const idleModalRef = useRef(null);
@@ -4017,12 +4018,6 @@ function TimeTrackerBar() {
     return () => clearInterval(t);
   }, [idleDeadline]);
 
-  useEffect(() => {
-    if (!confirmEnd) return;
-    const t = setTimeout(() => setConfirmEnd(false), 4000);
-    return () => clearTimeout(t);
-  }, [confirmEnd]);
-
   async function stillWorking() {
     lastInteraction.current = Date.now();
     idleModalRef.current = null;
@@ -4068,12 +4063,27 @@ function TimeTrackerBar() {
           )}
           {(ui === "trabajando" || ui === "pausa") && (
             <button className="spicy-btn-secondary" disabled={busy} style={{ color: ST_RED, borderColor: ST_RED_BG }}
-              onClick={() => { if (confirmEnd) { setConfirmEnd(false); act("terminar"); } else setConfirmEnd(true); }}>
-              {confirmEnd ? "¿Confirmar? Terminar jornada" : "Terminar jornada"}
+              onClick={() => { setError(""); setEndText(""); setEndOpen(true); }}>
+              Terminar jornada
             </button>
           )}
         </div>
       </div>
+
+      {endOpen && (
+        <div onClick={() => setEndOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 250, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <form onClick={e => e.stopPropagation()} onSubmit={async e => { e.preventDefault(); setEndOpen(false); await act("terminar", { p_resumen: endText.trim() }); }}
+            style={{ background: "white", borderRadius: 16, width: "100%", maxWidth: 440, padding: 24, display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#111" }}>Terminar jornada</div>
+            <div style={{ fontSize: 12, color: "#888", marginTop: -6 }}>Llevás {formatHM(seconds)} trabajadas hoy. Contá en pocas líneas qué hiciste: es obligatorio para cerrar el día.</div>
+            <textarea autoFocus required rows={5} maxLength={2000} className="spicy-input" placeholder="Resumen del día..." value={endText} onChange={e => setEndText(e.target.value)} style={{ width: "100%", resize: "vertical" }}/>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button type="button" className="spicy-btn-secondary" onClick={() => setEndOpen(false)}>Seguir trabajando</button>
+              <button type="submit" className="spicy-btn-primary" disabled={busy || endText.trim().length < 5}>Terminar jornada</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {idleDeadline && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
@@ -4106,6 +4116,18 @@ function MiTiempoView({ currentUserId }) {
   const [corr, setCorr] = useState(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  const [resumenModal, setResumenModal] = useState(null);
+
+  async function saveResumen(e) {
+    e.preventDefault();
+    setSaving(true); setFormError("");
+    try {
+      await timeRpc("agregar_resumen", { p_jornada: resumenModal.id, p_resumen: resumenModal.texto.trim() });
+      setResumenModal(null);
+      load();
+    } catch (err) { setFormError(timeErrorMessage(err)); }
+    setSaving(false);
+  }
 
   async function load() {
     try {
@@ -4220,8 +4242,10 @@ function MiTiempoView({ currentUserId }) {
               {j.auto_cerrada && j.revisada_at && <span className="spicy-badge-gray">revisada</span>}
               {j.estado !== "finalizada" && <span className="spicy-badge-green">abierta</span>}
               <span style={{ flex: 1 }}/>
+              {j.estado === "finalizada" && !j.resumen && <button className="spicy-btn-secondary" style={{ fontSize: 12, padding: "4px 10px" }} onClick={() => { setFormError(""); setResumenModal({ id: j.id, fecha: j.fecha, texto: "" }); }}>Agregar resumen</button>}
               {j.estado === "finalizada" && <button className="spicy-btn-secondary" style={{ fontSize: 12, padding: "4px 10px" }} onClick={() => openCorr(j)}>Pedir corrección</button>}
             </div>
+            {j.resumen && <div style={{ margin: "6px 0 0 26px", fontSize: 12.5, color: "#555", whiteSpace: "pre-wrap", borderLeft: "3px solid #EBEBEB", paddingLeft: 10 }}>{j.resumen}</div>}
             {expanded === j.id && (
               <div style={{ margin: "8px 0 0 26px", display: "flex", flexDirection: "column", gap: 3 }}>
                 {j.tramos.map(t => (
@@ -4251,6 +4275,21 @@ function MiTiempoView({ currentUserId }) {
           </div>
         ))}
       </div>
+
+      {resumenModal && (
+        <div onClick={() => setResumenModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <form onClick={e => e.stopPropagation()} onSubmit={saveResumen} style={{ background: "white", borderRadius: 16, width: "100%", maxWidth: 440, padding: 24, display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#111" }}>Resumen del {formatISODateShort(resumenModal.fecha)}</div>
+            <div style={{ fontSize: 12, color: "#888", marginTop: -6 }}>Esa jornada no tiene resumen. Se puede cargar una sola vez.</div>
+            <textarea autoFocus required rows={5} maxLength={2000} className="spicy-input" value={resumenModal.texto} onChange={e => setResumenModal(m => ({ ...m, texto: e.target.value }))} style={{ width: "100%", resize: "vertical" }}/>
+            {formError && <div style={{ fontSize: 12, color: ST_RED, background: ST_RED_BG, borderRadius: 8, padding: "8px 10px" }}>{formError}</div>}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button type="button" className="spicy-btn-secondary" onClick={() => setResumenModal(null)}>Cancelar</button>
+              <button type="submit" className="spicy-btn-primary" disabled={saving || resumenModal.texto.trim().length < 5}>Guardar</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {corr && (
         <div onClick={() => setCorr(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
@@ -4481,6 +4520,9 @@ function ControlJornadaView({ allUsers }) {
                     {j.auto_cerrada && !j.revisada_at && <button className="spicy-btn-secondary" style={{ fontSize: 12, padding: "4px 10px" }} disabled={busy} onClick={() => run(async () => { await timeRpc("admin_marcar_revisada", { p_jornada: j.id }); await loadDetail(); })}>Marcar revisada</button>}
                     {j.estado === "finalizada" && <button className="spicy-btn-secondary" style={{ fontSize: 12, padding: "4px 10px" }} onClick={() => openEdit("jornada", j)}>Editar jornada</button>}
                   </div>
+                  {j.resumen
+                    ? <div style={{ margin: "6px 0 0 100px", fontSize: 12.5, color: "#555", whiteSpace: "pre-wrap", borderLeft: "3px solid #EBEBEB", paddingLeft: 10 }}>{j.resumen}</div>
+                    : j.estado === "finalizada" && <div style={{ margin: "6px 0 0 100px", fontSize: 12, color: "#bbb" }}>Sin resumen del día</div>}
                   <div style={{ margin: "6px 0 0 100px", display: "flex", flexDirection: "column", gap: 3 }}>
                     {j.tramos.map(t => (
                       <div key={t.id} style={{ fontSize: 12, color: t.tipo === "trabajo" ? "#444" : "#D97706", display: "flex", gap: 8, alignItems: "center" }}>

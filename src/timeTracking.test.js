@@ -119,3 +119,10 @@ describe("errores de la base", () => {
     expect(timeErrorMessage({ message: "algo raro" })).toBe("algo raro");
   });
 });
+
+describe("errores del resumen del día", () => {
+  it("traduce los códigos nuevos", () => {
+    expect(timeErrorMessage({ message: "resumen_requerido" })).toContain("resumen del día");
+    expect(timeErrorMessage({ message: "resumen_ya_cargado" })).toContain("ya tiene");
+  });
+});

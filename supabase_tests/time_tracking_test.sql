@@ -47,7 +47,7 @@ begin
   perform set_config('app.time_now', '2026-10-12T14:45:00Z', true); perform heartbeat('A', 0);
   perform set_config('app.time_now', '2026-10-12T15:00:00Z', true); perform heartbeat('A', 0);
   perform set_config('app.time_now', '2026-10-12T15:15:00Z', true); perform heartbeat('A', 0);
-  perform set_config('app.time_now', '2026-10-12T15:30:00Z', true); perform terminar();
+  perform set_config('app.time_now', '2026-10-12T15:30:00Z', true); perform terminar('Resumen de prueba');
   select id, total_segundos into jid, n from jornadas where user_id = e1 and fecha = '2026-10-12';
   if n is distinct from 10800 then raise exception 'T1 total esperado 10800 s, fue %', n; end if;
   select sum(extract(epoch from (fin - inicio)))::integer into n from tramos where jornada_id = jid and tipo = 'pausa';
@@ -75,7 +75,7 @@ begin
     raise exception 'T2 el tramo debía cortar en la última actividad (12:10Z)';
   end if;
   perform set_config('app.time_now', '2026-10-13T13:00:00Z', true);
-  perform terminar();
+  perform terminar('Resumen de prueba');
   select total_segundos into n from jornadas where id = jid;
   if n <> 600 then raise exception 'T2 total esperado 600 s, fue %', n; end if;
 
@@ -141,7 +141,7 @@ begin
   r := heartbeat('A', 0);
   if r ->> 'reason' is distinct from 'otra_sesion' then raise exception 'T5 A no debía pisar a B'; end if;
   perform set_config('app.time_now', '2026-10-19T12:10:00Z', true);
-  perform terminar();
+  perform terminar('Resumen de prueba');
   select id, total_segundos into sid, n from jornadas where user_id = e1 and fecha = '2026-10-19';
   if n <> 600 then raise exception 'T5 el total debía ser 600 s (sin duplicar), fue %', n; end if;
 

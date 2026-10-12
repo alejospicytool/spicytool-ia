@@ -673,3 +673,55 @@ end $$;
 
 -- ═══ Barrido automático cada 5 minutos ═══════════════════════════════════════
 select cron.schedule('time-barrido', '*/5 * * * *', $$select public.time_barrido(null)$$);
+
+-- ═══ Ampliación 1 (2026-10-12): resumen del día obligatorio ═════════════════════
+-- Migración time_tracking_resumen_del_dia. terminar() pasó a terminar(p_resumen text):
+-- exige un resumen de al menos 5 caracteres. Si el barrido ya había cerrado la jornada,
+-- el resumen se guarda en la última jornada cerrada reciente que no tenga uno.
+-- agregar_resumen(): la propia persona carga (una sola vez) el resumen de una jornada
+-- sin uno, p. ej. una auto-cerrada. time_jornadas() ahora devuelve también `resumen`.
+alter table public.jornadas add column resumen text;
+
+drop function public.terminar();
+create or replace function public.terminar(p_resumen text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); v_now timestamptz; j public.jornadas; v_res text := trim(coalesce(p_resumen, ''));
+begin
+  if uid is null then raise exception 'no_autenticado'; end if;
+  if length(v_res) < 5 then raise exception 'resumen_requerido'; end if;
+  if length(v_res) > 2000 then raise exception 'datos_invalidos'; end if;
+  v_now := public.time_now();
+  perform public.time_barrido(uid);
+  select * into j from public.jornadas where user_id = uid and estado <> 'finalizada' for update;
+  if found then
+    perform public.time_finalizar(j.id, v_now, 'manual', false);
+    update public.jornadas set resumen = v_res where id = j.id;
+  else
+    update public.jornadas set resumen = v_res
+     where id = (select id from public.jornadas
+                 where user_id = uid and estado = 'finalizada' and resumen is null
+                   and fecha >= public.time_ba_date(v_now) - 1
+                 order by inicio desc limit 1);
+  end if;
+  return public.time_estado();
+end $$;
+
+create or replace function public.agregar_resumen(p_jornada uuid, p_resumen text) returns void
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); j public.jornadas; v_res text := trim(coalesce(p_resumen, ''));
+begin
+  if uid is null then raise exception 'no_autenticado'; end if;
+  if length(v_res) < 5 then raise exception 'resumen_requerido'; end if;
+  if length(v_res) > 2000 then raise exception 'datos_invalidos'; end if;
+  select * into j from public.jornadas where id = p_jornada for update;
+  if not found or j.user_id <> uid then raise exception 'no_autorizado'; end if;
+  if j.estado <> 'finalizada' then raise exception 'jornada_abierta'; end if;
+  if j.resumen is not null and length(trim(j.resumen)) > 0 then raise exception 'resumen_ya_cargado'; end if;
+  update public.jornadas set resumen = v_res where id = j.id;
+end $$;
+
+-- (time_jornadas se recreó con la columna `resumen`: ver la definición vigente en la base;
+--  es la misma de arriba más `resumen text` entre revisada_at y total_segundos.)
+
+revoke all on function public.terminar(text), public.agregar_resumen(uuid, text), public.time_jornadas(date, date, uuid) from public, anon, authenticated;
+grant execute on function public.terminar(text), public.agregar_resumen(uuid, text), public.time_jornadas(date, date, uuid) to authenticated;

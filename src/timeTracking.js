@@ -144,6 +144,9 @@ const ERROR_MESSAGES = {
   jornada_abierta: "No se puede editar una jornada que todavía está abierta.",
   solicitud_ya_resuelta: "Esa solicitud ya fue resuelta.",
   datos_invalidos: "Faltan datos o no son válidos.",
+  resumen_requerido: "Escribí el resumen del día (al menos 5 caracteres).",
+  resumen_ya_cargado: "Esa jornada ya tiene un resumen.",
+  entidad_inexistente: "No se encontró esa tarea, ticket o subtarea.",
 };
 export function timeErrorMessage(error) {
   const raw = (error && (error.message || String(error))) || "";
