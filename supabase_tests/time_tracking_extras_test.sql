@@ -77,6 +77,26 @@ begin
   if rec.resumen is distinct from 'Resumen escrito tarde' or not rec.auto_cerrada then
     raise exception 'R3 el resumen no quedó en la jornada auto-cerrada (%, %)', rec.resumen, rec.auto_cerrada;
   end if;
+
+  ------------------------------------------------------------------------
+  -- S1 subtareas: cualquier empleado crea, tilda y borra (RLS abierta); valida tipo y título
+  perform set_config('request.jwt.claims', json_build_object('sub', e1, 'role', 'authenticated')::text, true);
+  execute 'set local role authenticated';
+  select id into s from tickets limit 1;
+  insert into subtasks (id, entity_type, entity_id, title, created_by) values ('st_test_1', 'ticket', s, 'Revisar logs', e1);
+  update subtasks set done = true, done_at = now(), done_by = e1 where id = 'st_test_1';
+  select count(*) into n from subtasks where id = 'st_test_1' and done and created_by = e1;
+  if n <> 1 then raise exception 'S1 no se pudo crear/tildar una subtarea como empleado'; end if;
+  caught := false;
+  begin insert into subtasks (id, entity_type, entity_id, title) values ('st_test_2', 'otro', s, 'x'); exception when check_violation then caught := true; end;
+  if not caught then raise exception 'S1 aceptó un tipo de entidad inválido'; end if;
+  caught := false;
+  begin insert into subtasks (id, entity_type, entity_id, title) values ('st_test_3', 'ticket', s, '   '); exception when check_violation then caught := true; end;
+  if not caught then raise exception 'S1 aceptó un título vacío'; end if;
+  delete from subtasks where id = 'st_test_1';
+  select count(*) into n from subtasks where id = 'st_test_1';
+  if n <> 0 then raise exception 'S1 no se pudo borrar la subtarea'; end if;
+  execute 'reset role';
 end $$;
 
 select 'ALL EXTRAS TESTS PASSED' as result;

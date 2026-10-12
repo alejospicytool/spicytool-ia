@@ -2542,6 +2542,69 @@ function CommentsThread({ entityType, entityId, comments, currentUserId, current
   );
 }
 
+function subtaskProgress(subtasks, entityType, entityId) {
+  const list = subtasks.filter(s => s.entity_type === entityType && s.entity_id === entityId);
+  return list.length ? `${list.filter(s => s.done).length}/${list.length}` : null;
+}
+
+// Checklist de subtareas de un ticket / tarea de dev / tarea de operaciones.
+function SubtasksList({ entityType, entityId, subtasks, currentUserId, onChange }) {
+  const mine = subtasks.filter(s => s.entity_type === entityType && s.entity_id === entityId).sort((a, b) => a.created_at.localeCompare(b.created_at));
+  const [title, setTitle] = useState("");
+  const doneCount = mine.filter(s => s.done).length;
+
+  async function add() {
+    const t = title.trim();
+    if (!t) return;
+    await sb.from("subtasks").insert({ id: "st_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6), entity_type: entityType, entity_id: entityId, title: t, created_by: currentUserId });
+    setTitle("");
+    onChange();
+  }
+  async function toggle(st) {
+    await sb.from("subtasks").update({ done: !st.done, done_at: !st.done ? new Date().toISOString() : null, done_by: !st.done ? currentUserId : null }).eq("id", st.id);
+    onChange();
+  }
+  async function rename(st, value) {
+    const v = value.trim();
+    if (!v || v === st.title) return;
+    await sb.from("subtasks").update({ title: v }).eq("id", st.id);
+    onChange();
+  }
+  async function remove(st) {
+    await sb.from("subtasks").delete().eq("id", st.id);
+    onChange();
+  }
+
+  return (
+    <div>
+      {mine.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <div style={{ flex: 1, height: 5, background: "#F0F0F0", borderRadius: 3, overflow: "hidden" }}>
+            <div style={{ width: `${Math.round((doneCount / mine.length) * 100)}%`, height: "100%", background: "#16A34A" }}/>
+          </div>
+          <span style={{ fontSize: 11, color: "#888", fontWeight: 600 }}>{doneCount}/{mine.length}</span>
+        </div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
+        {mine.map(st => (
+          <div key={st.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "#F7F7F8", borderRadius: 8, padding: "5px 8px" }}>
+            <input type="checkbox" checked={st.done} onChange={() => toggle(st)} style={{ cursor: "pointer" }}/>
+            <input key={st.id + st.title} defaultValue={st.title} onBlur={e => rename(st, e.target.value)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+              style={{ flex: 1, border: "none", outline: "none", background: "transparent", fontSize: 13, fontFamily: "inherit", color: st.done ? "#aaa" : "#222", textDecoration: st.done ? "line-through" : "none", minWidth: 0 }}/>
+            <button onClick={() => remove(st)} title="Borrar subtarea" style={{ background: "none", border: "none", cursor: "pointer", color: "#ccc", fontSize: 15, lineHeight: 1, padding: 0 }}>×</button>
+          </div>
+        ))}
+        {mine.length === 0 && <div style={{ fontSize: 12, color: "#ccc" }}>Sin subtareas.</div>}
+      </div>
+      <div style={{ display: "flex", gap: 6 }}>
+        <input className="spicy-input" placeholder="Agregar subtarea..." value={title} maxLength={300} onChange={e => setTitle(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); add(); } }} style={{ flex: 1 }}/>
+        <button className="spicy-btn-primary" onClick={add} disabled={!title.trim()}>Agregar</button>
+      </div>
+    </div>
+  );
+}
+
 function AttachmentThumb({ path, name }) {
   const [url, setUrl] = useState(null);
   useEffect(()=>{
@@ -2620,7 +2683,7 @@ function HistoryList({ entries, labelKey }) {
   );
 }
 
-function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, currentUserId, assignees, comments, attachments, devTasks, setView, onRefresh }) {
+function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, currentUserId, assignees, comments, attachments, subtasks, devTasks, setView, onRefresh }) {
   const [showNew, setShowNew] = useState(false);
   const [detail,  setDetail]  = useState(null);
   const [dragOverStatus, setDragOverStatus] = useState(null);
@@ -2681,6 +2744,7 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
 
   async function deleteTicket(ticket) {
     await sb.from("tickets").delete().eq("id", ticket.id);
+    await sb.from("subtasks").delete().match({ entity_type:"ticket", entity_id:ticket.id });
     setDetail(null);
     onRefresh();
   }
@@ -2749,6 +2813,7 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
                         </div>
                         <span style={{ display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#aaa" }}>
                           {t.fibonacci_score && <span className="spicy-badge-gray">{t.fibonacci_score}</span>}
+                          {subtaskProgress(subtasks,"ticket",t.id) && <span>☑{subtaskProgress(subtasks,"ticket",t.id)}</span>}
                           {commentsCount(t.id)>0 && <span>💬{commentsCount(t.id)}</span>}
                           {attachmentsCount(t.id)>0 && <span>📎{attachmentsCount(t.id)}</span>}
                           {new Date(t.created_at).toLocaleDateString("es-UY",{day:"2-digit",month:"2-digit"})}
@@ -2894,6 +2959,11 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
               )}
 
               <div>
+                <div style={{ fontSize:12,color:"#666",fontWeight:500,marginBottom:6 }}>Subtareas</div>
+                <SubtasksList entityType="ticket" entityId={detail.id} subtasks={subtasks} currentUserId={currentUserId} onChange={onRefresh}/>
+              </div>
+
+              <div>
                 <div style={{ fontSize:12,color:"#666",fontWeight:500,marginBottom:6 }}>Comentarios</div>
                 <CommentsThread entityType="ticket" entityId={detail.id} comments={comments} currentUserId={currentUserId} currentUserEmail={currentUserEmail} onChange={onRefresh}/>
               </div>
@@ -2921,7 +2991,7 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
 }
 
 // ── Dev Tasks View (Kanban, tareas de desarrollo de producto) ──────────────
-function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, currentUserId, assignees, comments, attachments, tickets, onRefresh }) {
+function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, currentUserId, assignees, comments, attachments, subtasks, tickets, onRefresh }) {
   const [showNew, setShowNew] = useState(false);
   const [detail,  setDetail]  = useState(null);
   const [dragOverStage, setDragOverStage] = useState(null);
@@ -2980,6 +3050,7 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
 
   async function deleteDevTask(task) {
     await sb.from("dev_tasks").delete().eq("id", task.id);
+    await sb.from("subtasks").delete().match({ entity_type:"dev_task", entity_id:task.id });
     setDetail(null);
     onRefresh();
   }
@@ -3040,6 +3111,7 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
                       </div>
                       <span style={{ display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#aaa" }}>
                         {t.fibonacci_score && <span className="spicy-badge-gray">{t.fibonacci_score}</span>}
+                        {subtaskProgress(subtasks,"dev_task",t.id) && <span>☑{subtaskProgress(subtasks,"dev_task",t.id)}</span>}
                         {commentsCount(t.id)>0 && <span>💬{commentsCount(t.id)}</span>}
                         {attachmentsCount(t.id)>0 && <span>📎{attachmentsCount(t.id)}</span>}
                       </span>
@@ -3122,6 +3194,11 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
               <div style={{ fontSize:11,color:"#aaa",marginTop:6,lineHeight:1.5 }}>
                 {FIBONACCI_SCALE.map(f=><div key={f.value}><b>{f.value}</b>: {f.help}</div>)}
               </div>
+            </div>
+
+            <div>
+              <div style={{ fontSize:12,color:"#666",fontWeight:500,marginBottom:6 }}>Subtareas</div>
+              <SubtasksList entityType="dev_task" entityId={detail.id} subtasks={subtasks} currentUserId={currentUserId} onChange={onRefresh}/>
             </div>
 
             <div>
@@ -3366,7 +3443,7 @@ function DevsMetricsView({ tickets, ticketHistory, devTasks, devTaskHistory, ass
 }
 
 // ── Tasks View (Kanban + Calendario) ────────────────────────────────────────
-function TasksView({ tasks, allUsers, assignees, comments, attachments, currentUserEmail, currentUserId, onRefresh }) {
+function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks, currentUserEmail, currentUserId, onRefresh }) {
   const todayISO = new Date().toISOString().split("T")[0];
   const emptyForm = () => ({ title:"", start_date:todayISO, end_date:todayISO, assigneeIds:[], priority:"Media", description:"" });
 
@@ -3425,6 +3502,7 @@ function TasksView({ tasks, allUsers, assignees, comments, attachments, currentU
 
   async function deleteTask(task) {
     await sb.from("tasks").delete().eq("id", task.id);
+    await sb.from("subtasks").delete().match({ entity_type:"task", entity_id:task.id });
     setDetail(null);
     onRefresh();
   }
@@ -3531,6 +3609,7 @@ function TasksView({ tasks, allUsers, assignees, comments, attachments, currentU
                           {assigneesFor(t.id).length===0 && <span style={{ fontSize:11,color:"#ccc" }}>Sin asignar</span>}
                         </div>
                         <span style={{ display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#aaa" }}>
+                          {subtaskProgress(subtasks,"task",t.id) && <span>☑{subtaskProgress(subtasks,"task",t.id)}</span>}
                           {commentsCount(t.id)>0 && <span>💬{commentsCount(t.id)}</span>}
                           {attachmentsCount(t.id)>0 && <span>📎{attachmentsCount(t.id)}</span>}
                         </span>
@@ -3668,6 +3747,11 @@ function TasksView({ tasks, allUsers, assignees, comments, attachments, currentU
             <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Descripción
               <textarea key={detail.id} defaultValue={detail.description||""} onBlur={e=>updateTask(detail,{description:e.target.value||null})} className="spicy-input" rows={3} style={{ width:"100%",marginTop:4,resize:"vertical" }}/>
             </label>
+
+            <div>
+              <div style={{ fontSize:12,color:"#666",fontWeight:500,marginBottom:6 }}>Subtareas</div>
+              <SubtasksList entityType="task" entityId={detail.id} subtasks={subtasks} currentUserId={currentUserId} onChange={onRefresh}/>
+            </div>
 
             <div>
               <div style={{ fontSize:12,color:"#666",fontWeight:500,marginBottom:6 }}>Comentarios</div>
@@ -5091,6 +5175,7 @@ export default function SpicyFinanzas() {
   const [entityAssignees, setEntityAssignees] = useState([]);
   const [comments,        setComments]        = useState([]);
   const [attachments,     setAttachments]     = useState([]);
+  const [subtasks,        setSubtasks]        = useState([]);
   const [notes,           setNotes]           = useState([]);
   const [dataLoaded, setDataLoaded]   = useState(false);
 
@@ -5124,7 +5209,7 @@ export default function SpicyFinanzas() {
     // cada acción chica (agregar un asignado, comentar, etc.) y si tira abajo
     // dataLoaded, el gate de "Cargando datos..." desmonta toda la vista actual
     // (y con ella, el modal de detalle abierto) en cada una de esas acciones.
-    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,ticketHistoryRes,tasksRes,usersRes,allowedRes,onboardingRes,onboardingHistoryRes,devTasksRes,devTaskHistoryRes,assigneesRes,commentsRes,attachmentsRes,notesRes]=await Promise.all([
+    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,ticketHistoryRes,tasksRes,usersRes,allowedRes,onboardingRes,onboardingHistoryRes,devTasksRes,devTaskHistoryRes,assigneesRes,commentsRes,attachmentsRes,notesRes,subtasksRes]=await Promise.all([
       sb.from("user_roles").select("role").eq("user_id",session.user.id).single(),
       sb.from("transactions").select("*").order("date",{ascending:false}),
       sb.from("accounts").select("*").order("created_at"),
@@ -5145,6 +5230,7 @@ export default function SpicyFinanzas() {
       sb.from("comments").select("*"),
       sb.from("attachments").select("*"),
       sb.from("notes").select("*").order("updated_at",{ascending:false}),
+      sb.from("subtasks").select("*"),
     ]);
     setRole(roleRes.data?.role||"reader");
     setTxns(txRes.data||[]);
@@ -5167,6 +5253,7 @@ export default function SpicyFinanzas() {
     setComments(commentsRes.data||[]);
     setAttachments(attachmentsRes.data||[]);
     setNotes(notesRes.data||[]);
+    setSubtasks(subtasksRes.data||[]);
     setDataLoaded(true);
   }
 
@@ -5535,11 +5622,11 @@ export default function SpicyFinanzas() {
       {view==="pnl"&&<PnLView txns={txns}/>}
       {view==="inicio"&&<InicioView myOpenTickets={myOpenTickets} myOpenDevTasks={myOpenDevTasks} myOpenTasks={myOpenTasks} ticketHistory={ticketStatusHistory} devTaskHistory={devTaskStatusHistory} comments={comments} currentUserEmail={session.user.email} canSeeOperaciones={canSeeSection("Operaciones")} canSeeDevs={canSeeSection("Devs")} setView={setView}/>}
       {view==="opsdash"&&<OperationsSummaryView tickets={tickets} tasks={tasks} statusHistory={ticketStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
-      {view==="tickets"&&<TicketsView tickets={tickets} statusHistory={ticketStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} devTasks={devTasks} setView={setView} onRefresh={loadAll}/>}
-      {view==="tasks"&&<TasksView tasks={tasks} allUsers={allUsers} assignees={entityAssignees} comments={comments} attachments={attachments} currentUserEmail={session.user.email} currentUserId={session.user.id} onRefresh={loadAll}/>}
+      {view==="tickets"&&<TicketsView tickets={tickets} statusHistory={ticketStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} devTasks={devTasks} setView={setView} onRefresh={loadAll}/>}
+      {view==="tasks"&&<TasksView tasks={tasks} allUsers={allUsers} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} currentUserEmail={session.user.email} currentUserId={session.user.id} onRefresh={loadAll}/>}
       {view==="onboarding"&&<OnboardingView onboarding={onboarding} history={onboardingHistory} onRefresh={loadAll}/>}
       {view==="devdash"&&<DevsMetricsView tickets={tickets} ticketHistory={ticketStatusHistory} devTasks={devTasks} devTaskHistory={devTaskStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
-      {view==="devtasks"&&<DevTasksView devTasks={devTasks} statusHistory={devTaskStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} tickets={tickets} onRefresh={loadAll}/>}
+      {view==="devtasks"&&<DevTasksView devTasks={devTasks} statusHistory={devTaskStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} tickets={tickets} onRefresh={loadAll}/>}
       {view==="services"&&<ServicesView/>}
       {view==="categories"&&<CategoriesPanel catsIncome={catsIncome} catsExpense={catsExpense} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="usuarios"&&isAdmin&&<UserPermissionsPanel users={allUsers} allowedSections={allowedSections} onRefresh={loadAll}/>}
