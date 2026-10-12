@@ -725,3 +725,243 @@ end $$;
 
 revoke all on function public.terminar(text), public.agregar_resumen(uuid, text), public.time_jornadas(date, date, uuid) from public, anon, authenticated;
 grant execute on function public.terminar(text), public.agregar_resumen(uuid, text), public.time_jornadas(date, date, uuid) to authenticated;
+
+-- ═══ Ampliación 2 (2026-10-12): seguimiento por tarea ("Trabajar en esto") ══════════
+-- Migración time_tracking_work_on_tasks. Cada tramo de trabajo puede quedar etiquetado con un
+-- ticket / tarea de dev / tarea / subtarea (tramos.entity_*). Es opcional y NO hay un timer
+-- aparte: es el mismo reloj de la jornada.
+--  * trabajar_en(): inicia la jornada si no hay, la reanuda si está en pausa y, si ya estaba
+--    trabajando en otra cosa, cierra ese tramo (origen cambio_tarea) y abre uno nuevo.
+--  * La tarea queda "adjunta" a la jornada (jornadas.tarea_*): sobrevive a pausas (manuales o por
+--    inactividad) y al reanudar el tramo nuevo vuelve a la misma tarea. soltar_tarea() la quita
+--    (la jornada sigue sin tarea); terminar la jornada también.
+--  * El rótulo se toma en el SERVIDOR del título de la entidad (las subtareas llevan el título del
+--    padre), no del cliente. Es una foto del momento: si después renombran la tarea, no cambia.
+--  * time_por_tarea(): tiempo por tarea en un rango (un no-admin solo ve el suyo).
+--    time_entidad(): total de una tarea (lo ve cualquiera); el desglose por persona, solo admin.
+--  * time_estado() suma `tarea` y `tareas_hoy` (para pre-cargar el resumen del día).
+alter table public.tramos
+  add column entity_type text check (entity_type in ('ticket','dev_task','task','subtask')),
+  add column entity_id text,
+  add column entity_label text;
+alter table public.tramos add constraint tramos_entidad_completa check ((entity_type is null) = (entity_id is null));
+create index tramos_entidad on public.tramos (entity_type, entity_id) where entity_id is not null;
+alter table public.tramos drop constraint tramos_origen_cierre_check;
+alter table public.tramos add constraint tramos_origen_cierre_check
+  check (origen_cierre in ('manual','inactividad','sin_heartbeat','auto_cierre','correccion','cambio_tarea'));
+alter table public.jornadas add column tarea_tipo text, add column tarea_id text, add column tarea_label text;
+
+create or replace function public.time_entidad_titulo(p_tipo text, p_id text) returns text
+language plpgsql security definer set search_path = public as $$
+declare v text; st public.subtasks;
+begin
+  if p_tipo = 'ticket' then select title into v from public.tickets where id = p_id;
+  elsif p_tipo = 'dev_task' then select title into v from public.dev_tasks where id = p_id;
+  elsif p_tipo = 'task' then select title into v from public.tasks where id = p_id;
+  elsif p_tipo = 'subtask' then
+    select * into st from public.subtasks where id = p_id;
+    if found then
+      v := st.title || coalesce(' · ' || public.time_entidad_titulo(st.entity_type, st.entity_id), '');
+    end if;
+  end if;
+  return case when v is null then null else left(v, 200) end;
+end $$;
+
+create or replace function public.time_tramo_segundos(t public.tramos, j public.jornadas) returns integer
+language sql security definer set search_path = public as $$
+  select greatest(0, extract(epoch from (
+           coalesce(t.fin, least(public.time_now(), j.ultima_actividad + make_interval(mins => s.inactivity_minutes))) - t.inicio
+         )))::integer
+  from public.time_settings s where s.id = 1
+$$;
+
+create or replace function public.time_finalizar(p_jornada uuid, p_fin timestamptz, p_origen text, p_auto boolean)
+returns void language plpgsql security definer set search_path = public as $$
+declare j public.jornadas;
+begin
+  perform public.time_cerrar_tramo_abierto(p_jornada, p_fin, p_origen);
+  delete from public.tramos where jornada_id = p_jornada and tipo = 'pausa' and fin is not null and fin <= inicio;
+  update public.jornadas set estado = 'finalizada', fin = greatest(p_fin, inicio), auto_cerrada = p_auto,
+         tarea_tipo = null, tarea_id = null, tarea_label = null where id = p_jornada;
+  select * into j from public.jornadas where id = p_jornada;
+  update public.jornadas set total_segundos = public.time_jornada_segundos(j) where id = p_jornada;
+end $$;
+
+create or replace function public.reanudar(p_session text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); v_now timestamptz; j public.jornadas;
+begin
+  if uid is null then raise exception 'no_autenticado'; end if;
+  v_now := public.time_now();
+  perform public.time_barrido(uid);
+  select * into j from public.jornadas where user_id = uid and estado <> 'finalizada' for update;
+  if not found then raise exception 'sin_jornada_abierta'; end if;
+  if j.estado = 'pausa' then
+    perform public.time_cerrar_tramo_abierto(j.id, v_now, 'manual');
+    insert into public.tramos (jornada_id, tipo, inicio, entity_type, entity_id, entity_label)
+    values (j.id, 'trabajo', v_now, j.tarea_tipo, j.tarea_id, j.tarea_label);
+    update public.jornadas set estado = 'trabajando', ultima_actividad = v_now, ultimo_heartbeat = v_now, session_id = p_session where id = j.id;
+  end if;
+  return public.time_estado();
+end $$;
+
+create or replace function public.trabajar_en(p_session text, p_tipo text, p_id text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); v_now timestamptz; j public.jornadas; v_label text; v_jid uuid;
+begin
+  if uid is null then raise exception 'no_autenticado'; end if;
+  if p_tipo is null or p_id is null or p_tipo not in ('ticket','dev_task','task','subtask') then raise exception 'datos_invalidos'; end if;
+  v_label := public.time_entidad_titulo(p_tipo, p_id);
+  if v_label is null then raise exception 'entidad_inexistente'; end if;
+  v_now := public.time_now();
+  perform public.time_barrido(uid);
+  select * into j from public.jornadas where user_id = uid and estado <> 'finalizada' for update;
+  if not found then
+    insert into public.jornadas (user_id, fecha, inicio, estado, ultima_actividad, ultimo_heartbeat, session_id, tarea_tipo, tarea_id, tarea_label)
+    values (uid, public.time_ba_date(v_now), v_now, 'trabajando', v_now, v_now, p_session, p_tipo, p_id, v_label)
+    returning id into v_jid;
+    insert into public.tramos (jornada_id, tipo, inicio, entity_type, entity_id, entity_label)
+    values (v_jid, 'trabajo', v_now, p_tipo, p_id, v_label);
+  elsif j.estado = 'trabajando' then
+    if j.tarea_tipo is distinct from p_tipo or j.tarea_id is distinct from p_id then
+      perform public.time_cerrar_tramo_abierto(j.id, v_now, 'cambio_tarea');
+      insert into public.tramos (jornada_id, tipo, inicio, entity_type, entity_id, entity_label)
+      values (j.id, 'trabajo', v_now, p_tipo, p_id, v_label);
+      update public.jornadas set tarea_tipo = p_tipo, tarea_id = p_id, tarea_label = v_label where id = j.id;
+    end if;
+    update public.jornadas set ultima_actividad = v_now, ultimo_heartbeat = v_now, session_id = p_session where id = j.id;
+  else
+    perform public.time_cerrar_tramo_abierto(j.id, v_now, 'manual');
+    insert into public.tramos (jornada_id, tipo, inicio, entity_type, entity_id, entity_label)
+    values (j.id, 'trabajo', v_now, p_tipo, p_id, v_label);
+    update public.jornadas set estado = 'trabajando', ultima_actividad = v_now, ultimo_heartbeat = v_now, session_id = p_session,
+           tarea_tipo = p_tipo, tarea_id = p_id, tarea_label = v_label where id = j.id;
+  end if;
+  return public.time_estado();
+end $$;
+
+create or replace function public.soltar_tarea(p_session text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); v_now timestamptz; j public.jornadas;
+begin
+  if uid is null then raise exception 'no_autenticado'; end if;
+  v_now := public.time_now();
+  perform public.time_barrido(uid);
+  select * into j from public.jornadas where user_id = uid and estado <> 'finalizada' for update;
+  if found and j.tarea_tipo is not null then
+    if j.estado = 'trabajando' then
+      perform public.time_cerrar_tramo_abierto(j.id, v_now, 'cambio_tarea');
+      insert into public.tramos (jornada_id, tipo, inicio) values (j.id, 'trabajo', v_now);
+      update public.jornadas set ultima_actividad = v_now, ultimo_heartbeat = v_now, session_id = p_session where id = j.id;
+    end if;
+    update public.jornadas set tarea_tipo = null, tarea_id = null, tarea_label = null where id = j.id;
+  end if;
+  return public.time_estado();
+end $$;
+
+create or replace function public.time_estado() returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  uid uuid := auth.uid();
+  v_now timestamptz;
+  cfg public.time_settings;
+  j public.jornadas;
+  v_hoy integer; v_count integer; v_ext integer := 0; v_tareas jsonb;
+begin
+  if uid is null then raise exception 'no_autenticado'; end if;
+  v_now := public.time_now();
+  perform public.time_barrido(uid);
+  select * into cfg from public.time_settings where id = 1;
+  select * into j from public.jornadas where user_id = uid and estado <> 'finalizada';
+  select coalesce(sum(public.time_jornada_segundos(x)), 0)::integer, count(*)::integer
+    into v_hoy, v_count
+    from public.jornadas x
+    where x.user_id = uid and (x.fecha = public.time_ba_date(v_now) or x.estado <> 'finalizada');
+  select coalesce(jsonb_agg(jsonb_build_object('tipo', g.entity_type, 'id', g.entity_id, 'label', g.label, 'segundos', g.segs) order by g.segs desc), '[]'::jsonb)
+    into v_tareas
+    from (
+      select t.entity_type, t.entity_id, max(t.entity_label) as label, sum(public.time_tramo_segundos(t, jj))::integer as segs
+      from public.tramos t join public.jornadas jj on jj.id = t.jornada_id
+      where jj.user_id = uid and t.tipo = 'trabajo' and t.entity_id is not null
+        and (jj.fecha = public.time_ba_date(v_now) or jj.estado <> 'finalizada')
+      group by t.entity_type, t.entity_id
+    ) g;
+  if j.id is not null and j.estado = 'trabajando' then
+    v_ext := greatest(0, extract(epoch from (j.ultima_actividad + make_interval(mins => cfg.inactivity_minutes) - v_now)))::integer;
+  end if;
+  return jsonb_build_object(
+    'server_now', v_now,
+    'settings', jsonb_build_object(
+      'inactivity_minutes', cfg.inactivity_minutes,
+      'modal_response_seconds', cfg.modal_response_seconds,
+      'heartbeat_seconds', cfg.heartbeat_seconds),
+    'jornada', case when j.id is null then null else jsonb_build_object(
+      'id', j.id, 'estado', j.estado, 'inicio', j.inicio, 'session_id', j.session_id,
+      'ultima_actividad', j.ultima_actividad,
+      'owner_vivo', j.ultimo_heartbeat > v_now - make_interval(secs => cfg.heartbeat_seconds * 3)) end,
+    'tarea', case when j.tarea_tipo is null then null else jsonb_build_object('tipo', j.tarea_tipo, 'id', j.tarea_id, 'label', j.tarea_label) end,
+    'tareas_hoy', v_tareas,
+    'hoy_segundos', v_hoy,
+    'jornadas_hoy', v_count,
+    'puede_extender_segundos', v_ext
+  );
+end $$;
+
+-- time_jornadas: los tramos informan también la tarea (mismo cuerpo que antes + entity_*).
+--  (ver la definición vigente en la base: agrega 'entity_type','entity_id','entity_label' al jsonb de tramos.)
+
+create or replace function public.time_por_tarea(p_desde date, p_hasta date, p_user uuid default null)
+returns table (tipo text, entidad_id text, label text, segundos integer, personas integer)
+language plpgsql security definer set search_path = public as $$
+#variable_conflict use_column
+declare uid uuid := auth.uid();
+begin
+  if uid is null then raise exception 'no_autenticado'; end if;
+  if p_desde is null or p_hasta is null or p_hasta < p_desde or p_hasta - p_desde > 400 then
+    raise exception 'rango_invalido';
+  end if;
+  if public.get_my_role() is distinct from 'admin' then p_user := uid; end if;
+  return query
+  select t.entity_type, t.entity_id, max(t.entity_label), sum(public.time_tramo_segundos(t, j))::integer, count(distinct j.user_id)::integer
+  from public.tramos t join public.jornadas j on j.id = t.jornada_id
+  where t.tipo = 'trabajo' and t.entity_id is not null
+    and j.fecha between p_desde and p_hasta and (p_user is null or j.user_id = p_user)
+  group by t.entity_type, t.entity_id
+  order by 4 desc;
+end $$;
+
+create or replace function public.time_entidad(p_tipo text, p_id text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); v_total integer; v_mio integer; v_personas integer; v_por jsonb := '[]'::jsonb;
+begin
+  if uid is null then raise exception 'no_autenticado'; end if;
+  select coalesce(sum(public.time_tramo_segundos(t, j)), 0)::integer,
+         coalesce(sum(public.time_tramo_segundos(t, j)) filter (where j.user_id = uid), 0)::integer,
+         count(distinct j.user_id)::integer
+    into v_total, v_mio, v_personas
+    from public.tramos t join public.jornadas j on j.id = t.jornada_id
+    where t.entity_type = p_tipo and t.entity_id = p_id and t.tipo = 'trabajo';
+  if public.get_my_role() = 'admin' then
+    select coalesce(jsonb_agg(jsonb_build_object('usuario_id', g.user_id, 'nombre', g.nombre, 'segundos', g.segs) order by g.segs desc), '[]'::jsonb)
+      into v_por
+      from (
+        select j.user_id,
+               coalesce(nullif(trim(coalesce(ur.first_name,'') || ' ' || coalesce(ur.last_name,'')), ''), ur.email, j.user_id::text) as nombre,
+               sum(public.time_tramo_segundos(t, j))::integer as segs
+        from public.tramos t join public.jornadas j on j.id = t.jornada_id
+        left join public.user_roles ur on ur.user_id = j.user_id
+        where t.entity_type = p_tipo and t.entity_id = p_id and t.tipo = 'trabajo'
+        group by j.user_id, ur.first_name, ur.last_name, ur.email
+      ) g;
+  end if;
+  return jsonb_build_object('total_segundos', v_total, 'mi_segundos', v_mio, 'personas', v_personas, 'por_persona', v_por);
+end $$;
+
+revoke all on function public.time_entidad_titulo(text, text), public.time_tramo_segundos(public.tramos, public.jornadas),
+  public.trabajar_en(text, text, text), public.soltar_tarea(text), public.time_por_tarea(date, date, uuid),
+  public.time_entidad(text, text), public.time_estado(), public.reanudar(text), public.time_jornadas(date, date, uuid),
+  public.time_finalizar(uuid, timestamptz, text, boolean)
+  from public, anon, authenticated;
+grant execute on function public.trabajar_en(text, text, text), public.soltar_tarea(text), public.time_por_tarea(date, date, uuid),
+  public.time_entidad(text, text), public.time_estado(), public.reanudar(text), public.time_jornadas(date, date, uuid)
+  to authenticated;

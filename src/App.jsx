@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useSyncExternalStore } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { ONBOARDING_STAGES, ONBOARDING_LEAD_SOURCES, ONBOARDING_PAYMENT_STATUS, calcularEstado, calcularAvance, diasEntre, ESTADO_BADGE } from "./onboardingLogic.js";
 import {
   formatClock, formatHM, formatHours, formatDiffHours, baDateISO, addDaysISO, weekRangeISO, monthRangeISO,
   baTimeToISO, formatTimeBA, formatDateBA, formatDateTimeBA, formatISODateShort, weekdayShort, estadoUI, liveSeconds,
-  shouldSendHeartbeat, isIdleExpired, toCSV, DIAS_SEMANA, timeErrorMessage,
+  shouldSendHeartbeat, isIdleExpired, toCSV, DIAS_SEMANA, timeErrorMessage, buildResumenDraft, ENTIDAD_LABEL,
 } from "./timeTracking.js";
 
 // ── Supabase ───────────────────────────────────────────────────────────────
@@ -2591,6 +2591,7 @@ function SubtasksList({ entityType, entityId, subtasks, currentUserId, onChange 
             <input type="checkbox" checked={st.done} onChange={() => toggle(st)} style={{ cursor: "pointer" }}/>
             <input key={st.id + st.title} defaultValue={st.title} onBlur={e => rename(st, e.target.value)} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
               style={{ flex: 1, border: "none", outline: "none", background: "transparent", fontSize: 13, fontFamily: "inherit", color: st.done ? "#aaa" : "#222", textDecoration: st.done ? "line-through" : "none", minWidth: 0 }}/>
+            <WorkOnButton entityType="subtask" entityId={st.id} compact/>
             <button onClick={() => remove(st)} title="Borrar subtarea" style={{ background: "none", border: "none", cursor: "pointer", color: "#ccc", fontSize: 15, lineHeight: 1, padding: 0 }}>×</button>
           </div>
         ))}
@@ -2895,6 +2896,11 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
                 <button onClick={()=>setDetail(null)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#ccc",lineHeight:1 }}>×</button>
               </div>
 
+              <div style={{ display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",background:"#F7F7F8",borderRadius:10,padding:"8px 12px" }}>
+                <WorkOnButton entityType="ticket" entityId={detail.id}/>
+                <TaskTimeInfo entityType="ticket" entityId={detail.id}/>
+              </div>
+
               {detail.message && <div style={{ fontSize:13,color:"#444",background:"#F7F7F8",borderRadius:10,padding:12 }}>{detail.message}</div>}
 
               <div style={{ display:"flex",gap:12 }}>
@@ -3155,6 +3161,11 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
                 onBlur={e=>updateDevTask(detail,{title:e.target.value.trim()||detail.title})}
                 style={{ fontSize:16,fontWeight:700,color:"#111",border:"none",outline:"none",width:"100%",padding:0,fontFamily:"inherit",background:"transparent" }}/>
               <button onClick={()=>setDetail(null)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#ccc",lineHeight:1 }}>×</button>
+            </div>
+
+            <div style={{ display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",background:"#F7F7F8",borderRadius:10,padding:"8px 12px" }}>
+              <WorkOnButton entityType="dev_task" entityId={detail.id}/>
+              <TaskTimeInfo entityType="dev_task" entityId={detail.id}/>
             </div>
 
             <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Descripción
@@ -3717,6 +3728,11 @@ function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks
               <button onClick={()=>setDetail(null)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#ccc",lineHeight:1 }}>×</button>
             </div>
 
+            <div style={{ display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",background:"#F7F7F8",borderRadius:10,padding:"8px 12px" }}>
+              <WorkOnButton entityType="task" entityId={detail.id}/>
+              <TaskTimeInfo entityType="task" entityId={detail.id}/>
+            </div>
+
             <div style={{ display:"flex",gap:12 }}>
               <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Inicio
                 <input type="date" className="spicy-input" value={detail.start_date} onChange={e=>{ const v=e.target.value; updateTask(detail, { start_date:v, end_date: detail.end_date<v?v:detail.end_date }); }} style={{ width:"100%",marginTop:4 }}/>
@@ -3973,6 +3989,18 @@ async function timeQuery(builder) {
 }
 const TIME_CHANGED_EVENT = "spicy-time-changed";
 
+// Estado de la jornada compartido entre la barra de arriba y los botones "Trabajar en esto".
+const timeStore = {
+  snap: { estado: null, receivedAt: 0 },
+  listeners: new Set(),
+  set(estado) { this.snap = { estado, receivedAt: Date.now() }; this.listeners.forEach(l => l()); },
+  subscribe(l) { this.listeners.add(l); return () => this.listeners.delete(l); },
+  get() { return this.snap; },
+};
+function useTimeSnapshot() {
+  return useSyncExternalStore(cb => timeStore.subscribe(cb), () => timeStore.get());
+}
+
 const TIME_STATE_STYLE = {
   sin_iniciar: { label: "Sin iniciar", color: "#9CA3AF" },
   trabajando:  { label: "Trabajando",  color: "#16A34A" },
@@ -3980,10 +4008,86 @@ const TIME_STATE_STYLE = {
   finalizada:  { label: "Finalizada",  color: "#6B7280" },
 };
 
+// Botón "Trabajar en esto" de un ticket / tarea / subtarea: etiqueta el tiempo de la jornada con esa tarea.
+// "Pausar" es la pausa del reloj general (un solo reloj); "Soltar" deja la jornada corriendo sin tarea.
+function WorkOnButton({ entityType, entityId, compact }) {
+  const { estado } = useTimeSnapshot();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const tarea = estado?.tarea;
+  const isCurrent = !!tarea && tarea.tipo === entityType && tarea.id === entityId;
+  const jEstado = estado?.jornada?.estado;
+
+  async function call(fn, args) {
+    setBusy(true); setError("");
+    try {
+      const data = await timeRpc(fn, { p_session: getTimeSessionId(), ...args });
+      timeStore.set(data);
+      window.dispatchEvent(new Event(TIME_CHANGED_EVENT));
+    } catch (e) { setError(timeErrorMessage(e)); }
+    setBusy(false);
+  }
+  const start = () => call("trabajar_en", { p_tipo: entityType, p_id: entityId });
+  const btn = compact ? { fontSize: 11, padding: "1px 7px" } : { fontSize: 12, padding: "5px 12px" };
+
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+      {!isCurrent && (
+        <button type="button" className="spicy-btn-secondary" style={btn} disabled={busy || !estado} onClick={start}
+          title="Registrar que empezás a trabajar en esto">{compact ? "▶" : "▶ Trabajar en esto"}</button>
+      )}
+      {isCurrent && jEstado === "trabajando" && (
+        <>
+          {!compact && <span style={{ fontSize: 12, color: "#166534", fontWeight: 600 }}>● Trabajando en esto</span>}
+          <button type="button" className="spicy-btn-secondary" style={btn} disabled={busy} onClick={() => call("pausar")} title="Pausar el reloj (la tarea queda asociada)">{compact ? "⏸" : "⏸ Pausar"}</button>
+          <button type="button" className="spicy-btn-secondary" style={btn} disabled={busy} onClick={() => call("soltar_tarea")} title="Dejar de trabajar en esto (la jornada sigue)">{compact ? "⏹" : "Soltar"}</button>
+        </>
+      )}
+      {isCurrent && jEstado === "pausa" && (
+        <>
+          {!compact && <span style={{ fontSize: 12, color: "#92400E", fontWeight: 600 }}>⏸ En pausa en esto</span>}
+          <button type="button" className="spicy-btn-primary" style={btn} disabled={busy} onClick={() => call("reanudar")}>{compact ? "▶" : "▶ Reanudar"}</button>
+          <button type="button" className="spicy-btn-secondary" style={btn} disabled={busy} onClick={() => call("soltar_tarea")} title="Dejar de trabajar en esto">{compact ? "⏹" : "Soltar"}</button>
+        </>
+      )}
+      {error && <span style={{ fontSize: 11, color: ST_RED }}>{error}</span>}
+    </span>
+  );
+}
+
+// Tiempo registrado en una tarea (total para todos; el desglose por persona, solo admins).
+function TaskTimeInfo({ entityType, entityId }) {
+  const { estado } = useTimeSnapshot();
+  const [info, setInfo] = useState(null);
+  const [, setTick] = useState(0);
+  const current = estado?.tarea && estado.tarea.tipo === entityType && estado.tarea.id === entityId;
+  const working = current && estado?.jornada?.estado === "trabajando";
+  const key = `${estado?.tarea?.tipo || ""}:${estado?.tarea?.id || ""}:${estado?.jornada?.estado || ""}`;
+
+  useEffect(() => {
+    let alive = true;
+    const load = () => timeRpc("time_entidad", { p_tipo: entityType, p_id: entityId }).then(d => { if (alive) setInfo({ ...d, fetchedAt: Date.now() }); }).catch(() => {});
+    load();
+    const poll = working ? setInterval(load, 60000) : null;
+    const tick = working ? setInterval(() => setTick(x => x + 1), 15000) : null;
+    return () => { alive = false; if (poll) clearInterval(poll); if (tick) clearInterval(tick); };
+  }, [entityType, entityId, key, working]);
+
+  const extra = working && info ? Math.floor((Date.now() - info.fetchedAt) / 1000) : 0;
+  if (!info || (info.total_segundos === 0 && extra < 60)) return <span style={{ fontSize: 12, color: "#bbb" }}>{working ? "⏱ Registrando tiempo..." : "Sin tiempo registrado todavía"}</span>;
+  const por = (info.por_persona || []).map(p => `${p.nombre}: ${formatHM(p.segundos)}`).join(" · ");
+  return (
+    <span style={{ fontSize: 12, color: "#666" }} title={por || undefined}>
+      ⏱ Tiempo registrado: <b>{formatHM(info.total_segundos + extra)}</b>
+      {info.mi_segundos + extra > 0 && info.mi_segundos !== info.total_segundos && <> · vos {formatHM(info.mi_segundos + extra)}</>}
+      {por && <span style={{ color: "#aaa" }}> ({por})</span>}
+    </span>
+  );
+}
+
 function TimeTrackerBar() {
   const [sessionId] = useState(getTimeSessionId);
-  const [estado, setEstado] = useState(null);
-  const [receivedAt, setReceivedAt] = useState(Date.now());
+  const { estado, receivedAt } = useTimeSnapshot();
   const [now, setNow] = useState(Date.now());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -4001,11 +4105,12 @@ function TimeTrackerBar() {
   const otherSessionActive = jornada?.estado === "trabajando" && jornada.session_id !== sessionId && jornada.owner_vivo;
   const st = TIME_STATE_STYLE[ui];
 
+  useEffect(() => { estadoRef.current = estado; }, [estado]);
+
   function applyEstado(p) {
     if (!p) return;
     estadoRef.current = p;
-    setEstado(p);
-    setReceivedAt(Date.now());
+    timeStore.set(p);
   }
   async function refresh() {
     try { applyEstado(await timeRpc("time_estado")); } catch { /* se reintenta en el próximo ciclo */ }
@@ -4125,6 +4230,13 @@ function TimeTrackerBar() {
           </span>
           <span title="Tiempo trabajado hoy" style={{ fontSize: 20, fontWeight: 700, color: "#111", fontVariantNumeric: "tabular-nums" }}>{formatClock(seconds)}</span>
           <span style={{ fontSize: 11, color: "#aaa" }}>trabajado hoy</span>
+          {estado?.tarea && (
+            <span title={estado.tarea.label} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: ui === "trabajando" ? "#166534" : "#92400E", background: ui === "trabajando" ? "#EDFAF3" : "#FEF3C7", borderRadius: 8, padding: "4px 6px 4px 10px", maxWidth: 360 }}>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ui === "trabajando" ? "Trabajando en:" : "En pausa en:"} <b>{estado.tarea.label}</b></span>
+              <button title="Soltar la tarea (la jornada sigue corriendo)" disabled={busy} onClick={() => act("soltar_tarea", { p_session: sessionId })}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", fontSize: 14, lineHeight: 1, padding: "0 2px", opacity: 0.7 }}>×</button>
+            </span>
+          )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {error && <span style={{ fontSize: 12, color: ST_RED }}>{error}</span>}
@@ -4147,7 +4259,7 @@ function TimeTrackerBar() {
           )}
           {(ui === "trabajando" || ui === "pausa") && (
             <button className="spicy-btn-secondary" disabled={busy} style={{ color: ST_RED, borderColor: ST_RED_BG }}
-              onClick={() => { setError(""); setEndText(""); setEndOpen(true); }}>
+              onClick={() => { setError(""); setEndText(buildResumenDraft(estado?.tareas_hoy)); setEndOpen(true); }}>
               Terminar jornada
             </button>
           )}
@@ -4191,6 +4303,7 @@ function MiTiempoView({ currentUserId }) {
   const semana = weekRangeISO(hoy);
   const mes = monthRangeISO(hoy);
   const [rep, setRep] = useState({ hoy: null, semana: null, mes: null });
+  const [tareasSemana, setTareasSemana] = useState([]);
   const [jornadas, setJornadas] = useState([]);
   const [solicitudes, setSolicitudes] = useState([]);
   const [contrato, setContrato] = useState(null);
@@ -4215,14 +4328,16 @@ function MiTiempoView({ currentUserId }) {
 
   async function load() {
     try {
-      const [h, s, m, js, sols, cons] = await Promise.all([
+      const [h, s, m, js, sols, cons, tareas] = await Promise.all([
         timeRpc("time_reporte", { p_desde: hoy, p_hasta: hoy, p_user: currentUserId }),
         timeRpc("time_reporte", { p_desde: semana.desde, p_hasta: semana.hasta, p_user: currentUserId }),
         timeRpc("time_reporte", { p_desde: mes.desde, p_hasta: mes.hasta, p_user: currentUserId }),
         timeRpc("time_jornadas", { p_desde: addDaysISO(hoy, -59), p_hasta: hoy, p_user: currentUserId }),
         timeQuery(sb.from("solicitudes_correccion").select("*").eq("user_id", currentUserId).order("created_at", { ascending: false }).limit(30)),
         timeQuery(sb.from("contratos_usuario").select("*").eq("user_id", currentUserId).lte("vigente_desde", hoy).order("vigente_desde", { ascending: false }).limit(1)),
+        timeRpc("time_por_tarea", { p_desde: semana.desde, p_hasta: semana.hasta, p_user: currentUserId }),
       ]);
+      setTareasSemana(tareas || []);
       setRep({ hoy: h?.[0] || null, semana: s?.[0] || null, mes: m?.[0] || null });
       setJornadas(js || []);
       setSolicitudes(sols);
@@ -4310,6 +4425,19 @@ function MiTiempoView({ currentUserId }) {
         {kpi("Este mes", rep.mes)}
       </div>
 
+      {tareasSemana.length > 0 && (
+        <div className="spicy-card">
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#111", marginBottom: 10 }}>En qué trabajé esta semana</div>
+          {tareasSemana.slice(0, 8).map(t => (
+            <div key={t.tipo + t.entidad_id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "5px 0", fontSize: 13 }}>
+              <span className="spicy-badge-gray">{ENTIDAD_LABEL[t.tipo]}</span>
+              <span style={{ flex: 1, color: "#333", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.label}</span>
+              <b style={{ color: "#111" }}>{formatHM(t.segundos)}</b>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="spicy-card">
         <div style={{ fontSize: 14, fontWeight: 600, color: "#111", marginBottom: 12 }}>Historial de jornadas (últimos 60 días)</div>
         {loading && <div style={{ fontSize: 13, color: "#aaa" }}>Cargando...</div>}
@@ -4335,7 +4463,8 @@ function MiTiempoView({ currentUserId }) {
                 {j.tramos.map(t => (
                   <div key={t.id} style={{ fontSize: 12, color: t.tipo === "trabajo" ? "#444" : "#D97706" }}>
                     {t.tipo === "trabajo" ? "Trabajo" : "Pausa"} · {formatTimeBA(t.inicio)} → {t.fin ? formatTimeBA(t.fin) : "ahora"}
-                    {t.origen_cierre && t.origen_cierre !== "manual" && <span style={{ color: "#aaa" }}> ({t.origen_cierre.replace("_", " ")})</span>}
+                    {t.entity_label && <b style={{ color: "#166534" }}> · {t.entity_label}</b>}
+                    {t.origen_cierre && !["manual", "cambio_tarea"].includes(t.origen_cierre) && <span style={{ color: "#aaa" }}> ({t.origen_cierre.replace("_", " ")})</span>}
                   </div>
                 ))}
               </div>
@@ -4428,6 +4557,7 @@ function ControlJornadaView({ allUsers }) {
   const [dias, setDias] = useState([]);
   const [diaForm, setDiaForm] = useState({ fecha: hoy, user_id: "", motivo: "" });
   const [auditoria, setAuditoria] = useState([]);
+  const [porTarea, setPorTarea] = useState([]);
   const [edit, setEdit] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -4464,6 +4594,10 @@ function ControlJornadaView({ allUsers }) {
     try { setDias(await timeQuery(sb.from("dias_no_laborables").select("*").order("fecha", { ascending: false }).limit(200))); }
     catch (e) { setError(timeErrorMessage(e)); }
   }
+  async function loadPorTarea() {
+    try { setPorTarea(await timeRpc("time_por_tarea", { p_desde: range.desde, p_hasta: range.hasta, p_user: null })); setError(""); }
+    catch (e) { setError(timeErrorMessage(e)); }
+  }
   async function loadAuditoria() {
     try { setAuditoria(await timeQuery(sb.from("auditoria_tiempo").select("*").order("fecha", { ascending: false }).limit(200))); }
     catch (e) { setError(timeErrorMessage(e)); }
@@ -4474,7 +4608,8 @@ function ControlJornadaView({ allUsers }) {
     if (tab === "solicitudes") loadSolicitudes();
     if (tab === "feriados") loadDias();
     if (tab === "auditoria") loadAuditoria();
-  }, [tab]);
+    if (tab === "tareas") loadPorTarea();
+  }, [tab, range.desde, range.hasta]);
 
   const pendientes = solicitudes.filter(s => s.estado === "pendiente");
 
@@ -4539,6 +4674,7 @@ function ControlJornadaView({ allUsers }) {
         <div style={{ display: "flex", border: "1px solid #E0E0E0", borderRadius: 8, overflow: "hidden" }}>
           {tabBtn("resumen", "Resumen", 0)}
           {tabBtn("solicitudes", "Solicitudes", pendientes.length)}
+          {tabBtn("tareas", "Tiempo por tarea", 0)}
           {tabBtn("feriados", "Feriados y licencias", 0)}
           {tabBtn("auditoria", "Auditoría", 0)}
         </div>
@@ -4611,7 +4747,8 @@ function ControlJornadaView({ allUsers }) {
                     {j.tramos.map(t => (
                       <div key={t.id} style={{ fontSize: 12, color: t.tipo === "trabajo" ? "#444" : "#D97706", display: "flex", gap: 8, alignItems: "center" }}>
                         <span>{t.tipo === "trabajo" ? "Trabajo" : "Pausa"} · {formatTimeBA(t.inicio)} → {t.fin ? formatTimeBA(t.fin) : "ahora"}</span>
-                        {t.origen_cierre && <span style={{ color: "#aaa" }}>({t.origen_cierre.replace("_", " ")})</span>}
+                        {t.entity_label && <b style={{ color: "#166534" }}>· {t.entity_label}</b>}
+                        {t.origen_cierre && t.origen_cierre !== "cambio_tarea" && <span style={{ color: "#aaa" }}>({t.origen_cierre.replace("_", " ")})</span>}
                         {j.estado === "finalizada" && t.fin && <button onClick={() => openEdit("tramo", t)} style={{ background: "none", border: "none", cursor: "pointer", color: "#bbb", fontSize: 12, padding: 0 }}>✎</button>}
                       </div>
                     ))}
@@ -4650,6 +4787,33 @@ function ControlJornadaView({ allUsers }) {
             );
           })}
         </div>
+      )}
+
+      {tab === "tareas" && (
+        <>
+          <div className="spicy-card" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <input type="date" className="spicy-input" style={{ width: 150 }} value={range.desde} max={range.hasta} onChange={e => e.target.value && setRange(r => ({ ...r, desde: e.target.value }))}/>
+            <span style={{ color: "#aaa" }}>→</span>
+            <input type="date" className="spicy-input" style={{ width: 150 }} value={range.hasta} min={range.desde} onChange={e => e.target.value && setRange(r => ({ ...r, hasta: e.target.value }))}/>
+            {presets.map(([label, rg]) => <button key={label} className="spicy-btn-secondary" style={{ fontSize: 12, padding: "6px 12px" }} onClick={() => setRange(rg)}>{label}</button>)}
+          </div>
+          <div className="spicy-card" style={{ padding: 0, overflowX: "auto" }}>
+            <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 560 }}>
+              <thead><tr><th style={th}>Tarea</th><th style={th}>Tipo</th><th style={th}>Tiempo</th><th style={th}>Personas</th></tr></thead>
+              <tbody>
+                {porTarea.map(t => (
+                  <tr key={t.tipo + t.entidad_id}>
+                    <td style={td}>{t.label}</td>
+                    <td style={td}><span className="spicy-badge-gray">{ENTIDAD_LABEL[t.tipo]}</span></td>
+                    <td style={{ ...td, fontWeight: 600 }}>{formatHM(t.segundos)}</td>
+                    <td style={td}>{t.personas}</td>
+                  </tr>
+                ))}
+                {porTarea.length === 0 && <tr><td colSpan={4} style={{ ...td, textAlign: "center", color: "#ccc" }}>Nadie registró tiempo en tareas en este rango.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       {tab === "feriados" && (

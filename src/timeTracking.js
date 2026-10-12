@@ -153,3 +153,12 @@ export function timeErrorMessage(error) {
   const code = Object.keys(ERROR_MESSAGES).find((k) => raw.includes(k));
   return code ? ERROR_MESSAGES[code] : (raw || "Ocurrió un error.");
 }
+
+// Borrador del resumen del día a partir de las tareas en las que se trabajó (editable por la persona).
+export function buildResumenDraft(tareas) {
+  if (!tareas || tareas.length === 0) return "";
+  const lines = tareas.map((x) => `- ${x.label} (${formatHM(x.segundos)})`);
+  return `Trabajé en:\n${lines.join("\n")}\n\n`;
+}
+
+export const ENTIDAD_LABEL = { ticket: "Ticket", dev_task: "Tarea de dev", task: "Tarea", subtask: "Subtarea" };

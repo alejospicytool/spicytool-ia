@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   formatClock, formatHM, formatHours, formatDiffHours, baDateISO, addDaysISO, weekRangeISO, monthRangeISO,
   baTimeToISO, formatTimeBA, estadoUI, liveSeconds, shouldSendHeartbeat, isIdleExpired, toCSV, csvEscape,
-  weekdayShort, timeErrorMessage,
+  weekdayShort, timeErrorMessage, buildResumenDraft, ENTIDAD_LABEL,
 } from "./timeTracking.js";
 
 describe("formato de duraciones", () => {
@@ -124,5 +124,19 @@ describe("errores del resumen del día", () => {
   it("traduce los códigos nuevos", () => {
     expect(timeErrorMessage({ message: "resumen_requerido" })).toContain("resumen del día");
     expect(timeErrorMessage({ message: "resumen_ya_cargado" })).toContain("ya tiene");
+  });
+});
+
+describe("borrador del resumen del día", () => {
+  it("lista las tareas con su tiempo", () => {
+    const d = buildResumenDraft([{ label: "Error en WFs", segundos: 4800 }, { label: "Revisar logs · Error en WFs", segundos: 900 }]);
+    expect(d).toBe("Trabajé en:\n- Error en WFs (1h 20m)\n- Revisar logs · Error en WFs (15m)\n\n");
+  });
+  it("sin tareas no pre-carga nada", () => {
+    expect(buildResumenDraft([])).toBe("");
+    expect(buildResumenDraft(null)).toBe("");
+  });
+  it("tiene rótulo para cada tipo de entidad", () => {
+    expect(Object.keys(ENTIDAD_LABEL).sort()).toEqual(["dev_task", "subtask", "task", "ticket"]);
   });
 });
