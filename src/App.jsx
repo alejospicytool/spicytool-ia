@@ -2783,7 +2783,8 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
   const [filterCategory, setFilterCategory] = useState("");
   const [form, setForm] = useState({ title:"", client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigneeIds:[], files:[] });
   const [saving, setSaving] = useState(false);
-  const [statusError, setStatusError] = useState("");
+  const [statusError, setStatusError] = useState(null); // { id, msg }: el aviso es del ticket abierto
+  const [pendingMove, setPendingMove] = useState(null); // { id, status }: movimiento frenado por falta de Fibonacci
 
   const catInfo = (key) => TICKET_CATEGORIES.find(c=>c.key===key);
   useEntityUrlSync("ticket", detail?.id);
@@ -2840,10 +2841,15 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
   async function moveStatus(ticket, newStatus) {
     if (newStatus === ticket.status) return;
     if (TICKET_STATUSES_EN_CURSO.includes(newStatus) && !ticket.fibonacci_score) {
-      setStatusError("Este ticket necesita un puntaje Fibonacci antes de pasar a \""+newStatus+"\".");
+      // Se abre el detalle (si el cambio vino de arrastrar) para que se vea el aviso y se pueda estimar;
+      // al elegir el puntaje el ticket pasa solo a la columna pedida.
+      setStatusError({ id: ticket.id, msg: `Antes de pasar a "${newStatus}" elegí el puntaje Fibonacci (esfuerzo): al elegirlo el ticket se mueve solo.` });
+      setPendingMove({ id: ticket.id, status: newStatus });
+      setDetail(ticket);
       return;
     }
-    setStatusError("");
+    setStatusError(null);
+    setPendingMove(null);
     await updateTicket(ticket, { status: newStatus });
     await sb.from("ticket_status_history").insert({ id:"tsh_"+Date.now()+"_"+Math.random().toString(36).slice(2,6), ticket_id:ticket.id, status:newStatus, changed_by:currentUserEmail });
     onRefresh();
@@ -3047,7 +3053,7 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
                   {TICKET_STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
                 </select>
               </label>
-              {statusError && <div style={{ fontSize:12,color:ST_RED,background:"#FEF0F0",borderRadius:8,padding:"6px 10px" }}>{statusError}</div>}
+              {statusError && statusError.id===detail.id && <div style={{ fontSize:12,color:ST_RED,background:"#FEF0F0",borderRadius:8,padding:"6px 10px" }}>{statusError.msg}</div>}
 
               <div>
                 <div style={{ fontSize:12,color:"#666",fontWeight:500,marginBottom:6 }}>Asignados</div>
@@ -3057,7 +3063,11 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
               <div>
                 <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Puntaje Fibonacci (esfuerzo)
                   <select value={detail.fibonacci_score||""}
-                    onChange={e=>updateTicket(detail,{fibonacci_score:e.target.value?Number(e.target.value):null})}
+                    onChange={async e=>{
+                      const v = e.target.value ? Number(e.target.value) : null;
+                      await updateTicket(detail,{fibonacci_score:v});
+                      if (v && pendingMove && pendingMove.id===detail.id) { const target = pendingMove.status; setPendingMove(null); await moveStatus({ ...detail, fibonacci_score:v }, target); }
+                    }}
                     className="spicy-select" style={{ width:"100%",marginTop:4 }}>
                     <option value="">Sin estimar</option>
                     {FIBONACCI_SCALE.map(f=><option key={f.value} value={f.value}>{f.value} — {f.label}</option>)}
@@ -3122,7 +3132,8 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
   const [dragOverStage, setDragOverStage] = useState(null);
   const [form, setForm] = useState({ title:"", description:"", assigneeIds:[] });
   const [saving, setSaving] = useState(false);
-  const [stageError, setStageError] = useState("");
+  const [stageError, setStageError] = useState(null); // { id, msg }
+  const [pendingStage, setPendingStage] = useState(null); // { id, stage }
   const [filterAssignee, setFilterAssignee] = useState("");
   const [filterUnestimated, setFilterUnestimated] = useState(false);
 
@@ -3172,10 +3183,13 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
   async function moveStage(task, newStage) {
     if (newStage === task.stage) return;
     if (newStage === DEV_TASK_STAGE_EN_CURSO && !task.fibonacci_score) {
-      setStageError("Esta tarea necesita un puntaje Fibonacci antes de pasar a \"In Progress\".");
+      setStageError({ id: task.id, msg: 'Antes de pasar a "In Progress" elegí el puntaje Fibonacci (esfuerzo): al elegirlo la tarea se mueve sola.' });
+      setPendingStage({ id: task.id, stage: newStage });
+      setDetail(task);
       return;
     }
-    setStageError("");
+    setStageError(null);
+    setPendingStage(null);
     await updateDevTask(task, { stage: newStage });
     await sb.from("dev_task_status_history").insert({ id:"dth_"+Date.now()+"_"+Math.random().toString(36).slice(2,6), dev_task_id:task.id, stage:newStage, changed_by:currentUserEmail });
     onRefresh();
@@ -3305,7 +3319,7 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
                 {DEV_TASK_STAGES.map(s=><option key={s} value={s}>{s}</option>)}
               </select>
             </label>
-            {stageError && <div style={{ fontSize:12,color:ST_RED,background:"#FEF0F0",borderRadius:8,padding:"6px 10px" }}>{stageError}</div>}
+            {stageError && stageError.id===detail.id && <div style={{ fontSize:12,color:ST_RED,background:"#FEF0F0",borderRadius:8,padding:"6px 10px" }}>{stageError.msg}</div>}
 
             <div>
               <div style={{ fontSize:12,color:"#666",fontWeight:500,marginBottom:6 }}>Asignados</div>
@@ -3324,7 +3338,11 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
             <div>
               <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Puntaje Fibonacci (esfuerzo)
                 <select value={detail.fibonacci_score||""}
-                  onChange={e=>updateDevTask(detail,{fibonacci_score:e.target.value?Number(e.target.value):null})}
+                  onChange={async e=>{
+                    const v = e.target.value ? Number(e.target.value) : null;
+                    await updateDevTask(detail,{fibonacci_score:v});
+                    if (v && pendingStage && pendingStage.id===detail.id) { const target = pendingStage.stage; setPendingStage(null); await moveStage({ ...detail, fibonacci_score:v }, target); }
+                  }}
                   className="spicy-select" style={{ width:"100%",marginTop:4 }}>
                   <option value="">Sin estimar</option>
                   {FIBONACCI_SCALE.map(f=><option key={f.value} value={f.value}>{f.value} — {f.label}</option>)}
