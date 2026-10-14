@@ -8,7 +8,11 @@
 -- Este archivo queda solo como referencia — reemplazar MAKE_WEBHOOK_URL por
 -- el valor real antes de reaplicar (no se deja el valor real en git).
 --
--- El body que recibe Make es el ticket completo (to_jsonb(new)): id,
+-- Actualización 2026-10-14: el body ahora incluye también `url` (link directo al ticket,
+-- https://backoffice.wearespicy.net/?ticket=<id>) para usarlo en el mensaje de Discord.
+-- Se aplicó reescribiendo la función vigente (migración notify_make_include_ticket_url).
+--
+-- El body que recibe Make es el ticket completo (to_jsonb(new)) + url: id,
 -- client_id, client_name, category, priority, status, channel, message,
 -- assigned_to, resolution_note, fibonacci_score, created_at,
 -- first_response_at, resolved_at. Hay que actualizar el mapeo de campos en
@@ -25,7 +29,7 @@ begin
     perform net.http_post(
       url := 'MAKE_WEBHOOK_URL',
       headers := '{"Content-Type": "application/json"}'::jsonb,
-      body := to_jsonb(new)
+      body := to_jsonb(new) || jsonb_build_object('url', 'https://backoffice.wearespicy.net/?ticket=' || new.id)
     );
   end if;
   return new;

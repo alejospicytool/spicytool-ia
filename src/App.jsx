@@ -6,6 +6,7 @@ import {
   baTimeToISO, formatTimeBA, formatDateBA, formatDateTimeBA, formatISODateShort, weekdayShort, estadoUI, liveSeconds,
   shouldSendHeartbeat, isIdleExpired, toCSV, DIAS_SEMANA, timeErrorMessage, buildResumenDraft, ENTIDAD_LABEL,
 } from "./timeTracking.js";
+import { entitySearch, buildEntityLink, parseEntityLink, clearedSearch, LINK_TARGETS } from "./deepLinks.js";
 
 // ── Supabase ───────────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://khuavhbraikzreyhptog.supabase.co";
@@ -112,6 +113,9 @@ function BrandStyles() {
       .spicy-badge-green { background: #EDFAF3; color: #16A34A; font-size: 10px; padding: 2px 7px; border-radius: 5px; font-weight: 600; }
       .spicy-badge-gray { background: #F4F4F5; color: #666; font-size: 10px; padding: 2px 7px; border-radius: 5px; font-weight: 500; }
       .spicy-badge-amber { background: #FEF3C7; color: #D97706; font-size: 10px; padding: 2px 7px; border-radius: 5px; font-weight: 600; }
+      .spicy-inline-edit { border: 1px solid transparent !important; border-radius: 6px; padding: 3px 7px !important; margin-left: -8px; width: calc(100% + 8px) !important; cursor: text; transition: all 0.15s; }
+      .spicy-inline-edit:hover { border-color: #E0E0E0 !important; background: #FAFAFA !important; }
+      .spicy-inline-edit:focus { border-color: ${ST_RED} !important; background: white !important; outline: none; }
       input, select, textarea { font-family: 'DM Sans', sans-serif !important; }
     `;
     document.head.appendChild(style);
@@ -2617,6 +2621,96 @@ function AttachmentThumb({ path, name }) {
   return <img src={url} alt={name} style={{ width:56,height:56,borderRadius:8,objectFit:"cover" }}/>;
 }
 
+function validateAttachment(file) {
+  if (file.size > ATTACHMENT_MAX_BYTES) return "El archivo supera el límite de 20MB.";
+  if (!ATTACHMENT_MIME_TYPES.includes(file.type)) return "Tipo de archivo no permitido. Se aceptan imágenes, PDF, video, Word, Excel, PowerPoint, CSV y TXT.";
+  return "";
+}
+
+// Sube un archivo al bucket privado y registra su metadata. Devuelve "" si salió bien o el mensaje de error.
+// El nombre se sanea para la ruta del storage (sin tildes ni caracteres raros); el original queda en file_name.
+async function uploadAttachment(entityType, entityId, file, uploadedBy) {
+  const safeName = file.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Za-z0-9._-]+/g, "_");
+  const path = `${entityType}/${entityId}/${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${safeName}`;
+  const { error: upErr } = await sb.storage.from("attachments").upload(path, file, { contentType: file.type });
+  if (upErr) return upErr.message;
+  const { error: dbErr } = await sb.from("attachments").insert({ id: "att_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6), entity_type: entityType, entity_id: entityId, file_name: file.name, storage_path: path, content_type: file.type, size_bytes: file.size, uploaded_by: uploadedBy });
+  if (dbErr) { await sb.storage.from("attachments").remove([path]); return dbErr.message; }
+  return "";
+}
+
+const ATTACHMENTS_MAX_AT_CREATE = 10;
+
+// Elegir archivos ANTES de que exista el ticket (se suben al crearlo).
+function AttachmentsPickerLocal({ files, onChange }) {
+  const [error, setError] = useState("");
+  function add(e) {
+    const picked = [...(e.target.files || [])];
+    e.target.value = "";
+    setError("");
+    const ok = [];
+    for (const f of picked) {
+      const err = validateAttachment(f);
+      if (err) { setError(`${f.name}: ${err}`); continue; }
+      ok.push(f);
+    }
+    if (files.length + ok.length > ATTACHMENTS_MAX_AT_CREATE) setError(`Máximo ${ATTACHMENTS_MAX_AT_CREATE} archivos al crear.`);
+    onChange([...files, ...ok].slice(0, ATTACHMENTS_MAX_AT_CREATE));
+  }
+  const size = (b) => b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`;
+  return (
+    <div>
+      {files.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
+          {files.map((f, i) => (
+            <div key={f.name + i} style={{ display: "flex", alignItems: "center", gap: 8, background: "#F7F7F8", borderRadius: 8, padding: "5px 10px", fontSize: 12 }}>
+              <span>{f.type.startsWith("image/") ? "🖼️" : "📄"}</span>
+              <span title={f.name} style={{ flex: 1, color: "#333", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+              <span style={{ color: "#aaa" }}>{size(f.size)}</span>
+              <button type="button" onClick={() => onChange(files.filter((_, j) => j !== i))} title="Quitar" style={{ background: "none", border: "none", cursor: "pointer", color: "#ccc", fontSize: 15, lineHeight: 1, padding: 0 }}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <label className="spicy-btn-secondary" style={{ display: "inline-block", cursor: "pointer", fontSize: 12 }}>
+        + Adjuntar archivos
+        <input type="file" multiple onChange={add} style={{ display: "none" }}/>
+      </label>
+      {error && <div style={{ fontSize: 11, color: ST_RED, marginTop: 4 }}>{error}</div>}
+    </div>
+  );
+}
+
+// Mantiene la URL del navegador apuntando al ticket/tarea abierto (para copiarla y compartirla).
+function useEntityUrlSync(type, id) {
+  useEffect(() => {
+    const target = entitySearch(type, id);
+    if (id) {
+      if (window.location.search !== target) window.history.replaceState(null, "", window.location.pathname + target);
+    } else {
+      const cur = parseEntityLink(window.location.search);
+      if (cur && cur.type === type) window.history.replaceState(null, "", window.location.pathname + clearedSearch(window.location.search));
+    }
+  }, [type, id]);
+}
+
+function CopyLinkButton({ type, id }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    const url = buildEntityLink(window.location.origin, type, id);
+    try { await navigator.clipboard.writeText(url); }
+    catch { window.prompt("Copiá este link:", url); return; }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+  return (
+    <button type="button" onClick={copy} title="Copiar el link directo a este elemento"
+      style={{ background: "none", border: "none", cursor: "pointer", color: copied ? "#16A34A" : "#aaa", fontSize: 12, padding: "0 6px", whiteSpace: "nowrap", fontWeight: copied ? 600 : 400 }}>
+      {copied ? "✓ Link copiado" : "🔗 Copiar link"}
+    </button>
+  );
+}
+
 function AttachmentsList({ entityType, entityId, attachments, currentUserEmail, onChange }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
@@ -2627,14 +2721,12 @@ function AttachmentsList({ entityType, entityId, attachments, currentUserEmail, 
     e.target.value = "";
     if (!file) return;
     setError("");
-    if (file.size > ATTACHMENT_MAX_BYTES) { setError("El archivo supera el límite de 20MB."); return; }
-    if (!ATTACHMENT_MIME_TYPES.includes(file.type)) { setError("Tipo de archivo no permitido. Se aceptan imágenes, PDF, video, Word, Excel, PowerPoint, CSV y TXT."); return; }
+    const invalid = validateAttachment(file);
+    if (invalid) { setError(invalid); return; }
     setUploading(true);
-    const path = `${entityType}/${entityId}/${Date.now()}-${file.name}`;
-    const { error: upErr } = await sb.storage.from("attachments").upload(path, file, { contentType:file.type });
-    if (upErr) { setError(upErr.message); setUploading(false); return; }
-    await sb.from("attachments").insert({ id:"att_"+Date.now(), entity_type:entityType, entity_id:entityId, file_name:file.name, storage_path:path, content_type:file.type, size_bytes:file.size, uploaded_by:currentUserEmail });
+    const err = await uploadAttachment(entityType, entityId, file, currentUserEmail);
     setUploading(false);
+    if (err) { setError(err); return; }
     onChange();
   }
 
@@ -2684,16 +2776,24 @@ function HistoryList({ entries, labelKey }) {
   );
 }
 
-function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, currentUserId, assignees, comments, attachments, subtasks, devTasks, setView, onRefresh }) {
+function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, currentUserId, assignees, comments, attachments, subtasks, devTasks, setView, onRefresh, openId, onOpenHandled }) {
   const [showNew, setShowNew] = useState(false);
   const [detail,  setDetail]  = useState(null);
   const [dragOverStatus, setDragOverStatus] = useState(null);
   const [filterCategory, setFilterCategory] = useState("");
-  const [form, setForm] = useState({ title:"", client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigneeIds:[] });
+  const [form, setForm] = useState({ title:"", client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigneeIds:[], files:[] });
   const [saving, setSaving] = useState(false);
   const [statusError, setStatusError] = useState("");
 
   const catInfo = (key) => TICKET_CATEGORIES.find(c=>c.key===key);
+  useEntityUrlSync("ticket", detail?.id);
+  useEffect(() => {
+    if (!openId) return;
+    const found = tickets.find(x => x.id === openId);
+    if (found) setDetail(found);
+    onOpenHandled();
+  }, [openId]);
+
   const visibleTickets = filterCategory ? tickets.filter(t=>t.category===filterCategory) : tickets;
   const assigneesFor = (ticketId) => assignees.filter(a=>a.entity_type==="ticket" && a.entity_id===ticketId).map(a=>allUsers.find(u=>u.user_id===a.user_id)).filter(Boolean);
   const commentsCount = (ticketId) => comments.filter(c=>c.entity_type==="ticket" && c.entity_id===ticketId).length;
@@ -2719,10 +2819,16 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
     if (form.assigneeIds.length) {
       await sb.from("entity_assignees").insert(form.assigneeIds.map(userId=>({ id:"ea_"+Date.now()+"_"+Math.random().toString(36).slice(2,6), entity_type:"ticket", entity_id:id, user_id:userId })));
     }
+    const failed = [];
+    for (const f of form.files) {
+      const err = await uploadAttachment("ticket", id, f, currentUserEmail);
+      if (err) failed.push(`${f.name} (${err})`);
+    }
     setSaving(false);
-    setForm({ title:"", client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigneeIds:[] });
+    setForm({ title:"", client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigneeIds:[], files:[] });
     setShowNew(false);
     onRefresh();
+    if (failed.length) alert("El ticket se creó, pero no se pudieron subir estos archivos:\n- " + failed.join("\n- ") + "\nPodés adjuntarlos de nuevo desde el detalle del ticket.");
   }
 
   async function updateTicket(ticket, patch) {
@@ -2873,9 +2979,14 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
               <AssigneesPickerLocal selectedIds={form.assigneeIds} allUsers={allUsers} onChange={ids=>setForm(f=>({...f,assigneeIds:ids}))}/>
             </div>
 
+            <div>
+              <div style={{ fontSize:12,color:"#666",fontWeight:500,marginBottom:4 }}>Adjuntos</div>
+              <AttachmentsPickerLocal files={form.files} onChange={files=>setForm(f=>({...f,files}))}/>
+            </div>
+
             <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginTop:4 }}>
-              <button type="button" className="spicy-btn-secondary" onClick={()=>setShowNew(false)}>Cancelar</button>
-              <button type="submit" className="spicy-btn-primary" disabled={saving||!form.title.trim()||!form.category}>Crear ticket</button>
+              <button type="button" className="spicy-btn-secondary" disabled={saving} onClick={()=>setShowNew(false)}>Cancelar</button>
+              <button type="submit" className="spicy-btn-primary" disabled={saving||!form.title.trim()||!form.category}>{saving ? (form.files.length ? "Creando y subiendo..." : "Creando...") : "Crear ticket"}</button>
             </div>
           </form>
         </div>
@@ -2888,10 +2999,10 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
             <div onClick={e=>e.stopPropagation()} style={{ background:"white",borderRadius:16,width:"100%",maxWidth:520,maxHeight:"85vh",overflowY:"auto",padding:24,display:"flex",flexDirection:"column",gap:12 }}>
               <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
                 <div style={{ flex:1 }}>
-                  <input key={detail.id} defaultValue={detail.title}
+                  <input key={detail.id} defaultValue={detail.title} className="spicy-inline-edit" title="Click para editar el título"
                     onBlur={e=>updateTicket(detail,{title:e.target.value.trim()||detail.title})}
                     style={{ fontSize:16,fontWeight:700,color:"#111",border:"none",outline:"none",width:"100%",padding:0,fontFamily:"inherit",background:"transparent" }}/>
-                  <div style={{ fontSize:12,color:"#aaa",marginTop:3 }}>creado {new Date(detail.created_at).toLocaleDateString("es-UY")}</div>
+                  <div style={{ fontSize:12,color:"#aaa",marginTop:3,display:"flex",alignItems:"center",flexWrap:"wrap" }}>creado {new Date(detail.created_at).toLocaleDateString("es-UY")} <span style={{ margin:"0 4px" }}>·</span> <CopyLinkButton type="ticket" id={detail.id}/></div>
                 </div>
                 <button onClick={()=>setDetail(null)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#ccc",lineHeight:1 }}>×</button>
               </div>
@@ -2901,7 +3012,10 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
                 <TaskTimeInfo entityType="ticket" entityId={detail.id}/>
               </div>
 
-              {detail.message && <div style={{ fontSize:13,color:"#444",background:"#F7F7F8",borderRadius:10,padding:12 }}>{detail.message}</div>}
+              <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Mensaje original / descripción
+                <textarea key={detail.id} className="spicy-input" rows={3} defaultValue={detail.message||""} placeholder="Sin mensaje"
+                  onBlur={e=>updateTicket(detail,{message:e.target.value.trim()||null})} style={{ width:"100%",marginTop:4,resize:"vertical" }}/>
+              </label>
 
               <div style={{ display:"flex",gap:12 }}>
                 <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Categoría
@@ -2919,6 +3033,11 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
                 <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Prioridad
                   <select value={detail.priority} onChange={e=>updateTicket(detail,{priority:e.target.value})} className="spicy-select" style={{ width:"100%",marginTop:4 }}>
                     {TICKET_PRIORITIES.map(p=><option key={p} value={p}>{p}</option>)}
+                  </select>
+                </label>
+                <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Canal
+                  <select value={detail.channel} onChange={e=>updateTicket(detail,{channel:e.target.value})} className="spicy-select" style={{ width:"100%",marginTop:4 }}>
+                    {TICKET_CHANNELS.map(ch=><option key={ch} value={ch}>{ch}</option>)}
                   </select>
                 </label>
               </div>
@@ -2997,7 +3116,7 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
 }
 
 // ── Dev Tasks View (Kanban, tareas de desarrollo de producto) ──────────────
-function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, currentUserId, assignees, comments, attachments, subtasks, tickets, onRefresh }) {
+function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, currentUserId, assignees, comments, attachments, subtasks, tickets, onRefresh, openId, onOpenHandled }) {
   const [showNew, setShowNew] = useState(false);
   const [detail,  setDetail]  = useState(null);
   const [dragOverStage, setDragOverStage] = useState(null);
@@ -3008,6 +3127,14 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
   const [filterUnestimated, setFilterUnestimated] = useState(false);
 
   const assigneesFor = (taskId) => assignees.filter(a=>a.entity_type==="dev_task" && a.entity_id===taskId).map(a=>allUsers.find(u=>u.user_id===a.user_id)).filter(Boolean);
+  useEntityUrlSync("dev_task", detail?.id);
+  useEffect(() => {
+    if (!openId) return;
+    const found = devTasks.find(x => x.id === openId);
+    if (found) setDetail(found);
+    onOpenHandled();
+  }, [openId]);
+
   const commentsCount = (taskId) => comments.filter(c=>c.entity_type==="dev_task" && c.entity_id===taskId).length;
   const attachmentsCount = (taskId) => attachments.filter(a=>a.entity_type==="dev_task" && a.entity_id===taskId).length;
 
@@ -3157,9 +3284,10 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
         <div onClick={()=>setDetail(null)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}>
           <div onClick={e=>e.stopPropagation()} style={{ background:"white",borderRadius:16,width:"100%",maxWidth:520,maxHeight:"85vh",overflowY:"auto",padding:24,display:"flex",flexDirection:"column",gap:12 }}>
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
-              <input key={detail.id} defaultValue={detail.title}
+              <input key={detail.id} defaultValue={detail.title} className="spicy-inline-edit" title="Click para editar el título"
                 onBlur={e=>updateDevTask(detail,{title:e.target.value.trim()||detail.title})}
                 style={{ fontSize:16,fontWeight:700,color:"#111",border:"none",outline:"none",width:"100%",padding:0,fontFamily:"inherit",background:"transparent" }}/>
+              <CopyLinkButton type="dev_task" id={detail.id}/>
               <button onClick={()=>setDetail(null)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#ccc",lineHeight:1 }}>×</button>
             </div>
 
@@ -3454,7 +3582,7 @@ function DevsMetricsView({ tickets, ticketHistory, devTasks, devTaskHistory, ass
 }
 
 // ── Tasks View (Kanban + Calendario) ────────────────────────────────────────
-function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks, currentUserEmail, currentUserId, onRefresh }) {
+function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks, currentUserEmail, currentUserId, onRefresh, openId, onOpenHandled }) {
   const todayISO = new Date().toISOString().split("T")[0];
   const emptyForm = () => ({ title:"", start_date:todayISO, end_date:todayISO, assigneeIds:[], priority:"Media", description:"" });
 
@@ -3474,6 +3602,14 @@ function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks
   const prioClass = (p) => p==="Alta" ? "spicy-badge-red" : p==="Media" ? "spicy-badge-amber" : "spicy-badge-gray";
   const PRIO_COLOR = { Alta: ST_RED, Media: "#D97706", Baja: "#9CA3AF" };
   const assigneesFor = (taskId) => assignees.filter(a=>a.entity_type==="task" && a.entity_id===taskId).map(a=>allUsers.find(u=>u.user_id===a.user_id)).filter(Boolean);
+  useEntityUrlSync("task", detail?.id);
+  useEffect(() => {
+    if (!openId) return;
+    const found = tasks.find(x => x.id === openId);
+    if (found) setDetail(found);
+    onOpenHandled();
+  }, [openId]);
+
   const commentsCount = (taskId) => comments.filter(c=>c.entity_type==="task" && c.entity_id===taskId).length;
   const attachmentsCount = (taskId) => attachments.filter(a=>a.entity_type==="task" && a.entity_id===taskId).length;
   const fmtRange = (t) => {
@@ -3722,9 +3858,10 @@ function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks
         <div onClick={()=>setDetail(null)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}>
           <div onClick={e=>e.stopPropagation()} style={{ background:"white",borderRadius:16,width:"100%",maxWidth:520,maxHeight:"85vh",overflowY:"auto",padding:24,display:"flex",flexDirection:"column",gap:12 }}>
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
-              <input key={detail.id} defaultValue={detail.title}
+              <input key={detail.id} defaultValue={detail.title} className="spicy-inline-edit" title="Click para editar el título"
                 onBlur={e=>updateTask(detail,{title:e.target.value.trim()||detail.title})}
                 style={{ fontSize:16,fontWeight:700,color:"#111",border:"none",outline:"none",flex:1,padding:0,fontFamily:"inherit",background:"transparent" }}/>
+              <CopyLinkButton type="task" id={detail.id}/>
               <button onClick={()=>setDetail(null)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#ccc",lineHeight:1 }}>×</button>
             </div>
 
@@ -5344,6 +5481,7 @@ export default function SpicyFinanzas() {
   const [dataLoaded, setDataLoaded]   = useState(false);
 
   const [view,      setView]      = useState("inicio");
+  const [pendingLink, setPendingLink] = useState(() => parseEntityLink(window.location.search));
   const [filterType,setFilterType]= useState("all");
   const [filterAcc, setFilterAcc] = useState("all");
   const [syncing,   setSyncing]   = useState(false);
@@ -5435,6 +5573,14 @@ export default function SpicyFinanzas() {
       .flatMap(s => s.views.filter(v => !ADMIN_ONLY_VIEWS.includes(v) || isAdmin))[0];
     setView(fallback || "dashboard");
   },[session, dataLoaded, isAdmin, view, allowedSections]);
+
+  // ── Link directo (?ticket=…): abre la vista y el detalle si la persona tiene acceso a esa sección ──
+  useEffect(()=>{
+    if (!dataLoaded || !pendingLink) return;
+    const target = LINK_TARGETS[pendingLink.type];
+    if (!target || !canSeeSection(target.section)) { setPendingLink(null); return; }
+    setView(target.view);
+  },[dataLoaded, pendingLink]);
 
   async function handleAdd(e) {
     e.preventDefault();
@@ -5786,11 +5932,11 @@ export default function SpicyFinanzas() {
       {view==="pnl"&&<PnLView txns={txns}/>}
       {view==="inicio"&&<InicioView myOpenTickets={myOpenTickets} myOpenDevTasks={myOpenDevTasks} myOpenTasks={myOpenTasks} ticketHistory={ticketStatusHistory} devTaskHistory={devTaskStatusHistory} comments={comments} currentUserEmail={session.user.email} canSeeOperaciones={canSeeSection("Operaciones")} canSeeDevs={canSeeSection("Devs")} setView={setView}/>}
       {view==="opsdash"&&<OperationsSummaryView tickets={tickets} tasks={tasks} statusHistory={ticketStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
-      {view==="tickets"&&<TicketsView tickets={tickets} statusHistory={ticketStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} devTasks={devTasks} setView={setView} onRefresh={loadAll}/>}
-      {view==="tasks"&&<TasksView tasks={tasks} allUsers={allUsers} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} currentUserEmail={session.user.email} currentUserId={session.user.id} onRefresh={loadAll}/>}
+      {view==="tickets"&&<TicketsView tickets={tickets} statusHistory={ticketStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} devTasks={devTasks} setView={setView} onRefresh={loadAll} openId={pendingLink?.type==="ticket"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)}/>}
+      {view==="tasks"&&<TasksView tasks={tasks} allUsers={allUsers} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} currentUserEmail={session.user.email} currentUserId={session.user.id} onRefresh={loadAll} openId={pendingLink?.type==="task"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)}/>}
       {view==="onboarding"&&<OnboardingView onboarding={onboarding} history={onboardingHistory} onRefresh={loadAll}/>}
       {view==="devdash"&&<DevsMetricsView tickets={tickets} ticketHistory={ticketStatusHistory} devTasks={devTasks} devTaskHistory={devTaskStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
-      {view==="devtasks"&&<DevTasksView devTasks={devTasks} statusHistory={devTaskStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} tickets={tickets} onRefresh={loadAll}/>}
+      {view==="devtasks"&&<DevTasksView devTasks={devTasks} statusHistory={devTaskStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} tickets={tickets} onRefresh={loadAll} openId={pendingLink?.type==="dev_task"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)}/>}
       {view==="services"&&<ServicesView/>}
       {view==="categories"&&<CategoriesPanel catsIncome={catsIncome} catsExpense={catsExpense} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="usuarios"&&isAdmin&&<UserPermissionsPanel users={allUsers} allowedSections={allowedSections} onRefresh={loadAll}/>}
