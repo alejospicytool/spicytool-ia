@@ -7,6 +7,7 @@ import {
   shouldSendHeartbeat, isIdleExpired, toCSV, DIAS_SEMANA, timeErrorMessage, buildResumenDraft, ENTIDAD_LABEL,
 } from "./timeTracking.js";
 import { entitySearch, buildEntityLink, parseEntityLink, clearedSearch, LINK_TARGETS } from "./deepLinks.js";
+import { dayBA, weekStartBA, closureEvents, scoreRequiredForStatus } from "./metricsLogic.js";
 
 // ── Supabase ───────────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://khuavhbraikzreyhptog.supabase.co";
@@ -3065,6 +3066,10 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
                   <select value={detail.fibonacci_score||""}
                     onChange={async e=>{
                       const v = e.target.value ? Number(e.target.value) : null;
+                      if (v===null && scoreRequiredForStatus(statusGroup(detail.status))) {
+                        setStatusError({ id:detail.id, msg:`Este ticket está en "${detail.status}": no se le puede sacar el puntaje Fibonacci. Elegí otro valor si hay que corregirlo.` });
+                        return;
+                      }
                       await updateTicket(detail,{fibonacci_score:v});
                       if (v && pendingMove && pendingMove.id===detail.id) { const target = pendingMove.status; setPendingMove(null); await moveStatus({ ...detail, fibonacci_score:v }, target); }
                     }}
@@ -3340,6 +3345,10 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
                 <select value={detail.fibonacci_score||""}
                   onChange={async e=>{
                     const v = e.target.value ? Number(e.target.value) : null;
+                    if (v===null && ["In Progress","Testing","Done"].includes(detail.stage)) {
+                      setStageError({ id:detail.id, msg:`Esta tarea está en "${detail.stage}": no se le puede sacar el puntaje Fibonacci. Elegí otro valor si hay que corregirlo.` });
+                      return;
+                    }
                     await updateDevTask(detail,{fibonacci_score:v});
                     if (v && pendingStage && pendingStage.id===detail.id) { const target = pendingStage.stage; setPendingStage(null); await moveStage({ ...detail, fibonacci_score:v }, target); }
                   }}
@@ -3391,12 +3400,7 @@ function DevsMetricsView({ tickets, ticketHistory, devTasks, devTaskHistory, ass
   const [toDate, setToDate] = useState("");
 
   const inRange = (iso) => (!fromDate || iso>=fromDate) && (!toDate || iso<=toDate);
-  const weekOf = (iso) => {
-    const d = new Date(iso);
-    const day = (d.getDay()+6)%7; // lunes=0
-    d.setDate(d.getDate()-day);
-    return d.toISOString().split("T")[0];
-  };
+  const weekOf = weekStartBA; // lunes de la semana, en horario de Buenos Aires
   const assigneeIdsFor = (entityType, entityId) => assignees.filter(a=>a.entity_type===entityType && a.entity_id===entityId).map(a=>a.user_id);
 
   const showTickets = typeFilter!=="dev";
@@ -3404,27 +3408,33 @@ function DevsMetricsView({ tickets, ticketHistory, devTasks, devTaskHistory, ass
 
   const linkedDevTaskByTicket = {};
   devTasks.forEach(dt=>{ if (dt.ticket_id) linkedDevTaskByTicket[dt.ticket_id] = dt; });
-  const devTaskClosed = (dtId) => devTaskHistory.some(h=>h.dev_task_id===dtId && DEV_TASK_STAGES_CERRADOS.includes(h.stage));
+  const devTaskClosed = (dtId) => DEV_TASK_STAGES_CERRADOS.includes(devTasks.find(x=>x.id===dtId)?.stage);
 
   // Items cerrados (con fecha de cierre + puntaje) para velocidad / puntos soporte vs producto.
   // Una tarea de dev vinculada a un ticket cuenta como "soporte" — si ambos cerraron, se
   // descarta el evento del ticket para no duplicar el puntaje (solo cuando se ven los dos
   // tipos juntos; filtrado a un solo tipo no hay riesgo de doble conteo).
-  let closedTicketEvents = showTickets ? ticketHistory
-    .filter(h=>TICKET_STATUS_GROUPS["Cerrados"].includes(h.status) && inRange(h.changed_at.split("T")[0]))
-    .map(h=>{
-      const t = tickets.find(x=>x.id===h.ticket_id);
-      if (!t) return null;
-      const linkedTask = linkedDevTaskByTicket[t.id];
-      return { id:t.id, week:weekOf(h.changed_at), score:t.fibonacci_score||0, assigneeIds:assigneeIdsFor("ticket",t.id), category:"soporte", linkedTaskClosed: !!(linkedTask && devTaskClosed(linkedTask.id)) };
-    })
-    .filter(Boolean) : [];
+  // Un evento de cierre por ticket / tarea (ver closureEvents): antes cada paso por Testeando →
+  // Solucionado → Archivado sumaba el puntaje de nuevo.
+  const ticketStatusById = Object.fromEntries(tickets.map(t=>[t.id,t.status]));
+  const devStageById = Object.fromEntries(devTasks.map(t=>[t.id,t.stage]));
+  let closedTicketEvents = showTickets
+    ? closureEvents(ticketHistory,"ticket_id","status",TICKET_STATUS_GROUPS["Cerrados"],ticketStatusById)
+      .filter(ev=>inRange(dayBA(ev.changed_at)))
+      .map(ev=>{
+        const t = tickets.find(x=>x.id===ev.id);
+        if (!t) return null;
+        const linkedTask = linkedDevTaskByTicket[t.id];
+        return { id:t.id, week:weekOf(ev.changed_at), score:t.fibonacci_score||0, assigneeIds:assigneeIdsFor("ticket",t.id), category:"soporte", linkedTaskClosed: !!(linkedTask && devTaskClosed(linkedTask.id)) };
+      })
+      .filter(Boolean) : [];
   if (typeFilter==="all") closedTicketEvents = closedTicketEvents.filter(e=>!e.linkedTaskClosed);
 
-  const closedDevEvents = showDev ? devTaskHistory
-    .filter(h=>DEV_TASK_STAGES_CERRADOS.includes(h.stage) && inRange(h.changed_at.split("T")[0]))
-    .map(h=>{ const t=devTasks.find(x=>x.id===h.dev_task_id); return t?{ id:t.id, week:weekOf(h.changed_at), score:t.fibonacci_score||0, assigneeIds:assigneeIdsFor("dev_task",t.id), category: t.ticket_id?"soporte":"producto" }:null; })
-    .filter(Boolean) : [];
+  const closedDevEvents = showDev
+    ? closureEvents(devTaskHistory,"dev_task_id","stage",DEV_TASK_STAGES_CERRADOS,devStageById)
+      .filter(ev=>inRange(dayBA(ev.changed_at)))
+      .map(ev=>{ const t=devTasks.find(x=>x.id===ev.id); return t?{ id:t.id, week:weekOf(ev.changed_at), score:t.fibonacci_score||0, assigneeIds:assigneeIdsFor("dev_task",t.id), category: t.ticket_id?"soporte":"producto" }:null; })
+      .filter(Boolean) : [];
 
   const allClosedEvents = [...closedTicketEvents, ...closedDevEvents];
   const weeks = [...new Set(allClosedEvents.map(e=>e.week))].sort();
@@ -3435,6 +3445,10 @@ function DevsMetricsView({ tickets, ticketHistory, devTasks, devTaskHistory, ass
     devPoints: allClosedEvents.filter(e=>e.week===w && e.category==="producto").reduce((s,e)=>s+e.score,0),
   }));
   const maxWeekly = Math.max(1, ...velocityByWeek.map(w=>w.ticketPoints+w.devPoints));
+  const currentWeek = weekStartBA(new Date().toISOString());
+  const thisWeekRow = velocityByWeek.find(w=>w.week===currentWeek);
+  const thisWeekPoints = thisWeekRow ? thisWeekRow.ticketPoints+thisWeekRow.devPoints : 0;
+  const closedWithoutScore = allClosedEvents.filter(e=>!e.score).length;
 
   const byPerson = {};
   allClosedEvents.forEach(e=>{
@@ -3454,11 +3468,11 @@ function DevsMetricsView({ tickets, ticketHistory, devTasks, devTaskHistory, ass
     .sort((a,b)=>a.changed_at.localeCompare(b.changed_at))[0];
   const devCycleTimes = showTickets ? tickets
     .map(t=>({ t, h: firstEntryTo(ticketHistory,"ticket_id",t.id,"Testeando (Prod)","status") }))
-    .filter(x=>x.h && inRange(x.h.changed_at.split("T")[0]))
+    .filter(x=>x.h && inRange(dayBA(x.h.changed_at)))
     .map(x=>new Date(x.h.changed_at)-new Date(x.t.created_at)) : [];
   const resolutionTimes = showTickets ? tickets
     .map(t=>({ t, h: firstEntryTo(ticketHistory,"ticket_id",t.id,"Solucionado","status") }))
-    .filter(x=>x.h && inRange(x.h.changed_at.split("T")[0]))
+    .filter(x=>x.h && inRange(dayBA(x.h.changed_at)))
     .map(x=>new Date(x.h.changed_at)-new Date(x.t.created_at)) : [];
   const avg = (arr) => arr.length ? arr.reduce((s,x)=>s+x,0)/arr.length : null;
 
@@ -3470,6 +3484,7 @@ function DevsMetricsView({ tickets, ticketHistory, devTasks, devTaskHistory, ass
       h.forEach((entry,i)=>{
         if (entry.status!==status) return;
         const next = h[i+1];
+        if (!next && TICKET_STATUS_GROUPS["Cerrados"].includes(status)) return; // se quedó cerrado: no hay "tiempo en el estado"
         const end = next ? new Date(next.changed_at) : new Date();
         durations.push(end-new Date(entry.changed_at));
       });
@@ -3513,7 +3528,8 @@ function DevsMetricsView({ tickets, ticketHistory, devTasks, devTaskHistory, ass
         </div>
         <div className="spicy-kpi" style={{ cursor:"pointer" }} onClick={()=>setView("devtasks")}>
           <div className="spicy-kpi-label">Puntos esta semana</div>
-          <div className="spicy-kpi-value">{velocityByWeek.length ? velocityByWeek[velocityByWeek.length-1].ticketPoints+velocityByWeek[velocityByWeek.length-1].devPoints : 0}</div>
+          <div className="spicy-kpi-value">{thisWeekPoints}</div>
+          <div className="spicy-kpi-sub">semana del {formatISODateShort(currentWeek).slice(0,5)}</div>
         </div>
         <div className="spicy-kpi" style={{ cursor:unestimated.length?"pointer":"default" }}>
           <div className="spicy-kpi-label">Sin estimar</div>
@@ -3524,6 +3540,7 @@ function DevsMetricsView({ tickets, ticketHistory, devTasks, devTaskHistory, ass
       <div style={{ display:"flex",gap:16,flexWrap:"wrap" }}>
         <div className="spicy-card" style={{ flex:"1 1 320px" }}>
           <div style={{ fontSize:14,fontWeight:600,color:"#111",marginBottom:14 }}>Velocidad — puntos cerrados por semana <span style={{ fontSize:11,color:"#aaa",fontWeight:400 }}>(soporte vs. producto)</span></div>
+          {closedWithoutScore>0 && <div style={{ fontSize:11,color:"#D97706",marginBottom:10 }}>⚠ {closedWithoutScore} {closedWithoutScore===1?"cierre sin puntaje no suma":"cierres sin puntaje no suman"} (ver "Sin estimar").</div>}
           {velocityByWeek.length===0 && <div style={{ fontSize:13,color:"#bbb",textAlign:"center",padding:"1rem" }}>Sin datos todavía.</div>}
           {velocityByWeek.map(w=>(
             <div key={w.week} style={{ marginBottom:12 }}>
