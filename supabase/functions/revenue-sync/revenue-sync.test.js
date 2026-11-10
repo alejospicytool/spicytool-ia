@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { subscriptionMrr, normalizeStripeSub, verifyStripeSignature, handle, monthsOf, saveManualSubscription, reconcile } from "./index.ts";
+import { subscriptionMrr, normalizeStripeSub, verifyStripeSignature, handle, monthsOf, saveManualSubscription, reconcile, mergeFailure, invoiceSubscriptionId } from "./index.ts";
 
 // ── Base y Stripe en memoria ───────────────────────────────────────────────────────────────────────────
 function fakeStore(over = {}) {
   const st = {
-    plans: new Map(), fx: new Map(), customers: new Map(), subs: new Map(), events: new Set(), apply: [], audit: [], baseline: true, released: [], finished: [], runs: [],
+    plans: new Map(), fx: new Map(), customers: new Map(), subs: new Map(), events: new Set(), apply: [], audit: [], baseline: true, released: [], finished: [], runs: [], failures: new Map(),
   };
   const store = {
     st,
@@ -26,6 +26,9 @@ function fakeStore(over = {}) {
     baselineDone: async () => st.baseline,
     audit: async (a) => { st.audit.push(a); },
     logRun: async (r) => { st.runs.push(r); },
+    getFailure: async (id) => st.failures.get(id) || null,
+    saveFailure: async (f) => { st.failures.set(f.invoiceId, f); },
+    openFailureIds: async () => [...st.failures.values()].filter((f) => f.status === "open").map((f) => f.invoiceId),
     createManualPlan: async (name, category, counts) => { const id = "manual:plan-" + st.plans.size; st.plans.set(id, { name, category, countsInMrr: counts }); return id; },
     planExists: async (id) => st.plans.has(id),
     ...over,
@@ -39,6 +42,8 @@ const fakeStripe = (subs = [], over = {}) => ({
   async *listSubscriptions(status) { for (const s of subs.filter((x) => x.status === status)) yield s; },
   getCoupon: async (id) => ({ id, percent_off: 20 }),
   getProduct: async (id) => ({ name: "Producto " + id }),
+  getInvoice: async (id) => null,
+  async *listOpenInvoices() {},
   ...over,
 });
 
@@ -151,7 +156,7 @@ describe("webhook /stripe", () => {
   });
   it("eventos que no manejamos se ignoran (sin registrar)", async () => {
     const store = fakeStore();
-    const res = await handle(await eventReq(evt("e1", "invoice.paid", "in_1")), deps(store, fakeStripe()));
+    const res = await handle(await eventReq(evt("e1", "charge.succeeded", "ch_1")), deps(store, fakeStripe()));
     expect(await res.json()).toEqual({ ignored: true });
     expect(store.st.events.size).toBe(0);
   });
@@ -275,7 +280,7 @@ describe("reconcile y rutas protegidas", () => {
   it("/pull trae todo de Stripe SIN calcular MRR y avisa cuántos planes hay que clasificar", async () => {
     const store = fakeStore(), stripe = fakeStripe([stripeSub("a", "ca", [[price("pa", 10000)]]), stripeSub("b", "cb", [[price("pb", 500)]])]);
     const r = await (await handle(cronReq("pull"), deps(store, stripe))).json();
-    expect(r).toEqual({ subscriptions: 2, staleCount: 0, unclassified: 2 });
+    expect(r).toEqual({ subscriptions: 2, staleCount: 0, unclassified: 2, openFailures: 0 });
     expect(store.st.apply).toHaveLength(0);
     expect(store.st.subs.size).toBe(2);
     expect((await handle(adminReq("pull"), deps(store, stripe))).status).toBe(403);
@@ -381,5 +386,106 @@ describe("reconcile directo", () => {
     const store = fakeStore();
     const r = await reconcile({ store, stripe: fakeStripe([stripeSub("a", "ca", [[price("p1", 100)], [price("p2", 100)]])]), now: () => new Date(), coupons: new Map(), known: null });
     expect(r.unclassified).toBe(2);
+  });
+});
+
+// ── Pagos fallidos ─────────────────────────────────────────────────────────────────────────────────────
+const NOW_ISO = "2026-11-10T12:00:00.000Z";
+const invoice = (over = {}) => ({ id: "in_1", customer: "cus_1", customer_name: "Cliente 1", customer_email: "c1@x.com", subscription: "sub_1", amount_due: 30000, amount_remaining: 30000, currency: "usd", attempt_count: 1, next_payment_attempt: 1794398400, hosted_invoice_url: "https://invoice.stripe.com/i/abc", status: "open", ...over });
+const withError = (code = "card_declined", message = "Tu tarjeta fue rechazada.") => ({ payment_intent: { last_payment_error: { decline_code: code, code: "card_declined", message } } });
+
+describe("mergeFailure", () => {
+  it("arma la fila con monto, intentos, próximo reintento, motivo y link", () => {
+    const f = mergeFailure(null, invoice({ attempt_count: 2, ...withError("insufficient_funds") }), NOW_ISO);
+    expect(f).toMatchObject({ invoiceId: "in_1", customerKey: "stripe:cus_1", subscriptionId: "stripe:sub_1", amountDue: 300, currency: "usd", attemptCount: 2, failureCode: "insufficient_funds", failureMessage: "Tu tarjeta fue rechazada.", hostedInvoiceUrl: "https://invoice.stripe.com/i/abc", status: "open", firstFailedAt: NOW_ISO, lastFailedAt: NOW_ISO, resolvedAt: null });
+    expect(f.nextAttemptAt).toBe("2026-11-11T12:00:00.000Z");
+  });
+  it("un nuevo intento conserva la primera falla, suma intentos y no pierde el motivo si no viene", () => {
+    const first = mergeFailure(null, invoice({ attempt_count: 1, ...withError() }), "2026-11-08T10:00:00.000Z");
+    const second = mergeFailure(first, invoice({ attempt_count: 2 }), NOW_ISO);
+    expect(second.firstFailedAt).toBe("2026-11-08T10:00:00.000Z");
+    expect(second.lastFailedAt).toBe(NOW_ISO);
+    expect(second.attemptCount).toBe(2);
+    expect(second.failureCode).toBe("card_declined");
+  });
+  it("factura pagada = recuperada (sin próximo reintento); anulada e incobrable tienen su estado", () => {
+    const first = mergeFailure(null, invoice(), "2026-11-08T10:00:00.000Z");
+    const paid = mergeFailure(first, invoice({ status: "paid", amount_remaining: 0 }), NOW_ISO);
+    expect(paid).toMatchObject({ status: "recovered", nextAttemptAt: null, resolvedAt: NOW_ISO, lastFailedAt: "2026-11-08T10:00:00.000Z" });
+    expect(mergeFailure(first, invoice({ status: "void" }), NOW_ISO).status).toBe("void");
+    expect(mergeFailure(first, invoice({ status: "uncollectible" }), NOW_ISO).status).toBe("uncollectible");
+  });
+  it("API nueva de Stripe: la suscripción viene en parent.subscription_details; cliente como objeto", () => {
+    const inv = invoice({ subscription: undefined, parent: { subscription_details: { subscription: "sub_9" } }, customer: { id: "cus_9" } });
+    expect(invoiceSubscriptionId(inv)).toBe("stripe:sub_9");
+    expect(mergeFailure(null, inv, NOW_ISO).customerKey).toBe("stripe:cus_9");
+  });
+  it("sin cliente o sin id no se puede registrar", () => {
+    expect(mergeFailure(null, invoice({ customer: null }), NOW_ISO)).toBeNull();
+    expect(mergeFailure(null, invoice({ id: undefined }), NOW_ISO)).toBeNull();
+  });
+});
+
+describe("webhook de facturas", () => {
+  const ev = (id, type, inv) => eventReq({ id, type, data: { object: inv } });
+  it("invoice.payment_failed guarda la falla y el cliente, aun ANTES de la carga inicial (no toca el MRR)", async () => {
+    const store = fakeStore(); store.st.baseline = false;
+    const stripe = fakeStripe([], { getInvoice: async () => invoice({ attempt_count: 2, ...withError("insufficient_funds") }) });
+    const res = await handle(await ev("e1", "invoice.payment_failed", invoice()), deps(store, stripe));
+    expect(res.status).toBe(200);
+    const f = store.st.failures.get("in_1");
+    expect(f).toMatchObject({ customerKey: "stripe:cus_1", attemptCount: 2, failureCode: "insufficient_funds", status: "open" });
+    expect(store.st.customers.get("stripe:cus_1")).toMatchObject({ name: "Cliente 1", email: "c1@x.com", source: "stripe" });
+    expect(store.st.apply).toHaveLength(0);
+  });
+  it("si Stripe no devuelve la factura, se usa la del evento", async () => {
+    const store = fakeStore();
+    await handle(await ev("e1", "invoice.payment_failed", invoice()), deps(store, fakeStripe([], { getInvoice: async () => { throw new Error("Stripe 500"); } })));
+    expect(store.st.failures.get("in_1")).toMatchObject({ amountDue: 300, status: "open" });
+  });
+  it("invoice.paid de una factura que había fallado → recuperada; de una que nunca falló → se ignora", async () => {
+    const store = fakeStore(), stripe = fakeStripe([], { getInvoice: async () => invoice({ status: "paid", amount_remaining: 0 }) });
+    await handle(await ev("e1", "invoice.payment_failed", invoice()), deps(store, fakeStripe()));
+    await handle(await ev("e2", "invoice.paid", invoice({ status: "paid" })), deps(store, stripe));
+    expect(store.st.failures.get("in_1")).toMatchObject({ status: "recovered", nextAttemptAt: null });
+    expect(store.st.failures.get("in_1").resolvedAt).not.toBeNull();
+    await handle(await ev("e3", "invoice.paid", invoice({ id: "in_otra", status: "paid" })), deps(store, stripe));
+    expect(store.st.failures.has("in_otra")).toBe(false);
+    expect(store.st.finished.at(-1)[1]).toEqual({ skipped: "sin_fallo_previo" });
+  });
+  it("anulada e incobrable cierran la falla", async () => {
+    const store = fakeStore();
+    await handle(await ev("e1", "invoice.payment_failed", invoice()), deps(store, fakeStripe()));
+    await handle(await ev("e2", "invoice.marked_uncollectible", invoice({ status: "uncollectible" })), deps(store, fakeStripe([], { getInvoice: async () => invoice({ status: "uncollectible" }) })));
+    expect(store.st.failures.get("in_1").status).toBe("uncollectible");
+  });
+  it("evento duplicado de factura no se procesa dos veces", async () => {
+    const store = fakeStore();
+    await handle(await ev("e1", "invoice.payment_failed", invoice()), deps(store, fakeStripe()));
+    const again = await handle(await ev("e1", "invoice.payment_failed", invoice()), deps(store, fakeStripe()));
+    expect(await again.json()).toEqual({ duplicate: true });
+  });
+});
+
+describe("pull de facturas abiertas", () => {
+  it("trae solo las abiertas con intentos fallidos y cierra las que ya no están abiertas", async () => {
+    const store = fakeStore();
+    store.st.failures.set("in_vieja", { invoiceId: "in_vieja", customerKey: "stripe:cus_v", status: "open", attemptCount: 3, amountDue: 50, currency: "usd", firstFailedAt: "2026-10-01T00:00:00.000Z", lastFailedAt: "2026-10-05T00:00:00.000Z", nextAttemptAt: null, failureCode: null, failureMessage: null, hostedInvoiceUrl: null, subscriptionId: null, resolvedAt: null });
+    const stripe = fakeStripe([], {
+      async *listOpenInvoices() { yield invoice({ id: "in_a", attempt_count: 1 }); yield invoice({ id: "in_b", attempt_count: 0 }); },
+      getInvoice: async (id) => (id === "in_vieja" ? invoice({ id: "in_vieja", customer: "cus_v", status: "paid" }) : invoice({ id })),
+    });
+    const r = await (await handle(cronReq("pull"), deps(store, stripe))).json();
+    expect(r.openFailures).toBe(1);
+    expect(store.st.failures.has("in_a")).toBe(true);
+    expect(store.st.failures.has("in_b")).toBe(false);          // todavía sin intento de cobro
+    expect(store.st.failures.get("in_vieja").status).toBe("recovered");
+  });
+});
+
+describe("baja involuntaria", () => {
+  it("guarda el motivo de cancelación de Stripe", () => {
+    expect(normalizeStripeSub({ ...stripeSub("s", "c", [[price("p", 100)]]), cancellation_details: { reason: "payment_failed" } }).cancelReason).toBe("payment_failed");
+    expect(normalizeStripeSub(stripeSub("s", "c", [[price("p", 100)]])).cancelReason).toBeNull();
   });
 });

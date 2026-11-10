@@ -1,6 +1,8 @@
 // Métricas de revenue (reemplazo de ChartMogul). Una sola Edge Function con 5 rutas:
 //
-//   POST …/revenue-sync/stripe     Webhook de Stripe (verifica la firma, ignora duplicados, relee la suscripción).
+//   POST …/revenue-sync/stripe     Webhook de Stripe (verifica la firma, ignora duplicados, relee la suscripción o la factura).
+//                                  Suscripciones: customer.subscription.created/updated/deleted.
+//                                  Pagos fallidos: invoice.payment_failed / invoice.paid / invoice.voided / invoice.marked_uncollectible.
 //   POST …/revenue-sync/reconcile  Carga inicial ({"baseline":true}, una sola vez, y solo con todos los planes clasificados)
 //                                  y chequeo nocturno de respaldo.
 //                                  Lo llama pg_cron con el header x-revenue-cron-secret (o un admin logueado).
@@ -13,13 +15,13 @@
 //   1. En los Settings de la función, DESACTIVAR "Enforce JWT Verification": Stripe y pg_cron no mandan un JWT de
 //      usuario. La seguridad la dan la firma del webhook, el secret del cron y la verificación de admin (rpc is_admin).
 //   2. Edge Functions → Secrets:
-//        STRIPE_API_KEY          clave RESTRINGIDA de solo lectura (Customers, Subscriptions, Prices, Products, Coupons)
+//        STRIPE_API_KEY          clave RESTRINGIDA de solo lectura (Customers, Subscriptions, Prices, Products, Coupons, Invoices, PaymentIntents)
 //        STRIPE_WEBHOOK_SECRET   whsec_… (lo da Stripe al crear el endpoint)
 //        REVENUE_CRON_SECRET     un texto largo al azar (el mismo que se usa en el cron de la base)
 //      (SUPABASE_URL, SUPABASE_ANON_KEY y SUPABASE_SERVICE_ROLE_KEY ya los pone Supabase.)
 //   3. Stripe → Developers → Webhooks → Add endpoint → https://<proyecto>.supabase.co/functions/v1/revenue-sync/stripe
-//      con los eventos customer.subscription.created / updated / deleted.
-// Las tablas y la función rev_apply_mrr están en supabase_revenue.sql.
+//      con los eventos customer.subscription.created / updated / deleted y invoice.payment_failed / paid / voided / marked_uncollectible.
+// Las tablas y la función rev_apply_mrr están en supabase_revenue.sql; segmento y pagos fallidos en supabase_revenue_v2.sql.
 
 // ── Cálculo de MRR (todo en USD) ────────────────────────────────────────────────────────────────────────
 export const COUNTED_STATUSES = ["active", "past_due"]; // sin auto-churn por pago vencido; trialing no suma
@@ -29,7 +31,7 @@ export type Item = { priceId: string; unitAmount: number; quantity: number; inte
 export type Discount = { percentOff?: number | null; amountOff?: number | null; endsAt?: string | Date | null } | null;
 export type SubDoc = {
   id: string; customerKey: string; source: "stripe" | "manual"; status: string; currency: string;
-  items: Item[]; discount: Discount; canceledAt?: string | null;
+  items: Item[]; discount: Discount; canceledAt?: string | null; cancelReason?: string | null;
 };
 export type PlanInfo = { countsInMrr: boolean };
 
@@ -108,6 +110,7 @@ export function normalizeStripeSub(sub: any, coupons: Map<string, any> = new Map
       endsAt: ref!.end ? new Date(ref!.end * 1000).toISOString() : null,
     } : null,
     canceledAt: sub.canceled_at ? new Date(sub.canceled_at * 1000).toISOString() : null,
+    cancelReason: sub.cancellation_details?.reason ?? null, // 'payment_failed' = baja involuntaria
   };
 }
 
@@ -131,6 +134,55 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+// ── Pagos fallidos (facturas) ──────────────────────────────────────────────────────────────────────────
+export type FailureStatus = "open" | "recovered" | "void" | "uncollectible";
+export type FailureRow = {
+  invoiceId: string; customerKey: string; subscriptionId: string | null; amountDue: number; currency: string;
+  attemptCount: number; nextAttemptAt: string | null; failureCode: string | null; failureMessage: string | null;
+  hostedInvoiceUrl: string | null; status: FailureStatus; firstFailedAt: string; lastFailedAt: string; resolvedAt: string | null;
+};
+const isoOf = (sec: number | null | undefined) => (sec ? new Date(sec * 1000).toISOString() : null);
+export function invoiceStatus(inv: any): FailureStatus {
+  return inv.status === "paid" ? "recovered" : inv.status === "void" ? "void" : inv.status === "uncollectible" ? "uncollectible" : "open";
+}
+// El motivo del rechazo viene en payment_intent.last_payment_error (si la factura se leyó con ese campo expandido)
+export function failureReason(inv: any): { code: string | null; message: string | null } {
+  const e = inv.payment_intent && typeof inv.payment_intent === "object" ? inv.payment_intent.last_payment_error : null;
+  if (!e) return { code: null, message: null };
+  return { code: e.decline_code || e.code || null, message: e.message || null };
+}
+export function invoiceCustomerKey(inv: any): string | null {
+  const c = typeof inv.customer === "string" ? inv.customer : inv.customer?.id;
+  return c ? `stripe:${c}` : null;
+}
+export function invoiceSubscriptionId(inv: any): string | null {
+  const sub = inv.subscription || inv.parent?.subscription_details?.subscription || null; // API clásica / API nueva
+  const id = typeof sub === "string" ? sub : sub?.id;
+  return id ? `stripe:${id}` : null;
+}
+// Une lo que acaba de llegar con lo que ya teníamos de esa factura (se conserva la primera falla y el último motivo conocido)
+export function mergeFailure(prev: FailureRow | null, inv: any, nowIso: string): FailureRow | null {
+  const customerKey = invoiceCustomerKey(inv);
+  if (!customerKey || !inv.id) return null;
+  const reason = failureReason(inv);
+  const status = invoiceStatus(inv);
+  return {
+    invoiceId: inv.id, customerKey,
+    subscriptionId: invoiceSubscriptionId(inv) ?? prev?.subscriptionId ?? null,
+    amountDue: (inv.amount_remaining ?? inv.amount_due ?? 0) / 100,
+    currency: String(inv.currency || prev?.currency || "usd").toLowerCase(),
+    attemptCount: Math.max(inv.attempt_count || 0, prev?.attemptCount || 0, 1),
+    nextAttemptAt: status === "open" ? isoOf(inv.next_payment_attempt) : null,
+    failureCode: reason.code ?? prev?.failureCode ?? null,
+    failureMessage: reason.message ?? prev?.failureMessage ?? null,
+    hostedInvoiceUrl: inv.hosted_invoice_url ?? prev?.hostedInvoiceUrl ?? null,
+    status,
+    firstFailedAt: prev?.firstFailedAt ?? nowIso,
+    lastFailedAt: status === "open" ? nowIso : prev?.lastFailedAt ?? nowIso,
+    resolvedAt: status === "open" ? null : prev?.resolvedAt ?? nowIso,
+  };
+}
+
 // ── Interfaces (la base y Stripe se inyectan: así la lógica se prueba sin red) ─────────────────────────
 export interface Store {
   loadPlans(): Promise<Map<string, PlanInfo>>;
@@ -150,6 +202,9 @@ export interface Store {
   countUnclassified(): Promise<number>;
   baselineDone(): Promise<boolean>; // ya se hizo la carga inicial
   audit(row: { subscriptionId: string; before: SubDoc | null; after: SubDoc; userId: string | null }): Promise<void>;
+  getFailure(invoiceId: string): Promise<FailureRow | null>;
+  saveFailure(row: FailureRow): Promise<void>;
+  openFailureIds(): Promise<string[]>;
   logRun(run: { kind: string; fixes: number; stale: number; unclassified: number; errors: unknown[] }): Promise<void>;
   createManualPlan(name: string, category: string, countsInMrr: boolean): Promise<string>;
   planExists(priceId: string): Promise<boolean>;
@@ -159,6 +214,8 @@ export interface StripeApi {
   listSubscriptions(status: string): AsyncIterable<any>;
   getCoupon(id: string): Promise<any>;
   getProduct(id: string): Promise<any>;
+  getInvoice(id: string): Promise<any | null>; // con el payment_intent expandido para leer el motivo del rechazo
+  listOpenInvoices(): AsyncIterable<any>;
 }
 
 type Ctx = { store: Store; stripe: StripeApi; now: () => Date; coupons: Map<string, any>; known: Set<string> | null };
@@ -185,6 +242,29 @@ export async function saveStripeSubscription(ctx: Ctx, sub: any): Promise<SubDoc
   const doc = normalizeStripeSub(sub, ctx.coupons);
   await ctx.store.upsertSubscription(doc);
   return doc;
+}
+
+// Registra (o actualiza) una factura con pago fallido. Si Stripe no devuelve la factura se usa la del evento.
+export async function saveInvoiceFailure(ctx: Ctx, evInvoice: any): Promise<FailureRow | null> {
+  let inv = evInvoice;
+  try { inv = (await ctx.stripe.getInvoice(evInvoice.id)) || evInvoice; } catch { inv = evInvoice; }
+  const key = invoiceCustomerKey(inv);
+  if (!key) return null;
+  await ctx.store.upsertCustomer({ key, source: "stripe", name: inv.customer_name || undefined, email: inv.customer_email || undefined });
+  const row = mergeFailure(await ctx.store.getFailure(inv.id), inv, ctx.now().toISOString());
+  if (row) await ctx.store.saveFailure(row);
+  return row;
+}
+// Factura pagada / anulada / incobrable: solo se actualiza si antes había fallado (si no, no es de nuestro interés)
+export async function resolveInvoiceFailure(ctx: Ctx, evInvoice: any): Promise<FailureRow | null> {
+  const prev = await ctx.store.getFailure(evInvoice.id);
+  if (!prev) return null;
+  let inv = evInvoice;
+  try { inv = (await ctx.stripe.getInvoice(evInvoice.id)) || evInvoice; } catch { inv = evInvoice; }
+  const status = invoiceStatus(inv);
+  const row: FailureRow = { ...prev, status, nextAttemptAt: status === "open" ? prev.nextAttemptAt : null, resolvedAt: status === "open" ? null : ctx.now().toISOString() };
+  await ctx.store.saveFailure(row);
+  return row;
 }
 
 export async function recomputeCustomer(ctx: Ctx, key: string, opts: { cause?: string; baseline?: boolean; plans?: Map<string, PlanInfo>; fx?: Map<string, number> } = {}) {
@@ -226,7 +306,15 @@ export async function pullFromStripe(ctx: Ctx) {
     const prev = await ctx.store.getSubscription(id); // Stripe ya no la tiene: se da por cancelada
     if (prev) await ctx.store.upsertSubscription({ ...prev, status: "canceled", canceledAt: ctx.now().toISOString() });
   }
-  return { subscriptions: seen.size, staleCount, unclassified: await ctx.store.countUnclassified() };
+  // Facturas abiertas con intentos de cobro fallidos; y las que teníamos abiertas y ya no lo están (se pagaron o se anularon)
+  const openSeen = new Set<string>();
+  for await (const inv of ctx.stripe.listOpenInvoices()) {
+    if (!(inv.attempt_count > 0)) continue; // todavía no se intentó cobrar: no es un fallo
+    openSeen.add(inv.id);
+    await saveInvoiceFailure(ctx, inv);
+  }
+  for (const id of await ctx.store.openFailureIds()) if (!openSeen.has(id)) await resolveInvoiceFailure(ctx, { id });
+  return { subscriptions: seen.size, staleCount, unclassified: await ctx.store.countUnclassified(), openFailures: openSeen.size };
 }
 
 // Chequeo nocturno (baseline = false) y carga inicial (baseline = true).
@@ -291,7 +379,9 @@ const reply = (obj: unknown, status = 200) => new Response(JSON.stringify(obj), 
 export function userIdOf(req: Request): string | null {
   try { const t = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").split(".")[1]; return JSON.parse(atob(t.replace(/-/g, "+").replace(/_/g, "/"))).sub || null; } catch { return null; }
 }
-const HANDLED = ["customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted"];
+const SUB_EVENTS = ["customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted"];
+const INVOICE_EVENTS = ["invoice.payment_failed", "invoice.paid", "invoice.voided", "invoice.marked_uncollectible"];
+const HANDLED = [...SUB_EVENTS, ...INVOICE_EVENTS];
 const MAX_BODY = 1_000_000;
 
 export type Deps = {
@@ -320,6 +410,14 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
     // Idempotencia: Stripe puede mandar el mismo evento más de una vez
     if (!(await deps.store.claimEvent(event.id, event.type))) return reply({ duplicate: true });
     try {
+      if (INVOICE_EVENTS.includes(event.type)) {
+        // Pagos fallidos: no dependen de la carga inicial del MRR
+        const inv = event.data.object;
+        const row = event.type === "invoice.payment_failed" ? await saveInvoiceFailure(ctx, inv) : await resolveInvoiceFailure(ctx, inv);
+        const result = row ? { invoiceId: row.invoiceId, status: row.status, attempts: row.attemptCount } : { skipped: "sin_fallo_previo" };
+        await deps.store.finishEvent(event.id, result);
+        return reply({ ok: true });
+      }
       // Se relee la suscripción desde Stripe: los eventos pueden llegar desordenados
       const sub = await deps.stripe.getSubscription(event.data.object.id);
       let result: unknown = null;
@@ -395,6 +493,16 @@ export function makeStripeApi(apiKey: string, fetchFn: typeof fetch = fetch): St
     },
     getCoupon: (id) => get(`coupons/${id}`),
     getProduct: (id) => get(`products/${id}`),
+    getInvoice: (id) => get(`invoices/${id}`, { expand: ["payment_intent"] }),
+    async *listOpenInvoices() {
+      let after: string | undefined;
+      for (;;) {
+        const page = await get("invoices", { status: "open", limit: "100", expand: ["data.payment_intent"], ...(after ? { starting_after: after } : {}) });
+        for (const i of page.data) yield i;
+        if (!page.has_more || !page.data.length) return;
+        after = page.data[page.data.length - 1].id;
+      }
+    },
   };
 }
 
@@ -404,8 +512,8 @@ export function makeStore(sb: any): Store {
     const out: any[] = [];
     for (let from = 0; ; from += 1000) { const rows = check(await build(from, from + 999)) || []; out.push(...rows); if (rows.length < 1000) return out; }
   };
-  const toDoc = (r: any): SubDoc => ({ id: r.id, customerKey: r.customer_key, source: r.source, status: r.status, currency: r.currency, items: r.items, discount: r.discount, canceledAt: r.canceled_at });
-  const toRow = (d: SubDoc) => ({ id: d.id, customer_key: d.customerKey, source: d.source, status: d.status, currency: d.currency, items: d.items, discount: d.discount, canceled_at: d.canceledAt || null, updated_at: new Date().toISOString() });
+  const toDoc = (r: any): SubDoc => ({ id: r.id, customerKey: r.customer_key, source: r.source, status: r.status, currency: r.currency, items: r.items, discount: r.discount, canceledAt: r.canceled_at, cancelReason: r.cancel_reason });
+  const toRow = (d: SubDoc) => ({ id: d.id, customer_key: d.customerKey, source: d.source, status: d.status, currency: d.currency, items: d.items, discount: d.discount, canceled_at: d.canceledAt || null, cancel_reason: d.cancelReason ?? null, updated_at: new Date().toISOString() });
   return {
     async loadPlans() { return new Map((await fetchAll((a, b) => sb.from("rev_plans").select("price_id,counts_in_mrr").order("price_id").range(a, b))).map((p: any) => [p.price_id, { countsInMrr: p.counts_in_mrr }])); },
     async loadFx() { return new Map((check(await sb.from("rev_fx_rates").select("currency,rate")) || []).map((r: any) => [String(r.currency).toLowerCase(), Number(r.rate)])); },
@@ -428,6 +536,14 @@ export function makeStore(sb: any): Store {
     async countUnclassified() { const r = await sb.from("rev_plans").select("price_id", { count: "exact", head: true }).eq("category", "sin_clasificar"); check(r); return r.count || 0; },
     async baselineDone() { const r = check(await sb.from("rev_sync_runs").select("id").eq("kind", "baseline").limit(1)); return (r || []).length > 0; },
     async audit(a) { check(await sb.from("rev_manual_audit").insert({ subscription_id: a.subscriptionId, before: a.before, after: a.after, user_id: a.userId })); },
+    async getFailure(id) {
+      const r = check(await sb.from("rev_payment_failures").select("*").eq("invoice_id", id).maybeSingle());
+      return r ? { invoiceId: r.invoice_id, customerKey: r.customer_key, subscriptionId: r.subscription_id, amountDue: Number(r.amount_due), currency: r.currency, attemptCount: r.attempt_count, nextAttemptAt: r.next_attempt_at, failureCode: r.failure_code, failureMessage: r.failure_message, hostedInvoiceUrl: r.hosted_invoice_url, status: r.status, firstFailedAt: r.first_failed_at, lastFailedAt: r.last_failed_at, resolvedAt: r.resolved_at } : null;
+    },
+    async saveFailure(f) {
+      check(await sb.from("rev_payment_failures").upsert({ invoice_id: f.invoiceId, customer_key: f.customerKey, subscription_id: f.subscriptionId, amount_due: f.amountDue, currency: f.currency, attempt_count: f.attemptCount, next_attempt_at: f.nextAttemptAt, failure_code: f.failureCode, failure_message: f.failureMessage, hosted_invoice_url: f.hostedInvoiceUrl, status: f.status, first_failed_at: f.firstFailedAt, last_failed_at: f.lastFailedAt, resolved_at: f.resolvedAt, updated_at: new Date().toISOString() }, { onConflict: "invoice_id" }));
+    },
+    async openFailureIds() { return (await fetchAll((a, b) => sb.from("rev_payment_failures").select("invoice_id").eq("status", "open").order("invoice_id").range(a, b))).map((r: any) => r.invoice_id); },
     async logRun(r) { check(await sb.from("rev_sync_runs").insert({ kind: r.kind, fixes: r.fixes, stale: r.stale, unclassified: r.unclassified, errors: r.errors })); },
     async createManualPlan(name, category, countsInMrr) {
       const price_id = `manual:${crypto.randomUUID()}`;
