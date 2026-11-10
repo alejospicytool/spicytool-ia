@@ -177,7 +177,8 @@ export function mergeFailure(prev: FailureRow | null, inv: any, nowIso: string):
     failureMessage: reason.message ?? prev?.failureMessage ?? null,
     hostedInvoiceUrl: inv.hosted_invoice_url ?? prev?.hostedInvoiceUrl ?? null,
     status,
-    firstFailedAt: prev?.firstFailedAt ?? nowIso,
+    // La primera falla no puede ser posterior a la creación de la factura (al traer facturas viejas, "ahora" sería mentira)
+    firstFailedAt: [prev?.firstFailedAt, isoOf(inv.created)].filter(Boolean).sort()[0] ?? nowIso,
     lastFailedAt: status === "open" ? nowIso : prev?.lastFailedAt ?? nowIso,
     resolvedAt: status === "open" ? null : prev?.resolvedAt ?? nowIso,
   };
@@ -245,9 +246,9 @@ export async function saveStripeSubscription(ctx: Ctx, sub: any): Promise<SubDoc
 }
 
 // Registra (o actualiza) una factura con pago fallido. Si Stripe no devuelve la factura se usa la del evento.
-export async function saveInvoiceFailure(ctx: Ctx, evInvoice: any): Promise<FailureRow | null> {
+export async function saveInvoiceFailure(ctx: Ctx, evInvoice: any, { refetch = true } = {}): Promise<FailureRow | null> {
   let inv = evInvoice;
-  try { inv = (await ctx.stripe.getInvoice(evInvoice.id)) || evInvoice; } catch { inv = evInvoice; }
+  if (refetch) { try { inv = (await ctx.stripe.getInvoice(evInvoice.id)) || evInvoice; } catch { inv = evInvoice; } }
   const key = invoiceCustomerKey(inv);
   if (!key) return null;
   await ctx.store.upsertCustomer({ key, source: "stripe", name: inv.customer_name || undefined, email: inv.customer_email || undefined });
@@ -308,12 +309,17 @@ export async function pullFromStripe(ctx: Ctx) {
   }
   // Facturas abiertas con intentos de cobro fallidos; y las que teníamos abiertas y ya no lo están (se pagaron o se anularon)
   const openSeen = new Set<string>();
+  const batch: any[] = [];
+  const flush = async () => { await Promise.all(batch.splice(0).map((inv) => saveInvoiceFailure(ctx, inv, { refetch: false }))); };
   for await (const inv of ctx.stripe.listOpenInvoices()) {
     if (!(inv.attempt_count > 0)) continue; // todavía no se intentó cobrar: no es un fallo
     openSeen.add(inv.id);
-    await saveInvoiceFailure(ctx, inv);
+    batch.push(inv);
+    if (batch.length >= 8) await flush(); // de a 8 en paralelo: con cientos de facturas, una por una tardaría minutos
   }
-  for (const id of await ctx.store.openFailureIds()) if (!openSeen.has(id)) await resolveInvoiceFailure(ctx, { id });
+  await flush();
+  const gone = (await ctx.store.openFailureIds()).filter((id) => !openSeen.has(id));
+  for (let i = 0; i < gone.length; i += 8) await Promise.all(gone.slice(i, i + 8).map((id) => resolveInvoiceFailure(ctx, { id })));
   return { subscriptions: seen.size, staleCount, unclassified: await ctx.store.countUnclassified(), openFailures: openSeen.size };
 }
 

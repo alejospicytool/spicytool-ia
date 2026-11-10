@@ -408,6 +408,15 @@ describe("mergeFailure", () => {
     expect(second.attemptCount).toBe(2);
     expect(second.failureCode).toBe("card_declined");
   });
+  it("la primera falla no es posterior a la creación de la factura (al traer facturas viejas)", () => {
+    const viejo = mergeFailure(null, invoice({ created: 1790000000 }), NOW_ISO);
+    expect(viejo.firstFailedAt).toBe("2026-09-21T14:13:20.000Z");
+    // si ya la teníamos registrada como "hoy", se corrige a la fecha real de la factura
+    const corregido = mergeFailure({ ...viejo, firstFailedAt: NOW_ISO }, invoice({ created: 1790000000 }), NOW_ISO);
+    expect(corregido.firstFailedAt).toBe("2026-09-21T14:13:20.000Z");
+    // y nunca se adelanta a una falla anterior ya conocida
+    expect(mergeFailure({ ...viejo, firstFailedAt: "2026-09-01T00:00:00.000Z" }, invoice({ created: 1790000000 }), NOW_ISO).firstFailedAt).toBe("2026-09-01T00:00:00.000Z");
+  });
   it("factura pagada = recuperada (sin próximo reintento); anulada e incobrable tienen su estado", () => {
     const first = mergeFailure(null, invoice(), "2026-11-08T10:00:00.000Z");
     const paid = mergeFailure(first, invoice({ status: "paid", amount_remaining: 0 }), NOW_ISO);
@@ -471,12 +480,14 @@ describe("pull de facturas abiertas", () => {
   it("trae solo las abiertas con intentos fallidos y cierra las que ya no están abiertas", async () => {
     const store = fakeStore();
     store.st.failures.set("in_vieja", { invoiceId: "in_vieja", customerKey: "stripe:cus_v", status: "open", attemptCount: 3, amountDue: 50, currency: "usd", firstFailedAt: "2026-10-01T00:00:00.000Z", lastFailedAt: "2026-10-05T00:00:00.000Z", nextAttemptAt: null, failureCode: null, failureMessage: null, hostedInvoiceUrl: null, subscriptionId: null, resolvedAt: null });
+    const getInvoiceCalls = [];
     const stripe = fakeStripe([], {
       async *listOpenInvoices() { yield invoice({ id: "in_a", attempt_count: 1 }); yield invoice({ id: "in_b", attempt_count: 0 }); },
-      getInvoice: async (id) => (id === "in_vieja" ? invoice({ id: "in_vieja", customer: "cus_v", status: "paid" }) : invoice({ id })),
+      getInvoice: async (id) => { getInvoiceCalls.push(id); return id === "in_vieja" ? invoice({ id: "in_vieja", customer: "cus_v", status: "paid" }) : invoice({ id }); },
     });
     const r = await (await handle(cronReq("pull"), deps(store, stripe))).json();
     expect(r.openFailures).toBe(1);
+    expect(getInvoiceCalls).not.toContain("in_a");              // el listado ya trae la factura: no se vuelve a pedir
     expect(store.st.failures.has("in_a")).toBe(true);
     expect(store.st.failures.has("in_b")).toBe(false);          // todavía sin intento de cobro
     expect(store.st.failures.get("in_vieja").status).toBe("recovered");
