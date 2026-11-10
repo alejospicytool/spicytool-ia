@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Datos reales del CRM comercial (repo público: no subir)
+_import/
