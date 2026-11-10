@@ -233,14 +233,35 @@ describe("reconcile y rutas protegidas", () => {
     await handle(cronReq("reconcile"), deps(store, fakeStripe(subs)));
     expect(Object.fromEntries(store.st.apply.map((a) => [a.key, a.after]))).toEqual({ "stripe:ca": 100, "stripe:cb": 100, "stripe:ct": 0 });
   });
-  it("carga inicial: marca baseline, informa los planes sin clasificar y se bloquea si ya hay movimientos", async () => {
+  it("carga inicial: marca baseline y se bloquea si ya hay movimientos", async () => {
     const store = fakeStore(), stripe = fakeStripe([stripeSub("a", "ca", [[price("pa", 10000)]])]);
+    store.st.plans.set("pa", { countsInMrr: true, category: "saas" });
     const r = await (await handle(cronReq("reconcile", { baseline: true }), deps(store, stripe))).json();
-    expect(store.st.apply[0]).toMatchObject({ baseline: true, cause: "carga_inicial" });
-    expect(r.unclassified).toBe(1);
+    expect(store.st.apply[0]).toMatchObject({ baseline: true, cause: "carga_inicial", after: 100 });
+    expect(r.unclassified).toBe(0);
+    expect(store.st.runs[0].kind).toBe("baseline");
     store.st.eventsCount = 3;
     const again = await handle(cronReq("reconcile", { baseline: true }), deps(store, stripe));
     expect(again.status).toBe(409);
+    expect((await again.json()).error).toBe("baseline_ya_hecho");
+  });
+  it("carga inicial con planes SIN clasificar se rehúsa (si no, toda la base saldría como 'nuevos' al clasificar)", async () => {
+    const store = fakeStore(), stripe = fakeStripe([stripeSub("a", "ca", [[price("pa", 10000)]])]);
+    const res = await handle(cronReq("reconcile", { baseline: true }), deps(store, stripe));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("planes_sin_clasificar");
+    expect(store.st.apply).toHaveLength(0);          // no se registró ningún baseline
+    expect(store.st.plans.get("pa").category).toBe("sin_clasificar"); // pero los datos de Stripe sí quedaron traídos
+    const forced = await handle(cronReq("reconcile", { baseline: true, force: true }), deps(store, stripe));
+    expect(forced.status).toBe(200);
+  });
+  it("/pull trae todo de Stripe SIN calcular MRR y avisa cuántos planes hay que clasificar", async () => {
+    const store = fakeStore(), stripe = fakeStripe([stripeSub("a", "ca", [[price("pa", 10000)]]), stripeSub("b", "cb", [[price("pb", 500)]])]);
+    const r = await (await handle(cronReq("pull"), deps(store, stripe))).json();
+    expect(r).toEqual({ subscriptions: 2, staleCount: 0, unclassified: 2 });
+    expect(store.st.apply).toHaveLength(0);
+    expect(store.st.subs.size).toBe(2);
+    expect((await handle(adminReq("pull"), deps(store, stripe))).status).toBe(403);
   });
   it("un cliente con error (falta tipo de cambio) no frena al resto y queda informado", async () => {
     const subs = [stripeSub("a", "ca", [[price("pa", 10000)]], { currency: "ars" }), stripeSub("b", "cb", [[price("pa", 10000)]])];

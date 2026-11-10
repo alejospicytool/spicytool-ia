@@ -4,7 +4,7 @@
 --
 -- Acceso: SOLO admins pueden leer. Las escrituras las hace la Edge Function `revenue-sync` con la
 -- service_role (que se saltea RLS); el único permiso de escritura para admins desde el front es
--- clasificar planes (rev_plans.category / counts_in_mrr).
+-- clasificar planes (rev_plans.category / counts_in_mrr) y cargar tipos de cambio (rev_fx_rates).
 -- Las tablas viejas revenue_customers / revenue_customer_mrr (vacías, sin uso) NO se tocan.
 
 create or replace function public.is_admin() returns boolean
@@ -197,7 +197,7 @@ create policy "Revenue: admins clasifican planes" on public.rev_plans        for
 create policy "Revenue: admins leen clientes"  on public.rev_customers       for select to authenticated using (public.is_admin());
 create policy "Revenue: admins leen suscripciones" on public.rev_subscriptions for select to authenticated using (public.is_admin());
 create policy "Revenue: admins leen movimientos" on public.rev_mrr_events    for select to authenticated using (public.is_admin());
-create policy "Revenue: admins leen tipos de cambio" on public.rev_fx_rates  for select to authenticated using (public.is_admin());
+create policy "Revenue: admins manejan tipos de cambio" on public.rev_fx_rates for all to authenticated using (public.is_admin()) with check (public.is_admin());
 create policy "Revenue: admins leen auditoría" on public.rev_manual_audit    for select to authenticated using (public.is_admin());
 create policy "Revenue: admins leen histórico" on public.rev_history_monthly for select to authenticated using (public.is_admin());
 create policy "Revenue: admins leen corridas" on public.rev_sync_runs for select to authenticated using (public.is_admin());

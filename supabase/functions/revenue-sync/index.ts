@@ -1,8 +1,10 @@
-// Métricas de revenue (reemplazo de ChartMogul). Una sola Edge Function con 4 rutas:
+// Métricas de revenue (reemplazo de ChartMogul). Una sola Edge Function con 5 rutas:
 //
 //   POST …/revenue-sync/stripe     Webhook de Stripe (verifica la firma, ignora duplicados, relee la suscripción).
-//   POST …/revenue-sync/reconcile  Carga inicial ({"baseline":true}, una sola vez) y chequeo nocturno de respaldo.
+//   POST …/revenue-sync/reconcile  Carga inicial ({"baseline":true}, una sola vez, y solo con todos los planes clasificados)
+//                                  y chequeo nocturno de respaldo.
 //                                  Lo llama pg_cron con el header x-revenue-cron-secret (o un admin logueado).
+//   POST …/revenue-sync/pull       Trae las suscripciones de Stripe a la base SIN calcular MRR (primer paso de la puesta en marcha).
 //   POST …/revenue-sync/recompute  Recalcula el MRR de todos con lo que ya hay en la base (sin llamar a Stripe).
 //                                  Se usa después de clasificar planes o cargar tipos de cambio. Solo admin o cron.
 //   POST …/revenue-sync/manual     Alta / edición de suscripciones de clientes que pagan por fuera de Stripe. Solo admin.
@@ -205,8 +207,8 @@ async function recomputeAll(ctx: Ctx, cause: string, baseline: boolean) {
   return { fixes, errors, unclassified: await ctx.store.countUnclassified() };
 }
 
-// Carga inicial (baseline) y chequeo nocturno
-export async function reconcile(ctx: Ctx, { baseline = false } = {}) {
+// Trae las suscripciones de Stripe a la base (clientes, planes nuevos sin clasificar y suscripciones). NO recalcula MRR.
+export async function pullFromStripe(ctx: Ctx) {
   const seen = new Set<string>();
   for (const status of ["active", "past_due", "trialing"]) {
     for await (const sub of ctx.stripe.listSubscriptions(status)) {
@@ -224,9 +226,19 @@ export async function reconcile(ctx: Ctx, { baseline = false } = {}) {
     const prev = await ctx.store.getSubscription(id); // Stripe ya no la tiene: se da por cancelada
     if (prev) await ctx.store.upsertSubscription({ ...prev, status: "canceled", canceledAt: ctx.now().toISOString() });
   }
+  return { subscriptions: seen.size, staleCount, unclassified: await ctx.store.countUnclassified() };
+}
+
+// Chequeo nocturno (baseline = false) y carga inicial (baseline = true).
+// ORDEN DE PUESTA EN MARCHA: 1) pullFromStripe (ruta /pull)  2) clasificar planes y cargar tipos de cambio
+// 3) carga inicial. Si se hiciera la carga inicial con planes sin clasificar, todo valdría 0 y, al clasificar,
+// toda la base aparecería como "nuevos": por eso se rehúsa (salvo force).
+export async function reconcile(ctx: Ctx, { baseline = false, force = false } = {}) {
+  const pulled = await pullFromStripe(ctx);
+  if (baseline && !force && pulled.unclassified > 0) throw new Error("planes_sin_clasificar");
   const r = await recomputeAll(ctx, baseline ? "carga_inicial" : "reconciliacion", baseline);
-  await ctx.store.logRun({ kind: baseline ? "baseline" : "reconcile", fixes: r.fixes.length, stale: staleCount, unclassified: r.unclassified, errors: r.errors });
-  return { ...r, staleCount };
+  await ctx.store.logRun({ kind: baseline ? "baseline" : "reconcile", fixes: r.fixes.length, stale: pulled.staleCount, unclassified: r.unclassified, errors: r.errors });
+  return { ...r, staleCount: pulled.staleCount };
 }
 
 // ── Carga manual ───────────────────────────────────────────────────────────────────────────────────────
@@ -335,8 +347,9 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
       const baseline = body.baseline === true;
       // La carga inicial es de una sola vez: si ya hay movimientos, no se permite (evita marcar todo como baseline de nuevo)
       if (baseline && (await deps.store.countEvents()) > 0) return reply({ error: "baseline_ya_hecho" }, 409);
-      return reply(await reconcile(ctx, { baseline }));
+      return reply(await reconcile(ctx, { baseline, force: body.force === true }));
     }
+    if (route === "pull") return reply(await pullFromStripe(ctx));
     if (route === "recompute") {
       const r = await recomputeAll(ctx, "recalculo", false);
       await ctx.store.logRun({ kind: "recompute", fixes: r.fixes.length, stale: 0, unclassified: r.unclassified, errors: r.errors });
@@ -348,9 +361,9 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
     }
   } catch (e) {
     const msg = String((e as Error).message || e);
-    const known = /^(monto_invalido|intervalo_invalido|estado_invalido|cliente_requerido|cliente_invalido|plan_inexistente|suscripcion_invalida)$/.test(msg);
+    const known = /^(monto_invalido|intervalo_invalido|estado_invalido|cliente_requerido|cliente_invalido|plan_inexistente|suscripcion_invalida|planes_sin_clasificar)$/.test(msg);
     if (!known) console.error("revenue-sync", route, e);
-    return reply({ error: known ? msg : "error", detail: known ? undefined : msg }, known ? 400 : 500);
+    return reply({ error: known ? msg : "error", detail: known ? undefined : msg }, msg === "planes_sin_clasificar" ? 409 : known ? 400 : 500);
   }
   return reply({ error: "not_found" }, 404);
 }
