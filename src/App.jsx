@@ -8,6 +8,7 @@ import {
 } from "./timeTracking.js";
 import { entitySearch, buildEntityLink, parseEntityLink, clearedSearch, LINK_TARGETS } from "./deepLinks.js";
 import { dayBA, weekStartBA, closureEvents, scoreRequiredForStatus } from "./metricsLogic.js";
+import CrmApp from "./crm/CrmApp.jsx";
 
 // ── Supabase ───────────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://khuavhbraikzreyhptog.supabase.co";
@@ -133,6 +134,7 @@ const NAV_ICONS = {
   services:"⚡", categories:"⊞",
   opsdash:"🧭", tickets:"🎫", tasks:"📋", onboarding:"🚀", usuarios:"👥",
   devdash:"📈", devtasks:"🛠️",
+  crm:"💼",
 };
 const NAV_LABELS = {
   inicio:"Inicio", notes:"Notas", mytime:"Mi tiempo", timeadmin:"Control de jornada",
@@ -141,6 +143,7 @@ const NAV_LABELS = {
   services:"Servicios", categories:"Categorías",
   opsdash:"Resumen", tickets:"Tickets", tasks:"Tareas", onboarding:"Onboarding", usuarios:"Usuarios",
   devdash:"Resumen", devtasks:"Tareas",
+  crm:"CRM comercial",
 };
 const ADMIN_ONLY_VIEWS = ["add","usuarios","timeadmin"];
 // Inicio, Notas y Tiempo son visibles para todos sin pasar por allowed_sections — Inicio
@@ -184,6 +187,11 @@ const NAV_SECTIONS = [
   {
     label: "Devs",
     views: ["devdash","devtasks"],
+    adminOnly: false,
+  },
+  {
+    label: "CRM",
+    views: ["crm"],
     adminOnly: false,
   },
   {
@@ -5977,6 +5985,7 @@ export default function SpicyFinanzas() {
       {view==="usuarios"&&isAdmin&&<UserPermissionsPanel users={allUsers} allowedSections={allowedSections} onRefresh={loadAll}/>}
       {view==="mytime"&&<MiTiempoView currentUserId={session.user.id}/>}
       {view==="timeadmin"&&isAdmin&&<ControlJornadaView allUsers={allUsers}/>}
+      {view==="crm"&&<CrmApp sb={sb}/>}
       {view==="notes"&&<NotesView notes={notes} currentUserId={session.user.id} currentUserEmail={session.user.email} isAdmin={isAdmin} onRefresh={loadAll}/>}
 
       {/* ADD */}
