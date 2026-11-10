@@ -121,7 +121,7 @@ describe("avisos", () => {
 });
 
 // ══ Tablero tipo Revenue Dashboard ═══════════════════════════════════════════════════════════════════
-import { monthlyRows, periodRows, periodKpis, customerMonthly, segmentSummary, matchSegment, projectionMonths, projectionDefaults, computeProjection, failuresSummary, baselineEnd } from "./revenueMetrics.js";
+import { monthlyRows, periodRows, periodKpis, customerMonthly, segmentSummary, matchSegment, projectionMonths, projectionDefaults, computeProjection, failuresSummary, liveCustomerKeys, baselineEnd } from "./revenueMetrics.js";
 
 const H = (month, mrr, clientes, o = {}) => ({ month, data: { mrr_usd: mrr, clientes_pagos: clientes, new_mrr: 0, expansion_mrr: 0, contraction_mrr: 0, churn_mrr: 0, churn_clientes: 0, reactivation_mrr: 0, new_clientes: 0, parcial: "no", ...o } });
 const hist = [
@@ -279,6 +279,21 @@ describe("pagos fallidos", () => {
   });
   it("churn involuntario del mes: bajas de clientes cuya suscripción se canceló por falta de pago", () => {
     expect(r.involuntary).toEqual({ count: 1, mrr: 50, of: 2 });
+  });
+  it("deuda histórica: las facturas de clientes SIN suscripción viva no cuentan como 'para cobrar' ni como MRR en riesgo", () => {
+    const live = liveCustomerKeys([{ customer_key: "stripe:a", status: "past_due" }, { customer_key: "stripe:b", status: "canceled" }, { customer_key: "stripe:x", status: "trialing" }]);
+    expect([...live].sort()).toEqual(["stripe:a", "stripe:x"]);
+    const s = failuresSummary({ failures, customers: cs, liveKeys: live, involuntaryKeys: new Set(["stripe:c"]), events: evs, now });
+    expect(s.open.map((x) => x.invoice_id)).toEqual(["in_1", "in_2"]);       // solo las de A
+    expect(s.openCount).toBe(2); expect(s.openAmount).toBe(200);
+    expect(s.legacy.map((x) => x.invoice_id)).toEqual(["in_3"]);               // la de B queda como histórica
+    expect(s.legacyCount).toBe(1); expect(s.legacyAmount).toBe(40);
+    expect(s.mrrAtRisk).toBe(300); expect(s.customersAtRisk).toBe(1);          // B ya no infla el riesgo
+    // los recuperados del mes no dependen de la suscripción
+    expect(s.recoveredCount).toBe(1);
+  });
+  it("sin liveKeys todas cuentan como activas (compatibilidad)", () => {
+    expect(r.legacyCount).toBe(0); expect(r.openCount).toBe(3);
   });
   it("sin datos no inventa nada", () => {
     const e = failuresSummary({ now });

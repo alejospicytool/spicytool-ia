@@ -1,6 +1,6 @@
 // Páginas de la sección Métricas: Overview, MRR & ARR, Churn, Retención, Pagos fallidos, Clientes, Proyección y Planes.
 import { useMemo, useState } from "react";
-import { periodKpis, customerMonthly, segmentSummary, matchSegment, projectionMonths, projectionDefaults, computeProjection, failuresSummary, movementsFor } from "./revenueMetrics.js";
+import { periodKpis, customerMonthly, segmentSummary, matchSegment, projectionMonths, projectionDefaults, computeProjection, failuresSummary, liveCustomerKeys, movementsFor } from "./revenueMetrics.js";
 import { Kpi, PageHeader, Notice, Alerts, Modal, MonthBars, money, signed, pct, monthLabel, monthShort, fmtDate, fmtDateTime, initials } from "./revenueUi.jsx";
 import { callFn } from "./revenueApi.js";
 
@@ -115,7 +115,7 @@ export function MrrPage({ rows }) {
 // ── Churn ────────────────────────────────────────────────────────────────────────────────────────────
 export function ChurnPage({ rows, d, now }) {
   const k = useMemo(() => periodKpis(rows), [rows]);
-  const fs = useMemo(() => failuresSummary({ failures: d.failures, customers: d.customers, involuntaryKeys: d.involuntaryKeys, events: d.events, now }), [d, now]);
+  const fs = useMemo(() => failuresSummary({ failures: d.failures, customers: d.customers, liveKeys: liveCustomerKeys(d.subs), involuntaryKeys: d.involuntaryKeys, events: d.events, now }), [d, now]);
   if (!k) return <div><PageHeader title="Churn" /><div className="card"><div className="empty">Sin datos en este período.</div></div></div>;
   return (
     <div>
@@ -171,9 +171,9 @@ export function RetentionPage({ rows }) {
 
 // ── Pagos fallidos ───────────────────────────────────────────────────────────────────────────────────
 export function FailedPage({ d, now }) {
-  const fs = useMemo(() => failuresSummary({ failures: d.failures, customers: d.customers, involuntaryKeys: d.involuntaryKeys, events: d.events, now }), [d, now]);
+  const fs = useMemo(() => failuresSummary({ failures: d.failures, customers: d.customers, liveKeys: liveCustomerKeys(d.subs), involuntaryKeys: d.involuntaryKeys, events: d.events, now }), [d, now]);
   const resolved = useMemo(() => d.failures.filter((f) => f.status !== "open" && f.resolved_at && now - new Date(f.resolved_at) < 30 * 864e5).sort((a, b) => (a.resolved_at < b.resolved_at ? 1 : -1)), [d.failures, now]);
-  const [showResolved, setShowResolved] = useState(false);
+  const [showResolved, setShowResolved] = useState(false), [showLegacy, setShowLegacy] = useState(false);
   const names = useMemo(() => Object.fromEntries(d.customers.map((c) => [c.key, c])), [d.customers]);
   if (!d.v2) return <div><PageHeader title="Pagos fallidos" /><div className="card"><div className="empty">Falta aplicar <b>supabase_revenue_v2.sql</b> en Supabase para registrar los pagos fallidos.</div></div></div>;
   const STATUS = { recovered: ["badge-green", "Recuperado"], void: ["badge-muted", "Anulada"], uncollectible: ["badge-red", "Incobrable"] };
@@ -182,13 +182,13 @@ export function FailedPage({ d, now }) {
       <PageHeader title="Pagos fallidos" sub="Facturas de Stripe con intentos de cobro rechazados. Stripe reintenta solo; si se agotan los reintentos, la suscripción se cancela." />
       <div className="kpi-grid">
         <Kpi color="red" label="MRR en riesgo" value={money(fs.mrrAtRisk)} valueColor={fs.mrrAtRisk ? "var(--accent)" : undefined} sub={`${fs.customersAtRisk} ${fs.customersAtRisk === 1 ? "cliente" : "clientes"} con una factura impaga`} />
-        <Kpi color="yellow" label="Facturas abiertas" value={fs.openCount} sub={fs.openCount ? `${money(fs.openAmount)} por cobrar` : "nada pendiente"} />
+        <Kpi color="yellow" label="Facturas abiertas" value={fs.openCount} sub={fs.openCount ? `${money(fs.openAmount)} por cobrar · clientes con suscripción activa` : "nada pendiente"} />
         <Kpi color="green" label="Recuperados este mes" value={fs.recoveredCount} sub={fs.recoveredCount ? `${money(fs.recoveredAmount)} cobrados` : "—"} />
         <Kpi color="blue" label="Tasa de recuperación" value={fs.recoveryRate == null ? "—" : pct(fs.recoveryRate)} sub="recuperadas / cerradas del mes" />
       </div>
       <div className="card">
         <div className="card-title">Para cobrar <span className="card-sub">{fs.openCount} {fs.openCount === 1 ? "factura" : "facturas"}</span></div>
-        {fs.open.length === 0 && <div className="empty">No hay pagos fallidos abiertos. 🎉</div>}
+        {fs.open.length === 0 && <div className="empty">No hay pagos fallidos abiertos de clientes con suscripción activa. 🎉</div>}
         {fs.open.map((f) => {
           const c = f.customer, hot = f.attempt_count >= 3 || !f.next_attempt_at;
           return (
@@ -208,6 +208,18 @@ export function FailedPage({ d, now }) {
           );
         })}
       </div>
+      {fs.legacyCount > 0 && (
+        <div className="card">
+          <div className="card-title">Deuda histórica <span className="card-sub">{fs.legacyCount} {fs.legacyCount === 1 ? "factura" : "facturas"} · {money(fs.legacyAmount)} · de clientes sin suscripción activa</span>
+            <button className="btn-sm" onClick={() => setShowLegacy(!showLegacy)}>{showLegacy ? "Ocultar" : "Ver"}</button></div>
+          <div style={{ fontSize: 12, color: "#888" }}>Facturas que quedaron abiertas en Stripe de clientes que ya no tienen suscripción. No cuentan en el MRR en riesgo ni en la tasa de cobro. Si ya no se van a cobrar, conviene anularlas o marcarlas incobrables en Stripe.</div>
+          {showLegacy && (
+            <div className="table-wrap" style={{ marginTop: 12 }}><table><thead><tr><th>Cliente</th><th>Monto</th><th>Intentos</th><th>Desde</th><th></th></tr></thead>
+              <tbody>{[...fs.legacy].reverse().map((f) => (
+                <tr key={f.invoice_id}><td>{(f.customer && (f.customer.name || f.customer.email)) || f.customer_key}</td><td>{Number(f.amount_due).toLocaleString("es-AR", { maximumFractionDigits: 2 })} {String(f.currency).toUpperCase()}</td><td>{f.attempt_count}</td><td>{fmtDate(f.first_failed_at)}</td>
+                  <td>{f.hosted_invoice_url && <a className="btn-sm" href={f.hosted_invoice_url} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}>Ver factura</a>}</td></tr>))}</tbody></table></div>)}
+        </div>
+      )}
       <div className="card">
         <div className="card-title">Resueltos en los últimos 30 días <button className="btn-sm" onClick={() => setShowResolved(!showResolved)}>{showResolved ? "Ocultar" : `Ver (${resolved.length})`}</button></div>
         {showResolved && (resolved.length === 0 ? <div className="empty">Nada resuelto en el último mes.</div> : (

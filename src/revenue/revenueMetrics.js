@@ -249,11 +249,16 @@ export function computeProjection(baseTotal, proj, keys) {
 
 // ── Pagos fallidos ────────────────────────────────────────────────────────────────────────────────────
 const daysBetween = (a, b) => Math.max(0, Math.floor((new Date(b) - new Date(a)) / 864e5));
-export function failuresSummary({ failures = [], customers = [], involuntaryKeys = new Set(), events = [], now = new Date() }) {
+// liveKeys = clientes con alguna suscripción viva (active / past_due / trialing). "Para cobrar" son SOLO las facturas de esos
+// clientes; el resto (clientes que ya se fueron y cuyas facturas quedaron abiertas en Stripe) es deuda histórica y se
+// informa aparte para que no infle el MRR en riesgo. Sin liveKeys, todas cuentan como activas.
+export function failuresSummary({ failures = [], customers = [], liveKeys = null, involuntaryKeys = new Set(), events = [], now = new Date() }) {
   const byKey = new Map(customers.map((c) => [c.key, c]));
-  const open = failures.filter((f) => f.status === "open")
+  const all = failures.filter((f) => f.status === "open")
     .map((f) => ({ ...f, customer: byKey.get(f.customer_key) || null, daysOpen: daysBetween(f.first_failed_at, now) }))
     .sort((a, b) => (a.first_failed_at < b.first_failed_at ? -1 : 1));
+  const isLive = (f) => !liveKeys || liveKeys.has(f.customer_key);
+  const open = all.filter(isLive), legacy = all.filter((f) => !isLive(f));
   const atRisk = new Map();
   for (const f of open) { const c = f.customer; if (c && num(c.mrr) > 0) atRisk.set(c.key, num(c.mrr)); }
   const month = monthKeyOf(now);
@@ -266,9 +271,13 @@ export function failuresSummary({ failures = [], customers = [], involuntaryKeys
   return {
     open, openCount: open.length,
     openAmount: round2(open.reduce((s, f) => s + num(f.amount_due), 0)),
+    legacy, legacyCount: legacy.length, legacyAmount: round2(legacy.reduce((s, f) => s + num(f.amount_due), 0)),
     mrrAtRisk: round2([...atRisk.values()].reduce((s, v) => s + v, 0)), customersAtRisk: atRisk.size,
     recoveredCount: recovered.length, recoveredAmount: round2(recovered.reduce((s, f) => s + num(f.amount_due), 0)),
     recoveryRate: closed ? round2((recovered.length / closed) * 100) : null,
     involuntary: { count: invol.length, mrr: round2(Math.abs(invol.reduce((s, e) => s + num(e.delta), 0))), of: churn.count },
   };
 }
+
+// Clientes con una suscripción viva (para separar "Para cobrar" de la deuda histórica)
+export const liveCustomerKeys = (subs) => new Set(subs.filter((s) => ["active", "past_due", "trialing"].includes(s.status)).map((s) => s.customer_key));
