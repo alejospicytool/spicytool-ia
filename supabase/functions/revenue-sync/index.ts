@@ -148,7 +148,7 @@ export interface Store {
   releaseEvent(id: string): Promise<void>;
   applyMrr(key: string, after: number, cause: string, baseline: boolean): Promise<{ customerKey: string; before: number; after: number } | null>;
   countUnclassified(): Promise<number>;
-  countEvents(): Promise<number>;
+  baselineDone(): Promise<boolean>; // ya se hizo la carga inicial
   audit(row: { subscriptionId: string; before: SubDoc | null; after: SubDoc; userId: string | null }): Promise<void>;
   logRun(run: { kind: string; fixes: number; stale: number; unclassified: number; errors: unknown[] }): Promise<void>;
   createManualPlan(name: string, category: string, countsInMrr: boolean): Promise<string>;
@@ -234,8 +234,12 @@ export async function pullFromStripe(ctx: Ctx) {
 // 3) carga inicial. Si se hiciera la carga inicial con planes sin clasificar, todo valdría 0 y, al clasificar,
 // toda la base aparecería como "nuevos": por eso se rehúsa (salvo force).
 export async function reconcile(ctx: Ctx, { baseline = false, force = false } = {}) {
+  const done = await ctx.store.baselineDone();
+  if (baseline && done) throw new Error("baseline_ya_hecho"); // la carga inicial es de una sola vez
   const pulled = await pullFromStripe(ctx);
   if (baseline && !force && pulled.unclassified > 0) throw new Error("planes_sin_clasificar");
+  // Hasta la carga inicial NO se registran movimientos (saldría toda la base como "nuevos"): solo se trae la data
+  if (!baseline && !done) return { pulledOnly: true, ...pulled, fixes: [], errors: [] };
   const r = await recomputeAll(ctx, baseline ? "carga_inicial" : "reconciliacion", baseline);
   await ctx.store.logRun({ kind: baseline ? "baseline" : "reconcile", fixes: r.fixes.length, stale: pulled.staleCount, unclassified: r.unclassified, errors: r.errors });
   return { ...r, staleCount: pulled.staleCount };
@@ -276,7 +280,8 @@ export async function saveManualSubscription(ctx: Ctx, data: ManualInput, userId
   };
   await ctx.store.upsertSubscription(doc);
   await ctx.store.audit({ subscriptionId: id, before: prev, after: doc, userId });
-  const result = await recomputeCustomer(ctx, customerKey, { cause: prev ? "manual_edicion" : "manual_alta" });
+  // Antes de la carga inicial se guarda pero no se registra movimiento (la carga inicial lo va a incluir como base)
+  const result = (await ctx.store.baselineDone()) ? await recomputeCustomer(ctx, customerKey, { cause: prev ? "manual_edicion" : "manual_alta" }) : null;
   return { customerKey, subscriptionId: id, result };
 }
 
@@ -320,10 +325,10 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
       let result: unknown = null;
       if (sub) {
         const doc = await saveStripeSubscription(ctx, sub);
-        result = await recomputeCustomer(ctx, doc.customerKey, { cause: event.type });
+        result = (await deps.store.baselineDone()) ? await recomputeCustomer(ctx, doc.customerKey, { cause: event.type }) : { skipped: "sin_carga_inicial" };
       } else {
         const prev = await deps.store.getSubscription(`stripe:${event.data.object.id}`);
-        if (prev) { await deps.store.upsertSubscription({ ...prev, status: "canceled", canceledAt: now().toISOString() }); result = await recomputeCustomer(ctx, prev.customerKey, { cause: event.type }); }
+        if (prev) { await deps.store.upsertSubscription({ ...prev, status: "canceled", canceledAt: now().toISOString() }); result = (await deps.store.baselineDone()) ? await recomputeCustomer(ctx, prev.customerKey, { cause: event.type }) : { skipped: "sin_carga_inicial" }; }
       }
       await deps.store.finishEvent(event.id, result);
       return reply({ ok: true });
@@ -345,12 +350,11 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   try {
     if (route === "reconcile") {
       const baseline = body.baseline === true;
-      // La carga inicial es de una sola vez: si ya hay movimientos, no se permite (evita marcar todo como baseline de nuevo)
-      if (baseline && (await deps.store.countEvents()) > 0) return reply({ error: "baseline_ya_hecho" }, 409);
       return reply(await reconcile(ctx, { baseline, force: body.force === true }));
     }
     if (route === "pull") return reply(await pullFromStripe(ctx));
     if (route === "recompute") {
+      if (!(await deps.store.baselineDone())) return reply({ error: "sin_carga_inicial" }, 409);
       const r = await recomputeAll(ctx, "recalculo", false);
       await ctx.store.logRun({ kind: "recompute", fixes: r.fixes.length, stale: 0, unclassified: r.unclassified, errors: r.errors });
       return reply(r);
@@ -361,9 +365,9 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
     }
   } catch (e) {
     const msg = String((e as Error).message || e);
-    const known = /^(monto_invalido|intervalo_invalido|estado_invalido|cliente_requerido|cliente_invalido|plan_inexistente|suscripcion_invalida|planes_sin_clasificar)$/.test(msg);
+    const known = /^(monto_invalido|intervalo_invalido|estado_invalido|cliente_requerido|cliente_invalido|plan_inexistente|suscripcion_invalida|planes_sin_clasificar|baseline_ya_hecho)$/.test(msg);
     if (!known) console.error("revenue-sync", route, e);
-    return reply({ error: known ? msg : "error", detail: known ? undefined : msg }, msg === "planes_sin_clasificar" ? 409 : known ? 400 : 500);
+    return reply({ error: known ? msg : "error", detail: known ? undefined : msg }, /^(planes_sin_clasificar|baseline_ya_hecho)$/.test(msg) ? 409 : known ? 400 : 500);
   }
   return reply({ error: "not_found" }, 404);
 }
@@ -422,7 +426,7 @@ export function makeStore(sb: any): Store {
     async releaseEvent(id) { check(await sb.from("rev_stripe_events").delete().eq("id", id)); },
     async applyMrr(key, after, cause, baseline) { return check(await sb.rpc("rev_apply_mrr", { p_key: key, p_after: after, p_cause: cause, p_baseline: baseline })) ?? null; },
     async countUnclassified() { const r = await sb.from("rev_plans").select("price_id", { count: "exact", head: true }).eq("category", "sin_clasificar"); check(r); return r.count || 0; },
-    async countEvents() { const r = await sb.from("rev_mrr_events").select("id", { count: "exact", head: true }); check(r); return r.count || 0; },
+    async baselineDone() { const r = check(await sb.from("rev_sync_runs").select("id").eq("kind", "baseline").limit(1)); return (r || []).length > 0; },
     async audit(a) { check(await sb.from("rev_manual_audit").insert({ subscription_id: a.subscriptionId, before: a.before, after: a.after, user_id: a.userId })); },
     async logRun(r) { check(await sb.from("rev_sync_runs").insert({ kind: r.kind, fixes: r.fixes, stale: r.stale, unclassified: r.unclassified, errors: r.errors })); },
     async createManualPlan(name, category, countsInMrr) {

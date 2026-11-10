@@ -9,6 +9,7 @@ import {
 import { entitySearch, buildEntityLink, parseEntityLink, clearedSearch, LINK_TARGETS } from "./deepLinks.js";
 import { dayBA, weekStartBA, closureEvents, scoreRequiredForStatus } from "./metricsLogic.js";
 import CrmApp from "./crm/CrmApp.jsx";
+import RevenueApp from "./revenue/RevenueApp.jsx";
 
 // ── Supabase ───────────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://khuavhbraikzreyhptog.supabase.co";
@@ -135,6 +136,7 @@ const NAV_ICONS = {
   opsdash:"🧭", tickets:"🎫", tasks:"📋", onboarding:"🚀", usuarios:"👥",
   devdash:"📈", devtasks:"🛠️",
   crm:"💼",
+  metrics:"💹", metrics_customers:"👤", metrics_plans:"🏷️", metrics_manual:"✍️", metrics_history:"🗂️",
 };
 const NAV_LABELS = {
   inicio:"Inicio", notes:"Notas", mytime:"Mi tiempo", timeadmin:"Control de jornada",
@@ -144,8 +146,11 @@ const NAV_LABELS = {
   opsdash:"Resumen", tickets:"Tickets", tasks:"Tareas", onboarding:"Onboarding", usuarios:"Usuarios",
   devdash:"Resumen", devtasks:"Tareas",
   crm:"CRM comercial",
+  metrics:"Resumen", metrics_customers:"Clientes", metrics_plans:"Planes", metrics_manual:"Carga manual", metrics_history:"Histórico",
 };
-const ADMIN_ONLY_VIEWS = ["add","usuarios","timeadmin"];
+const ADMIN_ONLY_VIEWS = ["add","usuarios","timeadmin","metrics","metrics_customers","metrics_plans","metrics_manual","metrics_history"];
+// Secciones solo para admins: no se asignan desde el panel de Usuarios (la base también lo exige, ver supabase_revenue.sql).
+const ADMIN_ONLY_SECTIONS = ["Métricas"];
 // Inicio, Notas y Tiempo son visibles para todos sin pasar por allowed_sections — Inicio
 // es la landing personal, Notas es información de equipo que cualquiera puede
 // ver y crear (según el pedido), y Tiempo es el control de jornada de cada persona
@@ -193,6 +198,11 @@ const NAV_SECTIONS = [
     label: "CRM",
     views: ["crm"],
     adminOnly: false,
+  },
+  {
+    label: "Métricas",
+    views: ["metrics","metrics_customers","metrics_plans","metrics_manual","metrics_history"],
+    adminOnly: true,
   },
   {
     label: "Dashboard Producto",
@@ -621,7 +631,7 @@ function CategoriesPanel({ catsIncome, catsExpense, isAdmin, onRefresh }) {
 
 // ── User Permissions Panel ───────────────────────────────────────────────────
 function UserPermissionsPanel({ users, allowedSections, onRefresh }) {
-  const sections = NAV_SECTIONS.map(s=>s.label).filter(l=>!ALWAYS_VISIBLE_SECTIONS.includes(l));
+  const sections = NAV_SECTIONS.map(s=>s.label).filter(l=>!ALWAYS_VISIBLE_SECTIONS.includes(l)&&!ADMIN_ONLY_SECTIONS.includes(l));
   const emptyForm = () => ({ email:"", first_name:"", last_name:"", role:"reader" });
 
   const [showAdd, setShowAdd] = useState(false);
@@ -5604,7 +5614,7 @@ export default function SpicyFinanzas() {
 
   const isAdmin = role==="admin";
   const myAllowedSections = new Set(session ? allowedSections.filter(a=>a.user_id===session.user.id).map(a=>a.section) : []);
-  const canSeeSection = (label) => ALWAYS_VISIBLE_SECTIONS.includes(label) || isAdmin || myAllowedSections.has(label);
+  const canSeeSection = (label) => ALWAYS_VISIBLE_SECTIONS.includes(label) || isAdmin || (!ADMIN_ONLY_SECTIONS.includes(label) && myAllowedSections.has(label));
   const currentSection = NAV_SECTIONS.find(s=>s.views.includes(view));
   const currentViewBlocked = (currentSection && !canSeeSection(currentSection.label)) || (ADMIN_ONLY_VIEWS.includes(view) && !isAdmin);
 
@@ -5986,6 +5996,7 @@ export default function SpicyFinanzas() {
       {view==="mytime"&&<MiTiempoView currentUserId={session.user.id}/>}
       {view==="timeadmin"&&isAdmin&&<ControlJornadaView allUsers={allUsers}/>}
       {view==="crm"&&<CrmApp sb={sb}/>}
+      {isAdmin&&view.startsWith("metrics")&&<RevenueApp sb={sb} view={view} setView={setView}/>}
       {view==="notes"&&<NotesView notes={notes} currentUserId={session.user.id} currentUserEmail={session.user.email} isAdmin={isAdmin} onRefresh={loadAll}/>}
 
       {/* ADD */}

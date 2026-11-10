@@ -4,7 +4,7 @@ import { subscriptionMrr, normalizeStripeSub, verifyStripeSignature, handle, mon
 // ── Base y Stripe en memoria ───────────────────────────────────────────────────────────────────────────
 function fakeStore(over = {}) {
   const st = {
-    plans: new Map(), fx: new Map(), customers: new Map(), subs: new Map(), events: new Set(), apply: [], audit: [], eventsCount: 0, released: [], finished: [], runs: [],
+    plans: new Map(), fx: new Map(), customers: new Map(), subs: new Map(), events: new Set(), apply: [], audit: [], baseline: true, released: [], finished: [], runs: [],
   };
   const store = {
     st,
@@ -23,7 +23,7 @@ function fakeStore(over = {}) {
     releaseEvent: async (id) => { st.events.delete(id); st.released.push(id); },
     applyMrr: async (key, after, cause, baseline) => { st.apply.push({ key, after, cause, baseline }); return { customerKey: key, before: 0, after }; },
     countUnclassified: async () => [...st.plans.values()].filter((p) => p.category === "sin_clasificar").length,
-    countEvents: async () => st.eventsCount,
+    baselineDone: async () => st.baseline,
     audit: async (a) => { st.audit.push(a); },
     logRun: async (r) => { st.runs.push(r); },
     createManualPlan: async (name, category, counts) => { const id = "manual:plan-" + st.plans.size; st.plans.set(id, { name, category, countsInMrr: counts }); return id; },
@@ -236,17 +236,34 @@ describe("reconcile y rutas protegidas", () => {
   it("carga inicial: marca baseline y se bloquea si ya hay movimientos", async () => {
     const store = fakeStore(), stripe = fakeStripe([stripeSub("a", "ca", [[price("pa", 10000)]])]);
     store.st.plans.set("pa", { countsInMrr: true, category: "saas" });
+    store.st.baseline = false;
     const r = await (await handle(cronReq("reconcile", { baseline: true }), deps(store, stripe))).json();
     expect(store.st.apply[0]).toMatchObject({ baseline: true, cause: "carga_inicial", after: 100 });
     expect(r.unclassified).toBe(0);
     expect(store.st.runs[0].kind).toBe("baseline");
-    store.st.eventsCount = 3;
+    store.st.baseline = true; // (el motor real la marca al registrar la corrida)
     const again = await handle(cronReq("reconcile", { baseline: true }), deps(store, stripe));
     expect(again.status).toBe(409);
     expect((await again.json()).error).toBe("baseline_ya_hecho");
   });
+  it("ANTES de la carga inicial: webhook, chequeo nocturno, recompute y carga manual guardan datos pero NO registran movimientos", async () => {
+    const store = fakeStore(), stripe = fakeStripe([stripeSub("a", "ca", [[price("pa", 10000)]])]);
+    store.st.baseline = false; store.st.plans.set("pa", { countsInMrr: true, category: "saas" });
+    const hook = await handle(await eventReq(evt("e1", "customer.subscription.created", "a")), deps(store, stripe));
+    expect(await hook.json()).toEqual({ ok: true });
+    expect(store.st.finished[0][1]).toEqual({ skipped: "sin_carga_inicial" });
+    expect(store.st.subs.has("stripe:a")).toBe(true);
+    const night = await (await handle(cronReq("reconcile"), deps(store, stripe))).json();
+    expect(night.pulledOnly).toBe(true);
+    expect((await handle(cronReq("recompute"), deps(store, stripe))).status).toBe(409);
+    const man = await handle(adminReq("manual", { customerName: "X", planPriceId: "pa", amount: 10 }), deps(store, stripe, { isAdmin: async () => true }));
+    expect(man.status).toBe(200);
+    expect(store.st.apply).toHaveLength(0);
+    expect(store.st.runs).toHaveLength(0);
+  });
   it("carga inicial con planes SIN clasificar se rehúsa (si no, toda la base saldría como 'nuevos' al clasificar)", async () => {
     const store = fakeStore(), stripe = fakeStripe([stripeSub("a", "ca", [[price("pa", 10000)]])]);
+    store.st.baseline = false;
     const res = await handle(cronReq("reconcile", { baseline: true }), deps(store, stripe));
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe("planes_sin_clasificar");
