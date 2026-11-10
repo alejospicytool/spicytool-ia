@@ -215,3 +215,36 @@ export function applyConvAsProbabilities(crm) {
   const cs = crm.convStats();
   cs.rows.forEach((r) => { if (r.ok) r.stage.prob = Math.round(r.win * 100); });
 }
+
+// "Pegar conversación": a partir de lo que devolvió la IA arma qué abrir en la ficha del deal.
+//  - si el deal ya existe: { existingId, prefill } (valores del formulario a pisar/completar, como el original)
+//  - si es nuevo: { stage, preset } (valores iniciales del deal nuevo)
+export function buildPasteResult(crm, r, ex) {
+  const c = crm.S.config, p = r.proxima || {}, note = (r.resumen || "").trim();
+  const stamp = "Cargado desde conversación pegada el " + fmtDate(crm.today) + ".";
+  const okTime = /^\d\d:\d\d$/.test(p.hora || "");
+  const pick = (v, arr) => (arr && arr.indexOf(v) >= 0 ? v : "");
+  const tagIds = crm.pasteTagIds(r.etiquetas);
+  if (ex) {
+    const prefill = {};
+    if (!ex.telefono && r.telefono) prefill.telefono = r.telefono;
+    if (!ex.contacto && r.contacto) prefill.contacto = r.contacto;
+    if (p.accion) {
+      prefill.proxima = p.accion; prefill.proximaTipo = p.tipo === "reunion" ? "reunion" : "followup";
+      if (p.fecha && p.fecha >= crm.today) prefill.proximaFecha = p.fecha;
+      if (okTime) prefill.proximaHora = p.hora;
+    }
+    if (note) prefill.notas = (ex.notas ? ex.notas + "\n\n" : "") + note + "\n" + stamp;
+    if (tagIds.length) prefill.tags = Array.from(new Set([...(ex.tags || []), ...tagIds]));
+    return { existingId: ex.id, prefill };
+  }
+  const okStage = c.stages.find((s) => s.id === r.etapa && s.kind === "open");
+  return {
+    stage: okStage ? okStage.id : null,
+    preset: {
+      empresa: r.empresa || r.contacto || "", contacto: r.contacto || "", telefono: r.telefono || "", pais: pick(r.pais, c.countries), tipo: pick(r.tipoCuenta, c.types) || c.types[0] || "",
+      origen: pick(r.origen, c.sources), partner: pick(r.partner, c.partners), tags: tagIds, mrr: +r.mrrEstimado > 0 ? +r.mrrEstimado : (c.ticket || 200), notas: (note ? note + "\n" : "") + stamp,
+      proxima: p.accion || "", proximaTipo: p.tipo === "reunion" ? "reunion" : "followup", proximaFecha: p.fecha && p.fecha >= crm.today ? p.fecha : "", proximaHora: okTime ? p.hora : "09:00",
+    },
+  };
+}

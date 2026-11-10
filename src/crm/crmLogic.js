@@ -245,6 +245,7 @@ export function createCrm(S, opts = {}) {
     taskItems(true).forEach((x) => { if (x.done) return; if (x.fecha < today) v++; else if (x.fecha === today) hh++; });
     return { v, h: hh };
   }
+  const fmtStampDate = (t) => fmtDate(baDateISO(new Date(t)));
   const fmtDay = (d) => (d === today ? "Hoy" : d === isoPlus(1) ? "Mañana" : fmtDate(d));
   function nextDays() {
     const out = [], dn = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
@@ -398,7 +399,7 @@ export function createCrm(S, opts = {}) {
   return {
     S, now, today, curMonth, iso, isoPlus, dealById, tasks, stageById, tagById, prob, weighted, isOpen, overdue, hasPromo, promoTxt, daysIn, rotLevel,
     priceAt, isClient, isActiveClient, estLabel, renewal, nextMilestone, lastContact, califScore, califFilled, califTxt, califState,
-    fillTpl, waMsg, waCustom, waLink, forecastRows, chartSvg, groupBy, forecastData, convStats, kindOf, taskItems, dueCounts, fmtDay, nextDays,
+    fmtStampDate, fillTpl, waMsg, waCustom, waLink, forecastRows, chartSvg, groupBy, forecastData, convStats, kindOf, taskItems, dueCounts, fmtDay, nextDays,
     taskGroups, hoyData, clientsData, weeklyText, aiData, dealAiInfo, pasteContext, pasteMatch, pasteTagIds,
   };
 }

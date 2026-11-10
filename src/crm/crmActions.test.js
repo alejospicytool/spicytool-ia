@@ -232,3 +232,28 @@ describe("configuración", () => {
     expect(crm.S.config.stages[2].prob).toBe(60); // Propuesta: sin datos suficientes, queda igual
   });
 });
+
+describe("pegar conversación", () => {
+  const r = { empresa: "Acme", contacto: "Sol", telefono: "+5491100000000", pais: "Argentina", tipoCuenta: "Otro", origen: "Inventado", partner: "Partner X", etiquetas: ["Planilla"], mrrEstimado: 350, etapa: "demo", proxima: { accion: "Hacer demo", tipo: "reunion", fecha: "2026-11-12", hora: "15:30" }, resumen: "Busca CRM." };
+  it("deal nuevo: usa solo valores permitidos y la etapa abierta que sugiere", () => {
+    const x = A.buildPasteResult(make(), r, null);
+    expect(x.stage).toBe("demo");
+    expect(x.preset).toMatchObject({ empresa: "Acme", pais: "Argentina", tipo: "Otro", origen: "", partner: "Partner X", tags: ["t2"], mrr: 350, proxima: "Hacer demo", proximaTipo: "reunion", proximaFecha: "2026-11-12", proximaHora: "15:30" });
+    expect(x.preset.notas).toBe("Busca CRM.\nCargado desde conversación pegada el 10 nov.");
+  });
+  it("sin precio usa el ticket por defecto; fecha pasada o etapa no abierta se ignoran", () => {
+    const x = A.buildPasteResult(make(), { empresa: "", contacto: "Ana", mrrEstimado: null, etapa: "won", proxima: { accion: "Llamar", fecha: "2026-01-01", hora: "xx" } }, null);
+    expect(x.stage).toBeNull();
+    expect(x.preset).toMatchObject({ empresa: "Ana", mrr: 200, proximaFecha: "", proximaHora: "09:00" });
+  });
+  it("deal existente: completa lo que falta, suma notas y etiquetas sin duplicar", () => {
+    const crm = make(); const ex = crm.dealById("a"); ex.notas = "previa";
+    const x = A.buildPasteResult(crm, { ...r, telefono: "+1", contacto: "Otro" }, ex);
+    expect(x.existingId).toBe("a");
+    expect(x.prefill.telefono).toBeUndefined();  // ya tenía teléfono
+    expect(x.prefill.contacto).toBeUndefined();  // ya tenía contacto
+    expect(x.prefill.notas).toBe("previa\n\nBusca CRM.\nCargado desde conversación pegada el 10 nov.");
+    expect(x.prefill.tags).toEqual(["t1", "t2"]);
+    expect(x.prefill.proximaFecha).toBe("2026-11-12");
+  });
+});
