@@ -25,3 +25,6 @@ dist-ssr
 
 # Datos reales del CRM comercial (repo público: no subir)
 _import/
+
+# Histórico real de ingresos exportado de ChartMogul (repo público: no subir)
+docs/revenue/chartmogul_historico_mensual.json
