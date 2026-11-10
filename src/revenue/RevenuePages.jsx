@@ -1,6 +1,6 @@
 // Páginas de la sección Métricas: Overview, MRR & ARR, Churn, Retención, Pagos fallidos, Clientes, Proyección y Planes.
 import { useMemo, useState } from "react";
-import { periodKpis, customerMonthly, segmentSummary, matchSegment, projectionMonths, projectionDefaults, computeProjection, failuresSummary, liveCustomerKeys, movementsFor } from "./revenueMetrics.js";
+import { periodKpis, customerMonthly, segmentSummary, matchSegment, projectionMonths, projectionDefaults, computeProjection, failuresSummary, liveCustomerKeys, planUsage, movementsFor } from "./revenueMetrics.js";
 import { Kpi, PageHeader, Notice, Alerts, Modal, MonthBars, money, signed, pct, monthLabel, monthShort, fmtDate, fmtDateTime, initials } from "./revenueUi.jsx";
 import { callFn } from "./revenueApi.js";
 
@@ -421,7 +421,16 @@ export function ProjectionPage({ d, allRows, now }) {
 export function PlansPage({ d, done, sb, reload }) {
   const [dirty, setDirty] = useState(false), [busy, setBusy] = useState(false), [notice, setNotice] = useState(null);
   const [fxForm, setFxForm] = useState({ currency: "", rate: "" });
-  const sorted = useMemo(() => [...d.plans].sort((a, b) => (a.category === "sin_clasificar" ? 0 : 1) - (b.category === "sin_clasificar" ? 0 : 1) || String(a.name || a.price_id).localeCompare(String(b.name || b.price_id))), [d.plans]);
+  const usage = useMemo(() => planUsage(d.subs), [d.subs]);
+  const sorted = useMemo(() => [...d.plans].sort((a, b) => (a.category === "sin_clasificar" ? 0 : 1) - (b.category === "sin_clasificar" ? 0 : 1) || ((usage[b.price_id] || {}).live || 0) - ((usage[a.price_id] || {}).live || 0) || String(a.name || a.price_id).localeCompare(String(b.name || b.price_id))), [d.plans, usage]);
+  const usageText = (id) => {
+    const u = usage[id];
+    if (!u) return "sin suscripciones activas";
+    const price = u.min === u.max ? Number(u.min).toLocaleString("es-AR") : `${Number(u.min).toLocaleString("es-AR")}–${Number(u.max).toLocaleString("es-AR")}`;
+    const every = u.intervals.length === 1 && u.intervals[0] === "year" ? "año" : "mes";
+    const n = [u.live ? `${u.live} ${u.live === 1 ? "activa" : "activas"}` : "", u.trial ? `${u.trial} en prueba` : ""].filter(Boolean).join(" · ");
+    return `${u.currencies.join("/")} ${price}/${every} · ${n}`;
+  };
 
   async function update(p, patch) {
     setNotice(null);
@@ -459,7 +468,7 @@ export function PlansPage({ d, done, sb, reload }) {
         {sorted.length === 0 && <div className="empty">Todavía no hay planes. Se cargan al traer los datos de Stripe (Overview → Puesta en marcha).</div>}
         {sorted.map((p) => (
           <div key={p.price_id} className="movement-row" style={{ gap: 12 }}>
-            <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{p.name || "(sin nombre)"}</div><div className="mono" style={{ fontSize: 11, color: "#888" }}>{p.price_id}</div></div>
+            <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{p.name || "(sin nombre)"}</div><div style={{ fontSize: 12, color: "#555" }}>{usageText(p.price_id)}</div><div className="mono" style={{ fontSize: 10, color: "#aaa" }}>{p.price_id}</div></div>
             <select className="inp" style={{ width: 240 }} aria-label={"Categoría de " + (p.name || p.price_id)} value={p.category} onChange={(e) => update(p, { category: e.target.value, counts_in_mrr: DEFAULT_COUNTS[e.target.value] })}>{CATEGORIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
             <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", width: 120 }}><input type="checkbox" checked={p.counts_in_mrr} disabled={p.category === "sin_clasificar"} onChange={(e) => update(p, { counts_in_mrr: e.target.checked })} />Suma al MRR</label>
           </div>))}

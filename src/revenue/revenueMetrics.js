@@ -281,3 +281,21 @@ export function failuresSummary({ failures = [], customers = [], liveKeys = null
 
 // Clientes con una suscripción viva (para separar "Para cobrar" de la deuda histórica)
 export const liveCustomerKeys = (subs) => new Set(subs.filter((s) => ["active", "past_due", "trialing"].includes(s.status)).map((s) => s.customer_key));
+
+// Uso de cada plan: suscripciones activas / en prueba, precio (o rango) y cobro. Sirve para distinguir planes con el mismo nombre.
+export function planUsage(subs) {
+  const out = {};
+  for (const s of subs) {
+    const live = ["active", "past_due"].includes(s.status), trial = s.status === "trialing";
+    if (!live && !trial) continue;
+    for (const it of s.items || []) {
+      const u = (out[it.priceId] ||= { live: 0, trial: 0, min: Infinity, max: -Infinity, intervals: new Set(), currencies: new Set() });
+      if (live) u.live++; else u.trial++;
+      const price = (num(it.unitAmount) * (num(it.quantity) || 1)) / 100;
+      u.min = Math.min(u.min, price); u.max = Math.max(u.max, price);
+      u.intervals.add(it.interval); u.currencies.add(String(s.currency || "usd").toUpperCase());
+    }
+  }
+  for (const u of Object.values(out)) { u.intervals = [...u.intervals]; u.currencies = [...u.currencies]; }
+  return out;
+}

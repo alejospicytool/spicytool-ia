@@ -121,7 +121,7 @@ describe("avisos", () => {
 });
 
 // ══ Tablero tipo Revenue Dashboard ═══════════════════════════════════════════════════════════════════
-import { monthlyRows, periodRows, periodKpis, customerMonthly, segmentSummary, matchSegment, projectionMonths, projectionDefaults, computeProjection, failuresSummary, liveCustomerKeys, baselineEnd } from "./revenueMetrics.js";
+import { monthlyRows, periodRows, periodKpis, customerMonthly, segmentSummary, matchSegment, projectionMonths, projectionDefaults, computeProjection, failuresSummary, liveCustomerKeys, planUsage, baselineEnd } from "./revenueMetrics.js";
 
 const H = (month, mrr, clientes, o = {}) => ({ month, data: { mrr_usd: mrr, clientes_pagos: clientes, new_mrr: 0, expansion_mrr: 0, contraction_mrr: 0, churn_mrr: 0, churn_clientes: 0, reactivation_mrr: 0, new_clientes: 0, parcial: "no", ...o } });
 const hist = [
@@ -298,5 +298,20 @@ describe("pagos fallidos", () => {
   it("sin datos no inventa nada", () => {
     const e = failuresSummary({ now });
     expect(e).toMatchObject({ openCount: 0, openAmount: 0, mrrAtRisk: 0, recoveredCount: 0, recoveryRate: null, involuntary: { count: 0, mrr: 0, of: 0 } });
+  });
+});
+
+describe("uso de cada plan", () => {
+  const item = (priceId, unitAmount, interval = "month", quantity = 1) => ({ priceId, unitAmount, quantity, interval });
+  const subs = [
+    { status: "active", currency: "usd", items: [item("p1", 20000)] }, { status: "past_due", currency: "usd", items: [item("p1", 20000)] },
+    { status: "trialing", currency: "usd", items: [item("p2", 10000)] }, { status: "canceled", currency: "usd", items: [item("p3", 5000)] },
+    { status: "active", currency: "ars", items: [item("p1", 30000, "year", 2)] },
+  ];
+  it("cuenta activas (incluye vencidas) y en prueba; ignora canceladas; precio mínimo y máximo por cobro", () => {
+    const u = planUsage(subs);
+    expect(u.p1).toMatchObject({ live: 3, trial: 0, min: 200, max: 600, intervals: ["month", "year"], currencies: ["USD", "ARS"] });
+    expect(u.p2).toMatchObject({ live: 0, trial: 1, min: 100, max: 100 });
+    expect(u.p3).toBeUndefined();
   });
 });
