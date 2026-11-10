@@ -99,6 +99,18 @@ create table public.rev_history_monthly (
   source text not null default 'chartmogul'
 );
 
+-- Registro de cada corrida del chequeo (nocturno o manual): alimenta los avisos de la sección Métricas
+create table public.rev_sync_runs (
+  id bigint generated always as identity primary key,
+  at timestamptz not null default now(),
+  kind text not null check (kind in ('reconcile','baseline','recompute')),
+  fixes int not null default 0,          -- clientes cuyo MRR se corrigió
+  stale int not null default 0,          -- suscripciones que se habían perdido por webhook
+  unclassified int not null default 0,   -- planes sin clasificar
+  errors jsonb not null default '[]'     -- [{customerKey, error}]
+);
+create index rev_sync_runs_at_idx on public.rev_sync_runs (at desc);
+
 create or replace function public.rev_touch() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin new.updated_at := now(); new.updated_by := auth.uid(); return new; end $$;
@@ -178,6 +190,7 @@ alter table public.rev_fx_rates        enable row level security;
 alter table public.rev_stripe_events   enable row level security;
 alter table public.rev_manual_audit    enable row level security;
 alter table public.rev_history_monthly enable row level security;
+alter table public.rev_sync_runs       enable row level security;
 
 create policy "Revenue: admins leen planes"    on public.rev_plans           for select to authenticated using (public.is_admin());
 create policy "Revenue: admins clasifican planes" on public.rev_plans        for update to authenticated using (public.is_admin()) with check (public.is_admin());
@@ -187,8 +200,9 @@ create policy "Revenue: admins leen movimientos" on public.rev_mrr_events    for
 create policy "Revenue: admins leen tipos de cambio" on public.rev_fx_rates  for select to authenticated using (public.is_admin());
 create policy "Revenue: admins leen auditoría" on public.rev_manual_audit    for select to authenticated using (public.is_admin());
 create policy "Revenue: admins leen histórico" on public.rev_history_monthly for select to authenticated using (public.is_admin());
+create policy "Revenue: admins leen corridas" on public.rev_sync_runs for select to authenticated using (public.is_admin());
 -- rev_stripe_events: sin políticas (solo la service_role)
 
 revoke all on public.rev_plans, public.rev_customers, public.rev_subscriptions, public.rev_mrr_events,
-  public.rev_fx_rates, public.rev_stripe_events, public.rev_manual_audit, public.rev_history_monthly from anon;
+  public.rev_fx_rates, public.rev_stripe_events, public.rev_manual_audit, public.rev_history_monthly, public.rev_sync_runs from anon;
 revoke insert, delete on public.rev_plans from authenticated;
