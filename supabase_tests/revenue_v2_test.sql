@@ -40,15 +40,18 @@ begin
   caught := false;
   begin insert into rev_payment_failures (invoice_id, customer_key, amount_due) values ('in_x','t:a',1); exception when others then caught := true; end;
   if not caught then raise exception 'V5 el admin pudo escribir pagos fallidos'; end if;
-  caught := false;
-  begin update rev_payment_failures set status = 'recovered' where invoice_id = 'in_1'; exception when others then caught := true; end;
-  if not caught then raise exception 'V5 el admin pudo modificar pagos fallidos'; end if;
+  -- sin política de UPDATE, Postgres no da error: simplemente no toca ninguna fila
+  update rev_payment_failures set status = 'recovered' where invoice_id = 'in_1';
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'V5 el admin pudo modificar pagos fallidos (% filas)', n; end if;
 
   -- empleado: no ve nada ni puede asignar segmento
   perform set_config('request.jwt.claims', json_build_object('sub', emp_id, 'role', 'authenticated')::text, true);
   select count(*) into n from rev_payment_failures;
   if n <> 0 then raise exception 'V6 un empleado ve pagos fallidos (%)', n; end if;
   update rev_customers set segment = 'otro' where key = 't:b';
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'V6 un empleado pudo actualizar clientes (% filas)', n; end if;
   execute 'reset role';
   select segment into s from rev_customers where key = 't:b';
   if s is not null then raise exception 'V6 un empleado pudo asignar segmento (%)', s; end if;
