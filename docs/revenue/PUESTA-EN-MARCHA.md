@@ -5,21 +5,22 @@ Los archivos `mrr.js`, `engine.js`, `stripe-sync.js`, `webhook.js`, `reconcile.j
 | Pieza | Dónde |
 |---|---|
 | Tablas `rev_*`, permisos (solo admin) y función atómica `rev_apply_mrr` | `supabase_revenue.sql` (tests: `supabase_tests/revenue_test.sql`) |
+| Segmento por cliente y pagos fallidos | `supabase_revenue_v2.sql` (tests: `supabase_tests/revenue_v2_test.sql`) |
 | Webhook de Stripe, chequeo nocturno, carga manual | `supabase/functions/revenue-sync/index.ts` (tests: `revenue-sync.test.js`) |
 | Cron nocturno (pg_cron) | `supabase_revenue_cron.sql` |
-| Cálculo de métricas del panel | `src/revenue/revenueMetrics.js` |
-| Sección "Métricas" (solo admins) | `src/revenue/RevenueApp.jsx` |
+| Cálculo de métricas del panel (MRR, churn %, retención, proyección, pagos fallidos) | `src/revenue/revenueMetrics.js` |
+| Sección "Métricas" (solo admins): Overview, MRR & ARR, Churn, Retención, Pagos fallidos, Clientes, Proyección, Planes | `src/revenue/RevenueApp.jsx`, `RevenuePages.jsx`, `revenueUi.jsx` |
 | Carga del histórico de ChartMogul | `scripts/revenue-import.py` |
 
 El histórico (`chartmogul_historico_mensual.json`) tiene ingresos reales y el repo es público: está en `.gitignore`, no se sube.
 
 ## Puesta en marcha (en este orden)
 
-1. **Base:** pegar `supabase_revenue.sql` en Supabase → SQL editor. Después pegar `supabase_tests/revenue_test.sql`: tiene que terminar con `revenue_test: OK` (corre dentro de una transacción con ROLLBACK, no deja datos).
+1. **Base:** pegar `supabase_revenue.sql` en Supabase → SQL editor y después `supabase_revenue_v2.sql` (segmento y pagos fallidos). Después pegar `supabase_tests/revenue_test.sql` y `supabase_tests/revenue_v2_test.sql`: tienen que terminar sin errores (corren dentro de una transacción con ROLLBACK, no dejan datos). Si el v2 no está aplicado, Métricas funciona igual y avisa que faltan el segmento y los pagos fallidos.
 2. **Histórico:** `python3 scripts/revenue-import.py` y pegar `_import/revenue-history.sql` en el SQL editor.
-3. **Stripe:** crear una clave **restringida de solo lectura** (Customers, Subscriptions, Prices, Products, Coupons). No usar la `sk_live` completa del Worker.
+3. **Stripe:** crear una clave **restringida de solo lectura** (Customers, Subscriptions, Prices, Products, Coupons, **Invoices** y **PaymentIntents**; las dos últimas son para los pagos fallidos). No usar la `sk_live` completa del Worker.
 4. **Función:** Supabase → Edge Functions → crear `revenue-sync` pegando `index.ts`. **Desactivar "Enforce JWT Verification"** (Stripe y el cron no mandan JWT; la seguridad la dan la firma, el secret del cron y el chequeo de admin). Secrets: `STRIPE_API_KEY`, `STRIPE_WEBHOOK_SECRET`, `REVENUE_CRON_SECRET`.
-5. **Webhook:** Stripe → Developers → Webhooks → endpoint `https://khuavhbraikzreyhptog.supabase.co/functions/v1/revenue-sync/stripe` con `customer.subscription.created`, `.updated` y `.deleted`. Su signing secret va en `STRIPE_WEBHOOK_SECRET`.
+5. **Webhook:** Stripe → Developers → Webhooks → endpoint `https://khuavhbraikzreyhptog.supabase.co/functions/v1/revenue-sync/stripe` con `customer.subscription.created`, `.updated` y `.deleted` y, para los pagos fallidos, `invoice.payment_failed`, `invoice.paid`, `invoice.voided` y `invoice.marked_uncollectible`. Su signing secret va en `STRIPE_WEBHOOK_SECRET`.
 6. **Backoffice → Métricas → Resumen → "Puesta en marcha":**
    1. *Traer de Stripe* (trae todo sin calcular MRR).
    2. *Planes*: clasificar cada plan (SaaS suma al MRR; pass-through, servicio y test no) y cargar tipos de cambio si hay cobros que no son en USD.
@@ -28,6 +29,15 @@ El histórico (`chartmogul_historico_mensual.json`) tiene ingresos reales y el r
 8. **Comparar** el MRR con ChartMogul antes de apagarlo (se esperan diferencias: ChartMogul sumaba planes que no son SaaS).
 
 Hasta la carga inicial, ni el webhook, ni el chequeo nocturno, ni la carga manual registran movimientos: guardan los datos y listo.
+
+## Pantallas (basadas en el "SpicyTool · Revenue Dashboard" que ya existía)
+
+Se respetó su estética (tarjetas KPI con franja de color, números en tipografía monoespaciada, barras, tablas, filtros en píldoras) con la paleta clara del backoffice, y sus funciones: filtros de período y segmento, Overview, MRR & ARR con ARPA, Churn %, Retención (NRR con su misma fórmula), Clientes con MRR por mes y alta/edición/baja de clientes por fuera, y Proyección con supuestos editables y clientes "por fuera".
+
+- **Pagos fallidos (nuevo):** MRR en riesgo, facturas abiertas, intentos, motivo del rechazo, próximo reintento, link a la factura en Stripe, recuperados del mes, tasa de recuperación y churn involuntario (bajas por falta de pago, separadas del resto).
+- **Segmento:** se elige a mano por cliente (Inmobiliaria / Otro / sin segmento). Los clientes nuevos de Stripe entran sin segmento.
+- **Historia:** hasta el último mes cerrado antes de la carga inicial sale del export de ChartMogul; después, del sistema nuevo. El export no tiene datos por cliente, así que el MRR por mes de cada cliente solo existe desde la carga inicial.
+- **Diferencia con el prototipo:** el "Net" mensual incluye contracción y reactivación (el del prototipo las omitía en la tabla MRR). "Registrar baja manual" ya no es un registro suelto: se usa Clientes → Dar de baja, que queda como churn real y auditado.
 
 ## Diferencias con el código de referencia
 

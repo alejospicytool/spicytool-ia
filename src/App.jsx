@@ -136,7 +136,7 @@ const NAV_ICONS = {
   opsdash:"🧭", tickets:"🎫", tasks:"📋", onboarding:"🚀", usuarios:"👥",
   devdash:"📈", devtasks:"🛠️",
   crm:"💼",
-  metrics:"💹", metrics_customers:"👤", metrics_plans:"🏷️", metrics_manual:"✍️", metrics_history:"🗂️",
+  metrics:"💹", metrics_mrr:"↗", metrics_churn:"↘", metrics_retention:"⟳", metrics_failed:"⚠️", metrics_customers:"👤", metrics_projection:"⇢", metrics_plans:"🏷️",
 };
 const NAV_LABELS = {
   inicio:"Inicio", notes:"Notas", mytime:"Mi tiempo", timeadmin:"Control de jornada",
@@ -146,9 +146,9 @@ const NAV_LABELS = {
   opsdash:"Resumen", tickets:"Tickets", tasks:"Tareas", onboarding:"Onboarding", usuarios:"Usuarios",
   devdash:"Resumen", devtasks:"Tareas",
   crm:"CRM comercial",
-  metrics:"Resumen", metrics_customers:"Clientes", metrics_plans:"Planes", metrics_manual:"Carga manual", metrics_history:"Histórico",
+  metrics:"Overview", metrics_mrr:"MRR & ARR", metrics_churn:"Churn", metrics_retention:"Retención", metrics_failed:"Pagos fallidos", metrics_customers:"Clientes", metrics_projection:"Proyección", metrics_plans:"Planes",
 };
-const ADMIN_ONLY_VIEWS = ["add","usuarios","timeadmin","metrics","metrics_customers","metrics_plans","metrics_manual","metrics_history"];
+const ADMIN_ONLY_VIEWS = ["add","usuarios","timeadmin","metrics","metrics_mrr","metrics_churn","metrics_retention","metrics_failed","metrics_customers","metrics_projection","metrics_plans"];
 // Secciones solo para admins: no se asignan desde el panel de Usuarios (la base también lo exige, ver supabase_revenue.sql).
 const ADMIN_ONLY_SECTIONS = ["Métricas"];
 // Inicio, Notas y Tiempo son visibles para todos sin pasar por allowed_sections — Inicio
@@ -201,7 +201,7 @@ const NAV_SECTIONS = [
   },
   {
     label: "Métricas",
-    views: ["metrics","metrics_customers","metrics_plans","metrics_manual","metrics_history"],
+    views: ["metrics","metrics_mrr","metrics_churn","metrics_retention","metrics_failed","metrics_customers","metrics_projection","metrics_plans"],
     adminOnly: true,
   },
   {
