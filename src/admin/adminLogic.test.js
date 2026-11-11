@@ -1,36 +1,71 @@
 import { describe, it, expect } from "vitest";
 import {
-  PLAN_OPTIONS, planPatch, currentPlanKey, setPath, matchesSearch, escapeRegExp, sortUsersRecent, paginate, whatsappProvider, companyIdOf,
+  PAID_PLANS, planOf, planLabel, isPaidPlan, validatePlanAssignment, newIdempotencyKey, formatPrice, explainWebhookError, WEBHOOK_ERRORS, matchesSearch, escapeRegExp, sortUsersRecent, paginate, whatsappProvider, companyIdOf,
   validateCompanyEdit, validateContactEdit, diffFields, buildAuditEntry, userFullName, sortByPosition, isOwner, matchesFilters, isPaused, matchesCompanySearch, sortCompaniesByName,
 } from "./adminLogic.js";
 
-describe("planes", () => {
-  it("cada plan va al campo correcto", () => {
-    expect(planPatch("tier3")).toEqual({ field: "subscription.tier", value: "tier3" });
-    expect(planPatch("tier4")).toEqual({ field: "subscription.tier", value: "tier4" });
-    expect(planPatch("freemium")).toEqual({ field: "subscription.subscriptionType", value: "freemium" });
-    expect(planPatch("promoLanding")).toEqual({ field: "subscription.subscriptionType", value: "promo_landing" });
+describe("planes y suscripciones", () => {
+  it("los planes pagos son exactamente los cuatro del webhook", () => {
+    expect(PAID_PLANS).toEqual(["SpicyOne", "SpicyStart", "SpicyPro", "SpicyProMax"]);
+    expect(isPaidPlan("SpicyPro")).toBe(true);
+    expect(isPaidPlan("Freemium")).toBe(false);
+    expect(isPaidPlan("Free trial")).toBe(false);
+    expect(isPaidPlan("tier3")).toBe(false);
+    expect(isPaidPlan(undefined)).toBe(false);
   });
-  it("rechaza un plan que no existe", () => {
-    expect(() => planPatch("tier9")).toThrow(/inválido/);
-    expect(() => planPatch(undefined)).toThrow();
+  it("el plan del usuario sale de la suscripción; los tiers ya no cuentan", () => {
+    expect(planOf({ subscription: { plan: "SpicyStart" } })).toBe("SpicyStart");
+    expect(planOf({ subscription: { tier: "tier4" } })).toBeNull();
+    expect(planOf({})).toBeNull();
+    expect(planOf(null)).toBeNull();
+    expect(planLabel(null)).toBe("Sin plan");
+    expect(planLabel("SpicyPro")).toBe("SpicyPro");
   });
-  it("hay exactamente los cuatro planes del PLAN", () => {
-    expect(PLAN_OPTIONS.map((o) => o.key)).toEqual(["promoLanding", "freemium", "tier3", "tier4"]);
+  const ok = { email: "a@b.test", plan: "SpicyStart", stripePriceId: "price_1UVakiJdCZldzCmGb1bTskUp" };
+  it("asignación válida: acepta price_ y prod_, y recorta espacios", () => {
+    expect(validatePlanAssignment(ok).ok).toBe(true);
+    expect(validatePlanAssignment({ ...ok, stripePriceId: "prod_ABC123" }).ok).toBe(true);
+    expect(validatePlanAssignment({ ...ok, email: " a@b.test ", stripePriceId: " price_X1 " }).value).toEqual({ email: "a@b.test", plan: "SpicyStart", stripePriceId: "price_X1" });
   });
-  it("el plan actual: el tier manda sobre el tipo de suscripción", () => {
-    expect(currentPlanKey({ subscription: { subscriptionType: "freemium", tier: "tier3" } })).toBe("tier3");
-    expect(currentPlanKey({ subscription: { subscriptionType: "promo_landing", tier: null } })).toBe("promoLanding");
-    expect(currentPlanKey({ subscription: { subscriptionType: "paid", tier: null } })).toBeNull();
-    expect(currentPlanKey({})).toBeNull();
-    expect(currentPlanKey(null)).toBeNull();
+  it("asignación: Freemium, free trial, tiers o plan vacío se rechazan", () => {
+    for (const plan of ["Freemium", "Free trial", "tier3", "", undefined, "spicystart"]) expect(validatePlanAssignment({ ...ok, plan }).errors.plan).toBeTruthy();
   });
-  it("setPath escribe la ruta con puntos sin mutar el original", () => {
-    const u = { a: 1, subscription: { tier: "tier3", subscriptionType: "paid" } };
-    const n = setPath(u, "subscription.tier", "tier4");
-    expect(n.subscription).toEqual({ tier: "tier4", subscriptionType: "paid" });
-    expect(u.subscription.tier).toBe("tier3");
-    expect(setPath({}, "x.y.z", 1)).toEqual({ x: { y: { z: 1 } } });
+  it("asignación: precio vacío, sin prefijo o con espacios o símbolos", () => {
+    expect(validatePlanAssignment({ ...ok, stripePriceId: "" }).errors.stripePriceId).toMatch(/Falta/);
+    expect(validatePlanAssignment({ ...ok, stripePriceId: undefined }).errors.stripePriceId).toMatch(/Falta/);
+    for (const bad of ["1234", "sub_123", "price_", "price_ a", "price_a-b", "PRICE_abc"]) expect(validatePlanAssignment({ ...ok, stripePriceId: bad }).errors.stripePriceId).toMatch(/empieza con price_/);
+  });
+  it("asignación: email inválido", () => {
+    expect(validatePlanAssignment({ ...ok, email: "no-es-email" }).errors.email).toBeTruthy();
+    expect(validatePlanAssignment({ ...ok, email: "" }).errors.email).toBeTruthy();
+  });
+  it("la clave de idempotencia es única y legible", () => {
+    const a = newIdempotencyKey(), b = newIdempotencyKey();
+    expect(a).toMatch(/^bo-[0-9a-z]+-.+/);
+    expect(a).not.toBe(b);
+  });
+  it("sin crypto.randomUUID sigue generando claves distintas", () => {
+    const orig = globalThis.crypto;
+    Object.defineProperty(globalThis, "crypto", { value: undefined, configurable: true });
+    try {
+      const k1 = newIdempotencyKey(1000, () => 0.1), k2 = newIdempotencyKey(1000, () => 0.9);
+      expect(k1).toMatch(/^bo-/);
+      expect(k1).not.toBe(k2);
+    } finally { Object.defineProperty(globalThis, "crypto", { value: orig, configurable: true }); }
+  });
+  it("formato de precio", () => {
+    expect(formatPrice(4900, "usd")).toBe("USD 49");
+    expect(formatPrice(3950, "usd")).toMatch(/^USD 39,5/);
+    expect(formatPrice(0)).toBe("USD 0");
+  });
+  it("cada código de error del doc tiene título y acción; uno desconocido cae en ERROR", () => {
+    for (const c of ["EMAIL_INVALIDO", "USUARIO_NO_ENCONTRADO", "PLAN_INVALIDO", "PRECIO_REQUERIDO", "PRECIO_INVALIDO", "YA_SUSCRIPTO", "CLIENTE_STRIPE_BORRADO", "SIN_MEDIO_DE_PAGO", "PAGO_RECHAZADO", "STRIPE_PORTAL_FALLIDO", "ERROR", "UNAUTHORIZED", "FORBIDDEN"]) {
+      expect(WEBHOOK_ERRORS[c].title).toBeTruthy();
+      expect(WEBHOOK_ERRORS[c].action).toBeTruthy();
+    }
+    expect(explainWebhookError("PAGO_RECHAZADO").action).toMatch(/link/i);
+    expect(explainWebhookError("CODIGO_NUEVO")).toBe(WEBHOOK_ERRORS.ERROR);
+    expect(explainWebhookError(undefined)).toBe(WEBHOOK_ERRORS.ERROR);
   });
 });
 
@@ -143,11 +178,11 @@ describe("validaciones", () => {
 
 describe("auditoría", () => {
   it("arma quién, qué, cuándo y sobre qué", () => {
-    const e = buildAuditEntry({ id: 1, actor: "nico@x.test", action: "plan_change", targetType: "user", targetId: "u1", targetLabel: "Ana Paz", companyId: "c1", detail: { plan: "tier4" }, now: new Date("2026-11-11T10:00:00Z") });
-    expect(e).toEqual({ id: 1, at: "2026-11-11T10:00:00.000Z", actor: "nico@x.test", action: "plan_change", targetType: "user", targetId: "u1", targetLabel: "Ana Paz", companyId: "c1", detail: { plan: "tier4" } });
+    const e = buildAuditEntry({ id: 1, actor: "nico@x.test", action: "plan_assign", targetType: "user", targetId: "u1", targetLabel: "Ana Paz", companyId: "c1", detail: { plan: "SpicyPro" }, now: new Date("2026-11-11T10:00:00Z") });
+    expect(e).toEqual({ id: 1, at: "2026-11-11T10:00:00.000Z", actor: "nico@x.test", action: "plan_assign", targetType: "user", targetId: "u1", targetLabel: "Ana Paz", companyId: "c1", detail: { plan: "SpicyPro" } });
   });
   it("sin quién o con una acción desconocida no se registra", () => {
-    expect(() => buildAuditEntry({ id: 1, actor: "", action: "plan_change", targetType: "user", targetId: "u1" })).toThrow(/quién/);
+    expect(() => buildAuditEntry({ id: 1, actor: "", action: "plan_assign", targetType: "user", targetId: "u1" })).toThrow(/quién/);
     expect(() => buildAuditEntry({ id: 1, actor: "a", action: "inventada", targetType: "user", targetId: "u1" })).toThrow(/desconocida/);
   });
   it("sin etiqueta usa el id", () => {

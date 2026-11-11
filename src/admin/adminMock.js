@@ -11,12 +11,12 @@ const oid = (n) => "6650" + n.toString(16).padStart(20, "0");
 const iso = (d) => new Date(d).toISOString();
 
 const COMPANIES = [
-  { n: 1, name: "Inmobiliaria Ejemplo Norte", vertical: "real_estate", teamSize: "6-10", status: "active", credits: 1200, phone: "+54 11 5555-0101", created: "2025-02-11", tier: "tier4" },
-  { n: 2, name: "Propiedades Demo Sur", vertical: "real_estate", teamSize: "2-5", status: "active", credits: 300, phone: "+54 11 5555-0102", created: "2025-05-03", tier: "tier3" },
-  { n: 3, name: "Estudio Ficticio & Asociados", vertical: "services", teamSize: "1", status: "paused", credits: 0, phone: "+54 351 555-0103", created: "2025-07-19", tier: null, type: "freemium" },
-  { n: 4, name: "Casas de Prueba SRL", vertical: "real_estate", teamSize: "11-25", status: "active", credits: 4500, phone: "+54 11 5555-0104", created: "2025-09-30", tier: "tier4" },
-  { n: 5, name: "Hogar Modelo", vertical: "real_estate", teamSize: "2-5", status: "active", credits: 80, phone: "+54 261 555-0105", created: "2026-01-14", tier: null, type: "promo_landing" },
-  { n: 6, name: "Terrenos Muestra", vertical: "real_estate", teamSize: "1", status: "paused", credits: 15, phone: "+54 11 5555-0106", created: "2026-03-02", tier: null, type: "freemium" },
+  { n: 1, name: "Inmobiliaria Ejemplo Norte", vertical: "real_estate", teamSize: "6-10", status: "active", credits: 1200, phone: "+54 11 5555-0101", created: "2025-02-11", plan: "SpicyPro" },
+  { n: 2, name: "Propiedades Demo Sur", vertical: "real_estate", teamSize: "2-5", status: "active", credits: 300, phone: "+54 11 5555-0102", created: "2025-05-03", plan: "SpicyStart" },
+  { n: 3, name: "Estudio Ficticio & Asociados", vertical: "services", teamSize: "1", status: "paused", credits: 0, phone: "+54 351 555-0103", created: "2025-07-19", plan: "Freemium" },
+  { n: 4, name: "Casas de Prueba SRL", vertical: "real_estate", teamSize: "11-25", status: "active", credits: 4500, phone: "+54 11 5555-0104", created: "2025-09-30", plan: "SpicyProMax" },
+  { n: 5, name: "Hogar Modelo", vertical: "real_estate", teamSize: "2-5", status: "active", credits: 80, phone: "+54 261 555-0105", created: "2026-01-14", plan: "Free trial" },
+  { n: 6, name: "Terrenos Muestra", vertical: "real_estate", teamSize: "1", status: "paused", credits: 15, phone: "+54 11 5555-0106", created: "2026-03-02", plan: "Freemium" },
 ];
 
 // Un usuario por company (el dueño) y algunos más; companies[0] es la company del usuario.
@@ -29,13 +29,30 @@ const U = [
   [110, 6, "Facundo", "Ríos", {}], [111, 5, "Julieta", "Vega", {}], [112, 1, "Bruno", "Castro", {}],
 ];
 
+// Planes: Freemium y free trial no se cobran; los otros cuatro son los planes pagos (ver el doc de webhooks de back office).
+const PAID = ["SpicyOne", "SpicyStart", "SpicyPro", "SpicyProMax"];
+const PRICE_OF_PLAN = { SpicyOne: "price_1MockOneStd00001", SpicyStart: "price_1MockStartStd0001", SpicyPro: "price_1MockProStd000001", SpicyProMax: "price_1MockProMaxStd0001" };
+const CARD_OVERRIDE = { 107: "declined", 104: "none" };
+
+// Precios de Stripe de EJEMPLO (los montos son inventados). "active" e "interval" deciden si el webhook los acepta.
+export const stripe_prices = [
+  { id: "price_1MockOneStd00001", plan: "SpicyOne", nickname: "Estándar", amount: 2900, currency: "usd", interval: "month", active: true },
+  { id: "price_1MockStartStd0001", plan: "SpicyStart", nickname: "Estándar", amount: 4900, currency: "usd", interval: "month", active: true },
+  { id: "price_1MockStartPromo01", plan: "SpicyStart", nickname: "Promoción", amount: 3900, currency: "usd", interval: "month", active: true },
+  { id: "price_1MockProStd000001", plan: "SpicyPro", nickname: "Estándar", amount: 9900, currency: "usd", interval: "month", active: true },
+  { id: "price_1MockProMaxStd0001", plan: "SpicyProMax", nickname: "Estándar", amount: 19900, currency: "usd", interval: "month", active: true },
+  { id: "price_1MockProOld0000001", plan: "SpicyPro", nickname: "Archivado", amount: 8900, currency: "usd", interval: "month", active: false },
+  { id: "price_1MockProAnnual0001", plan: "SpicyPro", nickname: "Anual", amount: 99000, currency: "usd", interval: "year", active: true },
+];
+
 export const users = U.map(([n, c, name, surname, extra], i) => {
   const co = COMPANIES[c - 1];
   return {
     _id: oid(n), email: `${name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")}.${surname.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")}@ejemplo.test`,
     phoneNumber: `+54 9 11 5555-${String(2000 + i * 37).slice(-4)}`, name, surname, companies: [oid(c)],
-    subscription: { subscriptionType: co.type || "paid", tier: co.tier },
-    stripe: { customerId: `cus_Mock${String(n).padStart(4, "0")}` },
+    subscription: { plan: co.plan, stripeSubscriptionId: PAID.includes(co.plan) ? `sub_1Mock${n}` : null, priceId: PAID.includes(co.plan) ? PRICE_OF_PLAN[co.plan] : null },
+    // paymentMethod es solo del mock: simula cómo responde Stripe al cobrar ("ok", "none" = sin tarjeta, "declined" = rechazada)
+    stripe: { customerId: `cus_Mock${String(n).padStart(4, "0")}`, paymentMethod: CARD_OVERRIDE[n] || (PAID.includes(co.plan) ? "ok" : "none") },
     ...extra,
   };
 });
@@ -125,5 +142,5 @@ COMPANIES.forEach((co, ci) => {
 
 export const MOCK = {
   users, companies, contacts, campaigns, landings, companyconversions, whatsappconversions, workflows,
-  pipelines, pipelinestages, whatsapptemplates, webforms, contactlists, credit_balances, credit_transactions,
+  pipelines, pipelinestages, whatsapptemplates, webforms, contactlists, credit_balances, credit_transactions, stripe_prices,
 };

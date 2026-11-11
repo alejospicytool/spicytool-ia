@@ -93,7 +93,9 @@ export function ConfirmDialog({ title, children, confirmLabel = "Confirmar", dan
 const detailText = (a) => {
   const d = a.detail || {};
   if (Array.isArray(d.changes)) return d.changes.length ? d.changes.map((c) => `${c.key}: ${c.from ?? "—"} → ${c.to ?? "—"}`).join(" · ") : "Sin cambios de valores";
-  if (a.action === "plan_change") return `Plan: ${d.plan}`;
+  if (a.action === "plan_assign") return `${d.previousPlan || "Sin plan"} → ${d.plan} · ${d.stripePriceId}`;
+  if (a.action === "plan_assign_failed") return `${d.plan || "—"} · no se cobró (${d.code})`;
+  if (a.action === "card_link_created") return "Link de un solo uso";
   if (d.from != null) return `${d.from} → ${d.to}`;
   if (d.name) return d.name;
   return "";

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { resetMock, listUsers, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, changePlan, deleteWorkflow, getUser, listCompanies, listCompanyUsers } from "./adminApi.js";
+import { resetMock, listUsers, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, getPaymentMethodUrl, listPrices, WebhookError, deleteWorkflow, getUser, listCompanies, listCompanyUsers } from "./adminApi.js";
 import { MOCK } from "./adminMock.js";
 
 const ACTOR = "admin@ejemplo.test";
@@ -128,6 +128,109 @@ describe("listCompanies / listCompanyUsers", () => {
   });
 });
 
+describe("webhooks de back office (simulados)", () => {
+  const user = (name) => MOCK.users.find((x) => x.name === name);
+  const START = "price_1MockStartStd0001", PROMO = "price_1MockStartPromo01", PRO = "price_1MockProStd000001";
+  const subOf = async (name) => (await getUser(user(name)._id)).subscription;
+  const err = async (p) => { try { await p; } catch (e) { return e; } throw new Error("tenía que fallar"); };
+
+  it("solo ofrece precios activos y mensuales", async () => {
+    const r = await listPrices();
+    expect(r.length).toBeGreaterThan(0);
+    expect(r.every((p) => p.active && p.interval === "month")).toBe(true);
+    expect(r.some((p) => p.id === "price_1MockProOld0000001" || p.id === "price_1MockProAnnual0001")).toBe(false);
+  });
+  it("asignar plan con tarjeta ok: cambia plan, suscripción y precio, y audita", async () => {
+    const lucia = user("Lucía");
+    const r = await assignPlan(lucia._id, { plan: "SpicyStart", stripePriceId: PROMO, idempotencyKey: "k1" }, ACTOR);
+    expect(r).toMatchObject({ userEmail: lucia.email, plan: "SpicyStart", previousPlan: "SpicyPro", stripePriceId: PROMO, oldSubscriptionCancelled: true, billingFailures: [] });
+    expect(r.stripeSubscriptionId).toMatch(/^sub_/);
+    expect(await subOf("Lucía")).toEqual({ plan: "SpicyStart", stripeSubscriptionId: r.stripeSubscriptionId, priceId: PROMO });
+    const [a] = await listAudit();
+    expect(a).toMatchObject({ actor: ACTOR, action: "plan_assign", targetId: lucia._id });
+    expect(a.detail).toMatchObject({ plan: "SpicyStart", previousPlan: "SpicyPro", stripePriceId: PROMO });
+  });
+  it("mismo plan con otro precio cobra el nuevo; con el mismo precio es YA_SUSCRIPTO", async () => {
+    const id = user("Lucía")._id;
+    await assignPlan(id, { plan: "SpicyStart", stripePriceId: PROMO }, ACTOR);
+    await assignPlan(id, { plan: "SpicyStart", stripePriceId: START }, ACTOR);
+    expect((await subOf("Lucía")).priceId).toBe(START);
+    const e = await err(assignPlan(id, { plan: "SpicyStart", stripePriceId: START }, ACTOR));
+    expect(e).toBeInstanceOf(WebhookError);
+    expect([e.status, e.code]).toEqual([409, "YA_SUSCRIPTO"]);
+  });
+  it("tarjeta rechazada: 402, link para cambiarla, no cambia nada y queda auditado el intento", async () => {
+    const before = await subOf("Sofía");
+    const e = await err(assignPlan(user("Sofía")._id, { plan: "SpicyPro", stripePriceId: PRO }, ACTOR));
+    expect([e.status, e.code]).toEqual([402, "PAGO_RECHAZADO"]);
+    expect(e.extra.decline_code).toBe("insufficient_funds");
+    expect(e.extra.paymentMethodUpdateUrl).toMatch(/^https:\/\/billing\.stripe\.com\//);
+    expect(await subOf("Sofía")).toEqual(before);
+    const [a] = await listAudit();
+    expect(a).toMatchObject({ action: "plan_assign_failed" });
+    expect(a.detail.code).toBe("PAGO_RECHAZADO");
+  });
+  it("sin tarjeta guardada: 402 SIN_MEDIO_DE_PAGO con el link, y no se cobra", async () => {
+    const before = await subOf("Valentina");
+    const e = await err(assignPlan(user("Valentina")._id, { plan: "SpicyOne", stripePriceId: "price_1MockOneStd00001" }, ACTOR));
+    expect([e.status, e.code]).toEqual([402, "SIN_MEDIO_DE_PAGO"]);
+    expect(e.extra.paymentMethodUpdateUrl).toBeTruthy();
+    expect(await subOf("Valentina")).toEqual(before);
+  });
+  it("validaciones del webhook: plan, precio requerido, precio inválido (archivado, anual o inexistente)", async () => {
+    const id = user("Lucía")._id, before = await subOf("Lucía");
+    const code = async (body) => (await err(assignPlan(id, body, ACTOR))).code;
+    expect(await code({ plan: "Freemium", stripePriceId: START })).toBe("PLAN_INVALIDO");
+    expect(await code({ plan: "tier3", stripePriceId: START })).toBe("PLAN_INVALIDO");
+    expect(await code({ plan: "SpicyStart" })).toBe("PRECIO_REQUERIDO");
+    expect(await code({ plan: "SpicyStart", stripePriceId: "price_1MockProOld0000001" })).toBe("PRECIO_INVALIDO");
+    expect(await code({ plan: "SpicyStart", stripePriceId: "price_1MockProAnnual0001" })).toBe("PRECIO_INVALIDO");
+    expect(await code({ plan: "SpicyStart", stripePriceId: "price_noexiste" })).toBe("PRECIO_INVALIDO");
+    expect(await subOf("Lucía")).toEqual(before);
+    expect((await listAudit()).every((a) => a.action === "plan_assign_failed")).toBe(true);
+  });
+  it("usuario inexistente: 404", async () => {
+    const e = await err(assignPlan("nope", { plan: "SpicyStart", stripePriceId: START }, ACTOR));
+    expect([e.status, e.code]).toEqual([404, "USUARIO_NO_ENCONTRADO"]);
+  });
+  it("idempotencia: repetir la misma clave devuelve el primer resultado y no cobra dos veces", async () => {
+    const id = user("Lucía")._id;
+    const a = await assignPlan(id, { plan: "SpicyStart", stripePriceId: START, idempotencyKey: "ticket-1" }, ACTOR);
+    const b = await assignPlan(id, { plan: "SpicyStart", stripePriceId: START, idempotencyKey: "ticket-1" }, ACTOR);
+    expect(b).toEqual(a);
+    expect((await listAudit()).filter((x) => x.action === "plan_assign")).toHaveLength(1);
+  });
+  it("sin clave, repetir la misma operación es YA_SUSCRIPTO (tampoco cobra dos veces)", async () => {
+    const id = user("Lucía")._id;
+    await assignPlan(id, { plan: "SpicyStart", stripePriceId: START }, ACTOR);
+    expect((await err(assignPlan(id, { plan: "SpicyStart", stripePriceId: START }, ACTOR))).code).toBe("YA_SUSCRIPTO");
+  });
+  it("un cobro fallido no se guarda como resultado: reintentar con la misma clave vuelve a intentar", async () => {
+    const id = user("Sofía")._id;
+    for (let i = 0; i < 2; i++) expect((await err(assignPlan(id, { plan: "SpicyPro", stripePriceId: PRO, idempotencyKey: "k-fail" }, ACTOR))).code).toBe("PAGO_RECHAZADO");
+    expect((await listAudit()).filter((x) => x.action === "plan_assign_failed")).toHaveLength(2);
+  });
+  it("link de tarjeta: devuelve cliente y link único, no toca la suscripción y audita", async () => {
+    const lucia = user("Lucía"), before = await subOf("Lucía");
+    const a = await getPaymentMethodUrl(lucia._id, ACTOR), b = await getPaymentMethodUrl(lucia._id, ACTOR);
+    expect(a).toMatchObject({ userEmail: lucia.email, stripeCustomerId: lucia.stripe.customerId });
+    expect(a.paymentMethodUpdateUrl).toMatch(/^https:\/\/billing\.stripe\.com\/p\/session\//);
+    expect(b.paymentMethodUpdateUrl).not.toBe(a.paymentMethodUpdateUrl);
+    expect(await subOf("Lucía")).toEqual(before);
+    expect((await listAudit()).filter((x) => x.action === "card_link_created")).toHaveLength(2);
+    expect(JSON.stringify(await listAudit())).not.toContain("billing.stripe.com");
+  });
+  it("link de tarjeta: usuario inexistente es 404 y sin actor no se genera", async () => {
+    expect((await err(getPaymentMethodUrl("nope", ACTOR))).status).toBe(404);
+    await expect(getPaymentMethodUrl(user("Lucía")._id, "")).rejects.toThrow(/quién/);
+  });
+  it("hay usuarios para probar cada caso: con tarjeta, rechazada, sin tarjeta, freemium y free trial", () => {
+    expect(new Set(MOCK.users.map((u) => u.stripe.paymentMethod))).toEqual(new Set(["ok", "declined", "none"]));
+    expect(new Set(MOCK.users.map((u) => u.subscription.plan))).toEqual(new Set(["SpicyPro", "SpicyStart", "Freemium", "SpicyProMax", "Free trial"]));
+    expect(MOCK.users.some((u) => "tier" in u.subscription)).toBe(false);
+  });
+});
+
 describe("detalle de la company", () => {
   it("trae los usuarios de la company (users.companies = companyId)", async () => {
     const co = MOCK.companies[3];
@@ -194,17 +297,6 @@ describe("acciones: cambian los datos y dejan auditoría", () => {
     expect(acts).toEqual(["company_activate", "company_pause"]);
     await expect(setCompanyStatus(co._id, "borrada", ACTOR)).rejects.toThrow(/inválido/);
   });
-  it("cambiar plan escribe en el campo correcto y valida", async () => {
-    const u = MOCK.users.find((x) => x.subscription.tier === "tier3");
-    await changePlan(u._id, "tier4", ACTOR);
-    expect((await getUser(u._id)).subscription.tier).toBe("tier4");
-    await changePlan(u._id, "freemium", ACTOR);
-    const after = await getUser(u._id);
-    expect(after.subscription.subscriptionType).toBe("freemium");
-    expect(after.subscription.tier).toBe("tier4");
-    await expect(changePlan(u._id, "tier9", ACTOR)).rejects.toThrow(/inválido/);
-    expect((await listAudit()).filter((a) => a.action === "plan_change")).toHaveLength(2);
-  });
   it("eliminar workflow", async () => {
     const w = MOCK.workflows[0];
     await deleteWorkflow(w._id, ACTOR);
@@ -216,7 +308,7 @@ describe("acciones: cambian los datos y dejan auditoría", () => {
   it("sin actor no se puede modificar nada", async () => {
     const co = MOCK.companies[0];
     await expect(setCompanyStatus(co._id, "paused", "")).rejects.toThrow(/quién/);
-    await expect(changePlan(MOCK.users[0]._id, "tier4", undefined)).rejects.toThrow(/quién/);
+    await expect(assignPlan(MOCK.users[0]._id, { plan: "SpicyStart", stripePriceId: "price_1MockStartStd0001" }, undefined)).rejects.toThrow(/quién/);
     await expect(deleteWorkflow(MOCK.workflows[0]._id, "")).rejects.toThrow(/quién/);
     expect((await getCompanyBundle(co._id)).company.status).toBe(co.status);
     expect((await getUser(MOCK.users[0]._id)).subscription).toEqual(MOCK.users[0].subscription);

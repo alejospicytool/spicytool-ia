@@ -3,11 +3,11 @@
 // (editar, pausar/activar, cambiar plan, eliminar workflow), todas con confirmación o formulario y con auditoría.
 import { useState } from "react";
 import { Kpi, fmtDate, fmtDateTime } from "../revenue/revenueUi.jsx";
-import { getUser, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, changePlan, deleteWorkflow } from "./adminApi.js";
-import { companyIdOf, userFullName, whatsappProvider, currentPlanKey, planLabel, sortByPosition } from "./adminLogic.js";
+import { getUser, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, getPaymentMethodUrl, deleteWorkflow } from "./adminApi.js";
+import { companyIdOf, userFullName, whatsappProvider, planOf, planLabel, sortByPosition } from "./adminLogic.js";
 import { Tabs, DataTable, StatusBadge, ConfirmDialog, AuditList } from "./adminUi.jsx";
 import { useAsync } from "./adminHooks.js";
-import { EditCompanyDialog, EditContactDialog, ChangePlanDialog } from "./AdminDialogs.jsx";
+import { EditCompanyDialog, EditContactDialog, AssignPlanDialog, CardLinkDialog } from "./AdminDialogs.jsx";
 
 const yesNo = (v) => (v ? "Sí" : "No");
 const num = (v) => (v == null ? "—" : Number(v).toLocaleString("es-AR"));
@@ -27,14 +27,20 @@ function Summary({ b, user }) {
       </Card>
       <Card title="Usuario seleccionado">
         <dl className="kv">
-          {[["Nombre", userFullName(user)], ["Email", user.email], ["Teléfono", user.phoneNumber], ["Plan", planLabel(currentPlanKey(user))], ["Tipo de suscripción", user.subscription?.subscriptionType], ["Tier", user.subscription?.tier],
-            ["Cliente en Stripe", user.stripe?.customerId], ["Proveedor de WhatsApp", wa ? `${wa.provider} · ${wa.appId}` : "Sin configurar"]].map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v || "—"}</dd></div>)}
+          {[["Nombre", userFullName(user)], ["Email", user.email], ["Teléfono", user.phoneNumber], ["Plan", planLabel(planOf(user))],
+            ["Proveedor de WhatsApp", wa ? `${wa.provider} · ${wa.appId}` : "Sin configurar"]].map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v || "—"}</dd></div>)}
         </dl>
+      </Card>
+      <Card title="Suscripción">
+        <dl className="kv">
+          {[["Plan", planLabel(planOf(user))], ["Precio (Stripe)", user.subscription?.priceId], ["Suscripción en Stripe", user.subscription?.stripeSubscriptionId], ["Cliente en Stripe", user.stripe?.customerId]].map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v || "—"}</dd></div>)}
+        </dl>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 12 }}>El plan solo se cambia con “Asignar plan”, que cobra la tarjeta del cliente.</div>
       </Card>
       <Card title="Usuarios de la company" sub={b.users.length}>
         <DataTable rows={b.users} columns={[
           { key: "name", label: "Nombre", render: (u) => userFullName(u) }, { key: "email", label: "Email" }, { key: "phoneNumber", label: "Teléfono" },
-          { key: "plan", label: "Plan", render: (u) => planLabel(currentPlanKey(u)) },
+          { key: "plan", label: "Plan", render: (u) => planLabel(planOf(u)) },
         ]} />
       </Card>
     </>
@@ -118,12 +124,13 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
       <div className="detail-head">
         <div>
           <div className="page-title">{userFullName(user)} <StatusBadge status={co.status} /></div>
-          <div className="page-sub">{user.email} · {co.name} · Plan: {planLabel(currentPlanKey(user))}</div>
+          <div className="page-sub">{user.email} · {co.name} · Plan: {planLabel(planOf(user))}</div>
         </div>
         <div className="detail-actions">
           <button className="btn-secondary" onClick={() => setDialog("company")}>Editar company</button>
           <button className="btn-secondary" onClick={() => setDialog("contact")}>Editar contacto</button>
-          <button className="btn-secondary" onClick={() => setDialog("plan")}>Cambiar plan</button>
+          <button className="btn-secondary" onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
+          <button className="btn-secondary" onClick={() => setDialog("card")}>Link de tarjeta</button>
           {paused
             ? <button className="btn-primary" onClick={() => ask({ title: "Activar company", label: "Activar", text: <>Vas a <b>activar</b> la company <b>{co.name}</b>. Sus usuarios vuelven a poder usar la cuenta.</>, action: () => setCompanyStatus(co._id, "active", actor) })}>Activar company</button>
             : <button className="btn-warn" onClick={() => ask({ title: "Pausar company", label: "Pausar", danger: true, text: <>Vas a <b>pausar</b> la company <b>{co.name}</b>. Sus usuarios dejan de poder usar la cuenta hasta que la actives de nuevo.</>, action: () => setCompanyStatus(co._id, "paused", actor) })}>Pausar company</button>}
@@ -170,7 +177,8 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
 
       {dialog === "company" && <EditCompanyDialog company={co} onClose={() => setDialog(null)} onSubmit={submitted((v) => updateCompany(co._id, v, actor))} />}
       {dialog === "contact" && <EditContactDialog user={user} onClose={() => setDialog(null)} onSubmit={submitted((v) => updateUserContact(user._id, v, actor))} />}
-      {dialog === "plan" && <ChangePlanDialog user={user} onClose={() => setDialog(null)} onSubmit={submitted((k) => changePlan(user._id, k, actor))} />}
+      {dialog === "plan" && <AssignPlanDialog user={user} onClose={() => setDialog(null)} onDone={refresh} onSubmit={(v) => assignPlan(user._id, v, actor)} />}
+      {dialog === "card" && <CardLinkDialog user={user} onClose={() => { setDialog(null); refresh(); }} onSubmit={() => getPaymentMethodUrl(user._id, actor)} />}
       {confirm && <ConfirmDialog title={confirm.title} confirmLabel={confirm.label} danger={confirm.danger} busy={confirmBusy} error={confirmError} onConfirm={runConfirmed} onCancel={() => setConfirm(null)}>{confirm.text}</ConfirmDialog>}
     </div>
   );

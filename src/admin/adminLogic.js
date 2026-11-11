@@ -1,41 +1,54 @@
 // Lógica pura de la sección "Admin Spicy" (Usuarios + Company + Créditos): búsqueda, paginación, planes,
 // validaciones y armado del registro de auditoría. No toca red ni estado: se prueba en adminLogic.test.js.
 
-// ── Planes ──────────────────────────────────────────────────────────────────────────────────────
-// En Retool el plan se guardaba en dos campos distintos (subscription.subscriptionType y subscription.tier).
-// Acá hay un solo selector que sabe a qué campo va cada valor. Confirmar la lista real antes de conectar el backend.
-export const PLAN_OPTIONS = [
-  { key: "promoLanding", label: "Promo landing", field: "subscription.subscriptionType", value: "promo_landing" },
-  { key: "freemium", label: "Freemium", field: "subscription.subscriptionType", value: "freemium" },
-  { key: "tier3", label: "Tier 3", field: "subscription.tier", value: "tier3" },
-  { key: "tier4", label: "Tier 4", field: "subscription.tier", value: "tier4" },
-];
+// ── Planes y suscripciones ──────────────────────────────────────────────────────────────────────
+// Los "tier" ya no existen: lo que importa es la suscripción. Los planes pagos se asignan SOLO con el webhook de back office
+// (cobra la tarjeta al instante); Freemium y free trial no se asignan desde acá. Fuente: doc "Back office webhooks: subscriptions".
+export const PAID_PLANS = ["SpicyOne", "SpicyStart", "SpicyPro", "SpicyProMax"];
 
-export function planPatch(key) {
-  const p = PLAN_OPTIONS.find((o) => o.key === key);
-  if (!p) throw new Error("Plan inválido: " + key);
-  return { field: p.field, value: p.value };
+// Nombre del plan del usuario. Ojo: el campo real de Mongo hay que confirmarlo; está acá, en un solo lugar.
+export const planOf = (user) => (user && user.subscription && user.subscription.plan) || null;
+export const planLabel = (plan) => plan || "Sin plan";
+export const isPaidPlan = (plan) => PAID_PLANS.includes(plan);
+
+const PRICE_RE = /^(price|prod)_[A-Za-z0-9]+$/;
+
+// Formulario de "Asignar plan": mismas reglas que el webhook, para no llegar a cobrar con datos malos.
+export function validatePlanAssignment({ email, plan, stripePriceId }) {
+  const errors = {};
+  const e = String(email ?? "").trim(), p = String(plan ?? "").trim(), price = String(stripePriceId ?? "").trim();
+  if (!EMAIL_RE.test(e)) errors.email = "El email del cliente no es válido.";
+  if (!PAID_PLANS.includes(p)) errors.plan = "Elegí uno de los planes pagos (Freemium y free trial no se asignan desde acá).";
+  if (!price) errors.stripePriceId = "Falta el precio de Stripe.";
+  else if (!PRICE_RE.test(price)) errors.stripePriceId = "El precio de Stripe empieza con price_ (o prod_) y no lleva espacios.";
+  return { ok: Object.keys(errors).length === 0, errors, value: { email: e, plan: p, stripePriceId: price } };
 }
 
-// Plan actual de un usuario: si tiene tier3/tier4 manda el tier; si no, el tipo de suscripción.
-export function currentPlanKey(user) {
-  const s = (user && user.subscription) || {};
-  if (s.tier === "tier3" || s.tier === "tier4") return s.tier;
-  const byType = PLAN_OPTIONS.find((o) => o.field === "subscription.subscriptionType" && o.value === s.subscriptionType);
-  return byType ? byType.key : null;
+// Clave para que Stripe no cobre dos veces si se reintenta la misma operación.
+export function newIdempotencyKey(now = Date.now(), random = Math.random) {
+  const rnd = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Array.from({ length: 4 }, () => Math.floor(random() * 0xffff).toString(16).padStart(4, "0")).join("");
+  return `bo-${now.toString(36)}-${rnd}`;
 }
 
-export const planLabel = (key) => (PLAN_OPTIONS.find((o) => o.key === key) || {}).label || "Sin plan";
+export const formatPrice = (amountCents, currency = "usd") => `${String(currency).toUpperCase()} ${(Number(amountCents) / 100).toLocaleString("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 
-// Aplica un cambio con ruta con puntos ("subscription.tier") sobre una copia del objeto.
-export function setPath(obj, path, value) {
-  const out = { ...obj };
-  const parts = path.split(".");
-  let cur = out;
-  for (let i = 0; i < parts.length - 1; i++) { cur[parts[i]] = { ...(cur[parts[i]] || {}) }; cur = cur[parts[i]]; }
-  cur[parts[parts.length - 1]] = value;
-  return out;
-}
+// Errores del webhook: título para el admin y qué hacer (según la tabla del doc).
+export const WEBHOOK_ERRORS = {
+  EMAIL_INVALIDO: { title: "El email no es válido", action: "Corregí el email del cliente." },
+  USUARIO_NO_ENCONTRADO: { title: "No hay una cuenta con ese email", action: "Revisá el email con el que el cliente entra a la app." },
+  PLAN_INVALIDO: { title: "Ese plan no es uno de los pagos", action: "Usá SpicyOne, SpicyStart, SpicyPro o SpicyProMax." },
+  PRECIO_REQUERIDO: { title: "Falta el precio", action: "Elegí el precio de Stripe." },
+  PRECIO_INVALIDO: { title: "El precio no sirve", action: "No existe en Stripe, está archivado o no es mensual. Copiá el id de nuevo desde Stripe." },
+  YA_SUSCRIPTO: { title: "El cliente ya tiene ese precio", action: "No hay nada que hacer: ya está en ese plan. Para cambiar el precio, elegí otro." },
+  CLIENTE_STRIPE_BORRADO: { title: "El cliente fue borrado de Stripe", action: "Hace falta un desarrollador." },
+  SIN_MEDIO_DE_PAGO: { title: "El cliente no tiene tarjeta guardada", action: "No se cobró nada. Mandale el link para cargar la tarjeta y volvé a intentar." },
+  PAGO_RECHAZADO: { title: "La tarjeta fue rechazada", action: "No se cobró ni se cambió nada. Mandale el link para actualizar la tarjeta y, cuando lo haga, volvé a intentar." },
+  STRIPE_PORTAL_FALLIDO: { title: "Stripe no pudo generar el link", action: "Probá de nuevo en un minuto; si sigue, avisá a un desarrollador." },
+  ERROR: { title: "Error inesperado", action: "Avisá a un desarrollador: el detalle queda en Discord y en los logs del servidor." },
+  UNAUTHORIZED: { title: "Falta el token del webhook", action: "Revisá la configuración del servidor." },
+  FORBIDDEN: { title: "El token del webhook es incorrecto o venció", action: "Pedile uno nuevo a Jonathan y actualizalo en el servidor." },
+};
+export const explainWebhookError = (code) => WEBHOOK_ERRORS[code] || WEBHOOK_ERRORS.ERROR;
 
 // ── Búsqueda y paginación ──────────────────────────────────────────────────────────────────────
 export const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -135,7 +148,9 @@ export const AUDIT_ACTIONS = {
   contact_edit: "Editó la ficha de contacto",
   company_pause: "Pausó la company",
   company_activate: "Activó la company",
-  plan_change: "Cambió el plan",
+  plan_assign: "Asignó un plan (cobró)",
+  plan_assign_failed: "Intentó asignar un plan (no se cobró)",
+  card_link_created: "Generó un link para cambiar la tarjeta",
   workflow_delete: "Eliminó un workflow",
 };
 export const auditLabel = (action) => AUDIT_ACTIONS[action] || action;

@@ -2,14 +2,14 @@
 // la página vuelve todo al estado inicial. Las funciones tienen la forma de los endpoints que va a tener el backend
 // (ver PLAN.md), así que al conectar Mongo / Postgres solo se reemplaza este archivo; las pantallas no cambian.
 import { MOCK } from "./adminMock.js";
-import { matchesSearch, matchesFilters, isOwner, isPaused, matchesCompanySearch, sortCompaniesByName, sortUsersRecent, paginate, companyIdOf, userFullName, planPatch, setPath, validateCompanyEdit, validateContactEdit, diffFields, buildAuditEntry, sortByPosition, PLAN_OPTIONS } from "./adminLogic.js";
+import { matchesSearch, matchesFilters, isOwner, isPaused, matchesCompanySearch, sortCompaniesByName, sortUsersRecent, paginate, companyIdOf, userFullName, planOf, isPaidPlan, PAID_PLANS, validateCompanyEdit, validateContactEdit, diffFields, buildAuditEntry, sortByPosition } from "./adminLogic.js";
 
 let db = structuredClone(MOCK);
 let audit = [];
 let auditSeq = 0;
 
 // Solo para tests: vuelve al estado inicial.
-export function resetMock() { db = structuredClone(MOCK); audit = []; auditSeq = 0; }
+export function resetMock() { db = structuredClone(MOCK); audit = []; auditSeq = 0; sessionSeq = 0; subSeq = 0; idempotent.clear(); }
 
 const copy = (x) => structuredClone(x);
 const byId = (coll, id) => db[coll].find((x) => x._id === id);
@@ -136,17 +136,57 @@ export async function setCompanyStatus(companyId, status, actor) {
   return copy(co);
 }
 
-// PATCH /admin/users/:id/plan   (un solo endpoint: valida el plan y sabe a qué campo va)
-export async function changePlan(userId, planKey, actor) {
+// ── Webhooks de back office (doc "Back office webhooks: subscriptions") ─────────────────────────────
+// Hoy se SIMULAN. En producción los llama una función de backend que guarda el token (x-webhook-token); el front nunca lo ve.
+// Los errores llevan el mismo status y "code" que el webhook real, para que la pantalla los explique igual.
+export class WebhookError extends Error {
+  constructor(status, code, message, extra = {}) { super(message); this.name = "WebhookError"; this.status = status; this.code = code; this.extra = extra; }
+}
+const wh = (status, code, message, extra) => { throw new WebhookError(status, code, message, extra); };
+let sessionSeq = 0, subSeq = 0;
+const idempotent = new Map(); // clave → primera respuesta (el webhook real no cobra dos veces con la misma clave)
+const cardUrl = () => `https://billing.stripe.com/p/session/mock_${++sessionSeq}`;
+
+// Precios que se pueden usar: activos y mensuales (el webhook rechaza el resto con PRECIO_INVALIDO).
+export async function listPrices() {
+  return copy(db.stripe_prices.filter((p) => p.active && p.interval === "month"));
+}
+
+// POST /webhooks/backoffice/subscription   → 201. COBRA la tarjeta al instante; si el cobro falla no cambia nada.
+export async function assignPlan(userId, { plan, stripePriceId, idempotencyKey } = {}, actor) {
   needActor(actor);
-  const u = byId("users", userId) || fail("No se encontró el usuario.");
-  if (!PLAN_OPTIONS.some((o) => o.key === planKey)) fail("Plan inválido: " + planKey);
-  const { field, value } = planPatch(planKey);
-  const before = { subscriptionType: u.subscription?.subscriptionType ?? null, tier: u.subscription?.tier ?? null };
-  const next = setPath(u, field, value);
-  u.subscription = next.subscription;
-  log(actor, "plan_change", { targetType: "user", targetId: userId, targetLabel: userFullName(u), companyId: companyIdOf(u), detail: { plan: planKey, field, value, before } });
-  return copy(u);
+  const u = byId("users", userId) || wh(404, "USUARIO_NO_ENCONTRADO", "No Spicytool account with that email");
+  const target = { targetType: "user", targetId: userId, targetLabel: userFullName(u), companyId: companyIdOf(u) };
+  const failed = (status, code, message, extra) => {
+    log(actor, "plan_assign_failed", { ...target, detail: { plan, stripePriceId, code } });
+    wh(status, code, message, extra);
+  };
+  if (idempotencyKey && idempotent.has(idempotencyKey)) return copy(idempotent.get(idempotencyKey));
+  if (!isPaidPlan(plan)) failed(400, "PLAN_INVALIDO", "Plan must be one of " + PAID_PLANS.join(", "));
+  if (!stripePriceId) failed(400, "PRECIO_REQUERIDO", "stripePriceId is required");
+  const price = db.stripe_prices.find((p) => p.id === stripePriceId);
+  if (!price || !price.active || price.interval !== "month") failed(400, "PRECIO_INVALIDO", "The price does not exist, is archived or is not recurring");
+  if (u.stripe?.deleted) failed(409, "CLIENTE_STRIPE_BORRADO", "The customer was deleted in Stripe");
+  if (u.subscription?.priceId === stripePriceId && isPaidPlan(u.subscription.plan)) failed(409, "YA_SUSCRIPTO", "The customer already has an active subscription to that price");
+  const pm = u.stripe?.paymentMethod;
+  if (pm === "none") failed(402, "SIN_MEDIO_DE_PAGO", "The customer has no card in Stripe", { paymentMethodUpdateUrl: cardUrl() });
+  if (pm === "declined") failed(402, "PAGO_RECHAZADO", "Your card was declined.", { decline_code: "insufficient_funds", paymentMethodUpdateUrl: cardUrl() });
+  // Cobro aprobado: recién ahora cambia el plan
+  const previousPlan = planOf(u);
+  u.subscription = { plan, stripeSubscriptionId: `sub_1MockNew${++subSeq}`, priceId: stripePriceId };
+  const result = { message: "Subscription assigned and charged", userEmail: u.email, plan, previousPlan, stripePriceId, stripeSubscriptionId: u.subscription.stripeSubscriptionId, oldSubscriptionCancelled: true, billingFailures: [] };
+  if (idempotencyKey) idempotent.set(idempotencyKey, result);
+  log(actor, "plan_assign", { ...target, detail: { plan, previousPlan, stripePriceId, stripeSubscriptionId: result.stripeSubscriptionId, idempotencyKey: idempotencyKey || null } });
+  return copy(result);
+}
+
+// POST /webhooks/backoffice/payment-method-url   → 200. No cobra ni cambia la suscripción; el link es de un solo uso.
+export async function getPaymentMethodUrl(userId, actor) {
+  needActor(actor);
+  const u = byId("users", userId) || wh(404, "USUARIO_NO_ENCONTRADO", "No Spicytool account with that email");
+  const url = cardUrl();
+  log(actor, "card_link_created", { targetType: "user", targetId: userId, targetLabel: userFullName(u), companyId: companyIdOf(u), detail: {} });
+  return { userEmail: u.email, stripeCustomerId: u.stripe?.customerId || null, paymentMethodUpdateUrl: url };
 }
 
 // DELETE /admin/workflows/:id

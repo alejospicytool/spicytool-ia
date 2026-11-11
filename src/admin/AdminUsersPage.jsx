@@ -2,7 +2,7 @@
 // Al elegir un usuario se abre su detalle (company, contactos, créditos, etc.).
 import { useState } from "react";
 import { listUsers, listAudit } from "./adminApi.js";
-import { userFullName, currentPlanKey, planLabel, whatsappProvider } from "./adminLogic.js";
+import { userFullName, planOf, planLabel, whatsappProvider } from "./adminLogic.js";
 import { DataTable, StatusBadge, Pager, AuditList } from "./adminUi.jsx";
 import { useAsync } from "./adminHooks.js";
 import AdminCompanyDetail from "./AdminCompanyDetail.jsx";
@@ -39,7 +39,7 @@ export default function AdminUsersPage({ actor }) {
               { key: "phoneNumber", label: "Teléfono", muted: true },
               { key: "companyName", label: "Company" },
               { key: "companyStatus", label: "Estado", render: (u) => <StatusBadge status={u.companyStatus} /> },
-              { key: "plan", label: "Plan", render: (u) => planLabel(currentPlanKey(u)) },
+              { key: "plan", label: "Plan", render: (u) => planLabel(planOf(u)) },
               { key: "wa", label: "WhatsApp", muted: true, render: (u) => whatsappProvider(u)?.provider || "—" },
             ]} />
             {r && <Pager page={r.page} pages={r.pages} total={r.total} label={r.total === 1 ? "usuario" : "usuarios"} onChange={setPage} />}
