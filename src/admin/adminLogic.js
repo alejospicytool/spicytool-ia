@@ -158,6 +158,7 @@ export const AUDIT_ACTIONS = {
   contact_edit: "Editó la ficha de contacto",
   company_pause: "Pausó la company",
   company_activate: "Activó la company",
+  company_status_failed: "Intentó cambiar el estado de la company (no se guardó)",
   plan_assign_started: "Inició un cambio de plan (cobra)",
   plan_assign_unknown: "Cambio de plan sin confirmar (revisar Stripe)",
   plan_assign: "Asignó un plan (cobró)",

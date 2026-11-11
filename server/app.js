@@ -1,5 +1,5 @@
-// API del backoffice. Casi todo es LECTURA; lo único que escribe es el cambio de suscripción y el link de tarjeta (billing.js),
-// que pasan por los webhooks de Spicytool. Cada pedido exige un admin autenticado; los errores nunca devuelven detalles internos.
+// API del backoffice. Casi todo es LECTURA. Escribe solo: el cambio de suscripción y el link de tarjeta (billing.js, vía los webhooks
+// de Spicytool) y pausar/activar una company (companies.js, un $set de status en Mongo). Cada pedido exige un admin autenticado; los errores nunca devuelven detalles internos.
 // "queries" y "authenticate" se inyectan: así se prueba sin Mongo ni Supabase (app.test.js).
 import express from "express";
 
@@ -8,7 +8,7 @@ const int = (v, def, min, max) => { const n = Math.floor(Number(v)); return Numb
 const text = (v) => String(v ?? "").slice(0, 100);
 const flag = (v) => v === "1" || v === "true";
 
-export function createApp({ queries, authenticate, billing, audit, prices = [], log = console.error }) {
+export function createApp({ queries, authenticate, billing, companies, audit, prices = [], log = console.error }) {
   const app = express();
   app.disable("x-powered-by");
   app.use((req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
@@ -61,6 +61,13 @@ export function createApp({ queries, authenticate, billing, audit, prices = [], 
   const billed = (fn) => route(async (req, res) => { if (!needId(req, res)) return; const r = await fn(req); res.status(r.status).json(r.body); });
   app.post("/api/admin/users/:id/subscription", billed((req) => billing.assignPlan(req.admin, req.token, req.params.id, req.body)));
   app.post("/api/admin/users/:id/payment-method-url", billed((req) => billing.paymentMethodUrl(req.admin, req.token, req.params.id)));
+
+  // Pausar / activar una company (escribe solo el campo status en Mongo, con auditoría previa).
+  app.post("/api/admin/companies/:id/status", route(async (req, res) => {
+    if (!needId(req, res)) return;
+    const r = await companies.setStatus(req.admin, req.token, req.params.id, req.body && req.body.status);
+    res.status(r.status).json(r.body);
+  }));
 
   // Todo lo demás (cualquier otro POST/PATCH/PUT/DELETE) no existe.
   app.use("/api/admin", (req, res) => res.status(404).json({ error: "No existe" }));

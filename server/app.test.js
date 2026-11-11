@@ -17,12 +17,13 @@ const billing = {
   assignPlan: vi.fn(async () => ({ status: 201, body: { message: "ok" } })),
   paymentMethodUrl: vi.fn(async () => ({ status: 200, body: { paymentMethodUpdateUrl: "https://billing.stripe.com/p/session/a" } })),
 };
+const companies = { setStatus: vi.fn(async () => ({ status: 200, body: { _id: "x", status: "paused" } })) };
 const audit = { list: vi.fn(async (token, a) => [{ id: "1", echo: { token, ...a } }]) };
 const prices = [{ id: "price_1", plan: "SpicyPro", amount: 40000 }];
 
 let server, base;
 beforeAll(async () => {
-  const app = createApp({ queries, authenticate, billing, audit, prices, log: () => {} });
+  const app = createApp({ queries, authenticate, billing, companies, audit, prices, log: () => {} });
   await new Promise((r) => { server = app.listen(0, "127.0.0.1", r); });
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -111,6 +112,21 @@ describe("API del backoffice (solo lectura)", () => {
     const r = await call(`/api/admin/users/${ID}/payment-method-url`, { method: "POST", body: {} });
     expect(r.status).toBe(200);
     expect(billing.paymentMethodUrl).toHaveBeenCalledWith({ id: "u1", email: "nico@spicytool.test" }, "admin", ID);
+  });
+  it("pausar/activar: solo POST con admin; pasa admin, token, id y el estado pedido", async () => {
+    const r = await call(`/api/admin/companies/${ID}/status`, { method: "POST", body: { status: "paused" } });
+    expect(r.status).toBe(200);
+    expect(companies.setStatus).toHaveBeenCalledWith({ id: "u1", email: "nico@spicytool.test" }, "admin", ID, "paused");
+    expect((await call(`/api/admin/companies/${ID}/status`, { method: "POST", token: null, body: { status: "paused" } })).status).toBe(401);
+    expect((await call(`/api/admin/companies/${ID}/status`, { method: "GET" })).status).toBe(404);
+    expect((await call(`/api/admin/companies/${ID}/status`, { method: "PATCH", body: { status: "paused" } })).status).toBe(404);
+    expect((await call("/api/admin/companies/xyz/status", { method: "POST", body: { status: "paused" } })).status).toBe(400);
+  });
+  it("pausar con un error del servicio devuelve ese status y código", async () => {
+    companies.setStatus.mockResolvedValueOnce({ status: 409, body: { code: "YA_ESTA", message: "La company ya está pausada." } });
+    const r = await call(`/api/admin/companies/${ID}/status`, { method: "POST", body: { status: "paused" } });
+    expect(r.status).toBe(409);
+    expect(await r.json()).toMatchObject({ code: "YA_ESTA" });
   });
   it("las respuestas no se guardan en caché", async () => {
     expect((await call("/api/admin/health")).headers.get("cache-control")).toBe("no-store");

@@ -38,6 +38,9 @@ export function makeQueries(db) {
   }
 
   return {
+    // Tras una escritura se descarta la copia de 30 s para que las listas muestren el cambio enseguida.
+    invalidate() { snap = null; snapAt = 0; },
+
     async health() { await db.command({ ping: 1 }); return { ok: true, mode: "real" }; },
 
     async listUsers({ search = "", page = 1, pageSize = 8, owners = false, activeOnly = false } = {}) {

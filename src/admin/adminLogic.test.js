@@ -80,6 +80,7 @@ describe("planes y suscripciones", () => {
   it("las acciones de auditoría del cobro (iniciado, sin confirmar) tienen texto", () => {
     expect(AUDIT_ACTIONS.plan_assign_started).toBeTruthy();
     expect(AUDIT_ACTIONS.plan_assign_unknown).toMatch(/Stripe/);
+    expect(AUDIT_ACTIONS.company_status_failed).toMatch(/no se guardó/);
   });
 });
 

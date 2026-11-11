@@ -172,7 +172,7 @@ export async function updateUserContact(userId, fields, actor) {
 
 // PATCH /admin/companies/:id/status
 export async function setCompanyStatus(companyId, status, actor) {
-  readOnly();
+  if (real()) return http(`/companies/${companyId}/status`, {}, { method: "POST", body: { status } }); // escribe status en Mongo; el actor sale de la sesión
   needActor(actor);
   if (status !== "paused" && status !== "active") fail("Estado inválido: " + status);
   const co = byId("companies", companyId) || fail("No se encontró la company.");

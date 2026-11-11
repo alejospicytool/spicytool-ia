@@ -175,8 +175,8 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
           <button className="btn-secondary" onClick={() => setDialog("card")}>Link de tarjeta</button>
           <button className="btn-warn" disabled={!perms.data || !perms.data.support} title={perms.data && !perms.data.support ? (perms.data.disabledReason || "Tu usuario no tiene permiso de soporte. Pedile a un admin que te habilite.") : "Generar un link para entrar a la cuenta de este usuario"} onClick={() => setDialog("support")}>Entrar como usuario</button>
           {paused
-            ? <button className="btn-primary" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => ask({ title: "Activar company", label: "Activar", text: <>Vas a <b>activar</b> la company <b>{co.name}</b>. Sus usuarios vuelven a poder usar la cuenta.</>, action: () => setCompanyStatus(co._id, "active", actor) })}>Activar company</button>
-            : <button className="btn-warn" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => ask({ title: "Pausar company", label: "Pausar", danger: true, text: <>Vas a <b>pausar</b> la company <b>{co.name}</b>. Sus usuarios dejan de poder usar la cuenta hasta que la actives de nuevo.</>, action: () => setCompanyStatus(co._id, "paused", actor) })}>Pausar company</button>}
+            ? <button className="btn-primary" onClick={() => ask({ title: "Activar company", label: "Activar", text: <>Vas a <b>activar</b> la company <b>{co.name}</b>. Sus usuarios vuelven a poder usar la cuenta.</>, action: () => setCompanyStatus(co._id, "active", actor) })}>Activar company</button>
+            : <button className="btn-warn" onClick={() => ask({ title: "Pausar company", label: "Pausar", danger: true, text: <>Vas a <b>pausar</b> la company <b>{co.name}</b>. Sus usuarios dejan de poder usar la cuenta hasta que la actives de nuevo. No cancela la suscripción ni los cobros.</>, action: () => setCompanyStatus(co._id, "paused", actor) })}>Pausar company</button>}
         </div>
       </div>
 

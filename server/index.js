@@ -6,6 +6,7 @@ import { makeAuthenticator } from "./auth.js";
 import { makeQueries } from "./queries.js";
 import { makeAudit } from "./audit.js";
 import { makeBilling } from "./billing.js";
+import { makeCompanyAdmin } from "./companies.js";
 import { makeWebhookClient } from "./webhooks.js";
 import { STANDARD_PRICES } from "./prices.js";
 
@@ -24,5 +25,16 @@ const allowedEmails = String(process.env.WEBHOOK_ALLOWED_EMAILS || "").split(","
 const billing = makeBilling({ getUser: queries.getUser, audit, allowedEmails, webhook: makeWebhookClient({ token: process.env.BACKOFFICE_WEBHOOK_TOKEN, baseUrl: process.env.WEBHOOK_BASE_URL || "https://api.spicytool.net" }) });
 console.log(`Cobros: ${process.env.BACKOFFICE_WEBHOOK_TOKEN ? "token cargado" : "SIN token (desactivados)"} · ${allowedEmails.length ? `solo ${allowedEmails.length} email(s) habilitado(s)` : "todos los clientes habilitados"}`);
 
+// Escrituras en Mongo (pausar/activar company). Si existe MONGODB_WRITE_URI se usa un usuario aparte, limitado a escribir;
+// si no, se usa la misma conexión de lectura. Conviene separarlos cuando haya un usuario de solo lectura.
+let writeDb = db;
+if (process.env.MONGODB_WRITE_URI) {
+  const writeClient = new MongoClient(process.env.MONGODB_WRITE_URI, { serverSelectionTimeoutMS: 10000, maxPoolSize: 3, appName: "backoffice-api-write" });
+  await writeClient.connect();
+  writeDb = writeClient.db(process.env.MONGODB_DB || "spicytool");
+}
+const companies = makeCompanyAdmin({ db: writeDb, audit, invalidate: queries.invalidate });
+console.log(`Escrituras en Mongo: ${process.env.MONGODB_WRITE_URI ? "usuario de escritura aparte" : "misma conexión que la lectura"}`);
+
 const port = Number(process.env.PORT || 3100);
-createApp({ queries, authenticate: makeAuthenticator(), billing, audit, prices: STANDARD_PRICES }).listen(port, "127.0.0.1", () => console.log(`Backoffice API escuchando en 127.0.0.1:${port}`));
+createApp({ queries, authenticate: makeAuthenticator(), billing, companies, audit, prices: STANDARD_PRICES }).listen(port, "127.0.0.1", () => console.log(`Backoffice API escuchando en 127.0.0.1:${port}`));
