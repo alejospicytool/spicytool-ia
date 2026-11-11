@@ -55,12 +55,25 @@ export function isOwner(user, company) {
   return a !== "" && a === b;
 }
 
-// Filtros de la lista: solo owners y/o solo usuarios de una company activa ("activa" = cualquiera que no esté pausada).
+// Pausada, sin distinguir mayúsculas. Retool usaba dos criterios distintos (!= "paused" y regex ^paused$ con "i"), así que un
+// "Paused" podía aparecer en las dos listas o en ninguna; acá hay una sola definición y todo lo demás es "activa".
+export const isPaused = (company) => String((company && company.status) || "").trim().toLowerCase() === "paused";
+
+// Filtros de la lista: solo owners y/o solo usuarios de una company activa (cualquiera que no esté pausada).
 export function matchesFilters(user, company, { owners = false, activeOnly = false } = {}) {
   if (owners && !isOwner(user, company)) return false;
-  if (activeOnly && (!company || company.status === "paused")) return false;
+  if (activeOnly && (!company || isPaused(company))) return false;
   return true;
 }
+
+// Companies: búsqueda literal por nombre o email del owner, y orden por nombre.
+export function matchesCompanySearch(company, q) {
+  const text = String(q || "").trim();
+  if (!text) return true;
+  const re = new RegExp(escapeRegExp(text), "i");
+  return [company.name, company.userEmail].some((v) => v != null && re.test(String(v)));
+}
+export const sortCompaniesByName = (companies) => [...companies].sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "es", { sensitivity: "base" }));
 
 // Más recientes primero. Los _id de Mongo (ObjectId en hexa) crecen con el tiempo.
 export const sortUsersRecent = (users) => [...users].sort((a, b) => (String(a._id) < String(b._id) ? 1 : String(a._id) > String(b._id) ? -1 : 0));

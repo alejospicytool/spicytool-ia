@@ -138,7 +138,7 @@ const NAV_ICONS = {
   devdash:"📈", devtasks:"🛠️",
   crm:"💼",
   metrics:"💹", metrics_mrr:"↗", metrics_churn:"↘", metrics_retention:"⟳", metrics_failed:"⚠️", metrics_customers:"👤", metrics_projection:"⇢", metrics_plans:"🏷️",
-  adm_users:"🛡️",
+  adm_users:"🛡️", adm_companies:"🏢",
 };
 const NAV_LABELS = {
   inicio:"Inicio", notes:"Notas", mytime:"Mi tiempo", timeadmin:"Control de jornada",
@@ -149,9 +149,9 @@ const NAV_LABELS = {
   devdash:"Resumen", devtasks:"Tareas",
   crm:"CRM comercial",
   metrics:"Overview", metrics_mrr:"MRR & ARR", metrics_churn:"Churn", metrics_retention:"Retención", metrics_failed:"Pagos fallidos", metrics_customers:"Clientes", metrics_projection:"Proyección", metrics_plans:"Planes",
-  adm_users:"Usuarios y companies",
+  adm_users:"Usuarios y companies", adm_companies:"Companies",
 };
-const ADMIN_ONLY_VIEWS = ["add","usuarios","timeadmin","metrics","metrics_mrr","metrics_churn","metrics_retention","metrics_failed","metrics_customers","metrics_projection","metrics_plans","adm_users"];
+const ADMIN_ONLY_VIEWS = ["add","usuarios","timeadmin","metrics","metrics_mrr","metrics_churn","metrics_retention","metrics_failed","metrics_customers","metrics_projection","metrics_plans","adm_users","adm_companies"];
 // Secciones solo para admins: no se asignan desde el panel de Usuarios (la base también lo exige, ver supabase_revenue.sql).
 const ADMIN_ONLY_SECTIONS = ["Métricas","Admin Spicy"];
 // Inicio, Notas y Tiempo son visibles para todos sin pasar por allowed_sections — Inicio
@@ -209,7 +209,7 @@ const NAV_SECTIONS = [
   },
   {
     label: "Admin Spicy",
-    views: ["adm_users"],
+    views: ["adm_users","adm_companies"],
     adminOnly: true,
   },
   {

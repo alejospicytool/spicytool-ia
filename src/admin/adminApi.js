@@ -2,7 +2,7 @@
 // la página vuelve todo al estado inicial. Las funciones tienen la forma de los endpoints que va a tener el backend
 // (ver PLAN.md), así que al conectar Mongo / Postgres solo se reemplaza este archivo; las pantallas no cambian.
 import { MOCK } from "./adminMock.js";
-import { matchesSearch, matchesFilters, isOwner, sortUsersRecent, paginate, companyIdOf, userFullName, planPatch, setPath, validateCompanyEdit, validateContactEdit, diffFields, buildAuditEntry, sortByPosition, PLAN_OPTIONS } from "./adminLogic.js";
+import { matchesSearch, matchesFilters, isOwner, isPaused, matchesCompanySearch, sortCompaniesByName, sortUsersRecent, paginate, companyIdOf, userFullName, planPatch, setPath, validateCompanyEdit, validateContactEdit, diffFields, buildAuditEntry, sortByPosition, PLAN_OPTIONS } from "./adminLogic.js";
 
 let db = structuredClone(MOCK);
 let audit = [];
@@ -36,6 +36,23 @@ export async function listUsers({ search = "", page = 1, pageSize = 8, owners = 
       return { ...copy(u), companyName: co ? co.name : "—", companyStatus: co ? co.status : null, isOwner: isOwner(u, co) };
     }),
   };
+}
+
+// GET /admin/companies?status=active|paused&search=&page=&pageSize=
+// "counts" son los totales de cada lista con la búsqueda aplicada, para mostrarlos en las pestañas.
+export async function listCompanies({ status = "active", search = "", page = 1, pageSize = 8 } = {}) {
+  const found = db.companies.filter((c) => matchesCompanySearch(c, search));
+  const counts = { active: found.filter((c) => !isPaused(c)).length, paused: found.filter(isPaused).length };
+  const list = sortCompaniesByName(found.filter((c) => (status === "paused" ? isPaused(c) : !isPaused(c))));
+  const p = paginate(list, page, pageSize);
+  return { ...p, counts, items: p.items.map((c) => ({ ...copy(c), userCount: db.users.filter((u) => (u.companies || []).includes(c._id)).length })) };
+}
+
+// GET /admin/companies/:id/users   (el owner primero)
+export async function listCompanyUsers(companyId) {
+  const co = byId("companies", companyId) || fail("No se encontró la company.");
+  const users = db.users.filter((u) => (u.companies || []).includes(companyId)).map((u) => ({ ...copy(u), isOwner: isOwner(u, co) }));
+  return users.sort((a, b) => Number(b.isOwner) - Number(a.isOwner) || userFullName(a).localeCompare(userFullName(b), "es", { sensitivity: "base" }));
 }
 
 export async function getUser(userId) {

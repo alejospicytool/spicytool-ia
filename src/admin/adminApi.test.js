@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { resetMock, listUsers, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, changePlan, deleteWorkflow, getUser } from "./adminApi.js";
+import { resetMock, listUsers, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, changePlan, deleteWorkflow, getUser, listCompanies, listCompanyUsers } from "./adminApi.js";
 import { MOCK } from "./adminMock.js";
 
 const ACTOR = "admin@ejemplo.test";
@@ -78,6 +78,53 @@ describe("listUsers: filtros", () => {
     const antes = (await all({ activeOnly: true })).length;
     await setCompanyStatus(co._id, "paused", ACTOR);
     expect((await all({ activeOnly: true })).length).toBe(antes - MOCK.users.filter((u) => u.companies[0] === co._id).length);
+  });
+});
+
+describe("listCompanies / listCompanyUsers", () => {
+  it("separa activas y pausadas, con los totales de cada lista", async () => {
+    const a = await listCompanies({ status: "active", pageSize: 50 }), p = await listCompanies({ status: "paused", pageSize: 50 });
+    const nPaused = MOCK.companies.filter((c) => c.status === "paused").length;
+    expect(p.items).toHaveLength(nPaused);
+    expect(a.items).toHaveLength(MOCK.companies.length - nPaused);
+    expect(a.counts).toEqual({ active: a.items.length, paused: nPaused });
+    expect(a.items.every((c) => c.status !== "paused")).toBe(true);
+    expect(p.items.every((c) => c.status === "paused")).toBe(true);
+    const ids = [...a.items, ...p.items].map((c) => c._id);
+    expect(new Set(ids).size).toBe(MOCK.companies.length); // ninguna en las dos listas ni en ninguna
+  });
+  it("ordena por nombre y cuenta usuarios", async () => {
+    const a = await listCompanies({ status: "active", pageSize: 50 });
+    const names = a.items.map((c) => c.name);
+    expect(names).toEqual([...names].sort((x, y) => x.localeCompare(y, "es", { sensitivity: "base" })));
+    for (const c of a.items) expect(c.userCount).toBe(MOCK.users.filter((u) => u.companies[0] === c._id).length);
+  });
+  it("busca por nombre o por email del owner, y los totales siguen la búsqueda", async () => {
+    const r = await listCompanies({ search: "demo", pageSize: 50 });
+    expect(r.items.map((c) => c.name)).toEqual(["Propiedades Demo Sur"]);
+    expect(r.counts).toEqual({ active: 1, paused: 0 });
+    const byOwner = await listCompanies({ search: "valentina.silva", status: "paused" });
+    expect(byOwner.items.map((c) => c.name)).toEqual(["Estudio Ficticio & Asociados"]);
+    expect((await listCompanies({ search: "zzz" })).items).toEqual([]);
+  });
+  it("pagina", async () => {
+    const r = await listCompanies({ status: "active", pageSize: 3 });
+    expect(r).toMatchObject({ total: 4, pages: 2, page: 1 });
+    expect(r.items).toHaveLength(3);
+  });
+  it("pausar una company la pasa de lista", async () => {
+    const co = MOCK.companies.find((c) => c.status === "active");
+    await setCompanyStatus(co._id, "paused", ACTOR);
+    expect((await listCompanies({ status: "paused", pageSize: 50 })).items.some((c) => c._id === co._id)).toBe(true);
+    expect((await listCompanies({ status: "active", pageSize: 50 })).items.some((c) => c._id === co._id)).toBe(false);
+  });
+  it("usuarios de la company: el owner primero, y error si no existe", async () => {
+    const co = MOCK.companies[3];
+    const u = await listCompanyUsers(co._id);
+    expect(u).toHaveLength(MOCK.users.filter((x) => x.companies[0] === co._id).length);
+    expect(u[0].isOwner).toBe(true);
+    expect(u.slice(1).every((x) => !x.isOwner)).toBe(true);
+    await expect(listCompanyUsers("nope")).rejects.toThrow(/No se encontró/);
   });
 });
 

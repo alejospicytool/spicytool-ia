@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   PLAN_OPTIONS, planPatch, currentPlanKey, setPath, matchesSearch, escapeRegExp, sortUsersRecent, paginate, whatsappProvider, companyIdOf,
-  validateCompanyEdit, validateContactEdit, diffFields, buildAuditEntry, userFullName, sortByPosition, isOwner, matchesFilters,
+  validateCompanyEdit, validateContactEdit, diffFields, buildAuditEntry, userFullName, sortByPosition, isOwner, matchesFilters, isPaused, matchesCompanySearch, sortCompaniesByName,
 } from "./adminLogic.js";
 
 describe("planes", () => {
@@ -192,5 +192,38 @@ describe("filtros de la lista", () => {
     expect(matchesFilters(owner, co, { owners: true, activeOnly: true })).toBe(true);
     expect(matchesFilters(owner, { ...co, status: "paused" }, { owners: true, activeOnly: true })).toBe(false);
     expect(matchesFilters(other, co, { owners: true, activeOnly: true })).toBe(false);
+  });
+});
+
+describe("companies activas y pausadas", () => {
+  it("pausada: sin distinguir mayúsculas ni espacios; todo lo demás es activa", () => {
+    expect(isPaused({ status: "paused" })).toBe(true);
+    expect(isPaused({ status: "Paused" })).toBe(true);
+    expect(isPaused({ status: " PAUSED " })).toBe(true);
+    expect(isPaused({ status: "active" })).toBe(false);
+    expect(isPaused({ status: undefined })).toBe(false);
+    expect(isPaused({})).toBe(false);
+    expect(isPaused(null)).toBe(false);
+  });
+  it("una company con estado raro cae en una sola lista", () => {
+    for (const status of ["paused", "Paused", "active", "", null, "suspended"]) {
+      expect(isPaused({ status }) !== !isPaused({ status })).toBe(true);
+    }
+  });
+  it("el filtro 'company activa' usa la misma definición", () => {
+    expect(matchesFilters({ email: "a@b.test" }, { status: "Paused" }, { activeOnly: true })).toBe(false);
+  });
+  it("búsqueda de company por nombre o email del owner, literal", () => {
+    const c = { name: "Casas (Norte) S.A.", userEmail: "Dueno@Ejemplo.test" };
+    expect(matchesCompanySearch(c, "casas (norte)")).toBe(true);
+    expect(matchesCompanySearch(c, "dueno@")).toBe(true);
+    expect(matchesCompanySearch(c, ".*")).toBe(false);
+    expect(matchesCompanySearch(c, "")).toBe(true);
+    expect(matchesCompanySearch({}, "x")).toBe(false);
+  });
+  it("orden por nombre, ignorando mayúsculas y acentos, sin mutar", () => {
+    const a = [{ name: "zeta" }, { name: "Álamo" }, { name: "beta" }, { name: "Alfa" }];
+    expect(sortCompaniesByName(a).map((c) => c.name)).toEqual(["Álamo", "Alfa", "beta", "zeta"]);
+    expect(a[0].name).toBe("zeta");
   });
 });
