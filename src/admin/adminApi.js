@@ -4,6 +4,34 @@
 import { MOCK } from "./adminMock.js";
 import { matchesSearch, matchesFilters, isOwner, isPaused, matchesCompanySearch, sortCompaniesByName, sortUsersRecent, paginate, companyIdOf, userFullName, planOf, isPaidPlan, PAID_PLANS, validateCompanyEdit, validateContactEdit, validateSupportReason, buildSupportRequest, SUPPORT_ACTIONS, diffFields, buildAuditEntry, sortByPosition } from "./adminLogic.js";
 
+// ── Modo real o de ejemplo ───────────────────────────────────────────────────────────────────────
+// Al abrir Admin Spicy se prueba el backend (/api/admin, en el servidor). Si responde, las LECTURAS salen de Mongo (solo lectura);
+// si no, se usan los datos de ejemplo. Las escrituras todavía no están conectadas: en modo real se rechazan con un mensaje claro.
+let tokenProvider = null, mode = "mock";
+export function configureAdminApi(getToken) { tokenProvider = getToken; }
+export const adminMode = () => mode;
+const real = () => mode === "real";
+const READ_ONLY_MSG = "Todavía no está conectado: por ahora esta sección es de solo lectura.";
+const readOnly = () => { if (real()) throw new Error(READ_ONLY_MSG); };
+
+async function http(path, params = {}) {
+  const token = tokenProvider ? await tokenProvider() : null;
+  if (!token) throw new Error("No hay sesión.");
+  const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== "" && v !== false).map(([k, v]) => [k, String(v)])).toString();
+  const res = await fetch(`/api/admin${path}${qs ? "?" + qs : ""}`, { headers: { Authorization: `Bearer ${token}` } });
+  let body = null;
+  try { body = await res.json(); } catch { /* sin cuerpo JSON */ }
+  if (!res.ok) { const e = new Error((body && body.error) || `Error ${res.status}`); e.status = res.status; throw e; }
+  return body;
+}
+
+export async function probeAdminApi() {
+  mode = "mock";
+  if (!tokenProvider) return mode;
+  try { const r = await http("/health"); if (r && r.ok === true && r.mode === "real") mode = "real"; } catch { /* sin backend: quedan los datos de ejemplo */ }
+  return mode;
+}
+
 let db = structuredClone(MOCK);
 let audit = [];
 let auditSeq = 0;
@@ -26,6 +54,7 @@ function log(actor, action, { targetType, targetId, targetLabel, companyId, deta
 // ── Lectura ─────────────────────────────────────────────────────────────────────────────────────
 // GET /admin/users?search=&owners=&activeOnly=&page=&pageSize=   (filtrado y paginado del lado del servidor)
 export async function listUsers({ search = "", page = 1, pageSize = 8, owners = false, activeOnly = false } = {}) {
+  if (real()) return http("/users", { search, page, pageSize, owners, activeOnly });
   const rows = db.users.map((u) => ({ u, co: byId("companies", companyIdOf(u)) }))
     .filter(({ u, co }) => matchesSearch(u, search) && matchesFilters(u, co, { owners, activeOnly }));
   const p = paginate(sortUsersRecent(rows.map((r) => r.u)), page, pageSize);
@@ -41,6 +70,7 @@ export async function listUsers({ search = "", page = 1, pageSize = 8, owners = 
 // GET /admin/companies?status=active|paused&search=&page=&pageSize=
 // "counts" son los totales de cada lista con la búsqueda aplicada, para mostrarlos en las pestañas.
 export async function listCompanies({ status = "active", search = "", page = 1, pageSize = 8 } = {}) {
+  if (real()) return http("/companies", { status, search, page, pageSize });
   const found = db.companies.filter((c) => matchesCompanySearch(c, search));
   const counts = { active: found.filter((c) => !isPaused(c)).length, paused: found.filter(isPaused).length };
   const list = sortCompaniesByName(found.filter((c) => (status === "paused" ? isPaused(c) : !isPaused(c))));
@@ -50,12 +80,14 @@ export async function listCompanies({ status = "active", search = "", page = 1, 
 
 // GET /admin/companies/:id/users   (el owner primero)
 export async function listCompanyUsers(companyId) {
+  if (real()) return http(`/companies/${companyId}/users`);
   const co = byId("companies", companyId) || fail("No se encontró la company.");
   const users = db.users.filter((u) => (u.companies || []).includes(companyId)).map((u) => ({ ...copy(u), isOwner: isOwner(u, co) }));
   return users.sort((a, b) => Number(b.isOwner) - Number(a.isOwner) || userFullName(a).localeCompare(userFullName(b), "es", { sensitivity: "base" }));
 }
 
 export async function getUser(userId) {
+  if (real()) { try { return await http(`/users/${userId}`); } catch (e) { if (e.status === 404) return null; throw e; } }
   const u = byId("users", userId);
   return u ? copy(u) : null;
 }
@@ -63,6 +95,7 @@ export async function getUser(userId) {
 // Todo lo de una company: sus datos y sus colecciones hijas.
 // GET /admin/companies/:id
 export async function getCompanyBundle(companyId) {
+  if (real()) return http(`/companies/${companyId}`);
   const company = byId("companies", companyId);
   if (!company) fail("No se encontró la company.");
   const own = (coll) => copy(db[coll].filter((x) => x.companyId === companyId));
@@ -84,11 +117,13 @@ export async function getCompanyBundle(companyId) {
 
 // GET /admin/pipelines/:id/stages
 export async function getPipelineStages(pipelineId) {
+  if (real()) return http(`/pipelines/${pipelineId}/stages`);
   return copy(sortByPosition(db.pipelinestages.filter((s) => s.pipelineId === pipelineId)));
 }
 
 // GET /admin/companies/:id/credits   (Postgres de billing: credit_balances + credit_transactions)
 export async function getCredits(companyId) {
+  if (real()) return { balance: null, transactions: [], unavailable: true }; // el saldo de WhatsApp vive en otra base (billing), todavía sin conectar
   const balance = db.credit_balances.find((b) => b.company_id === companyId) || null;
   const transactions = db.credit_transactions.filter((t) => t.company_id === companyId).sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
   return copy({ balance, transactions });
@@ -96,12 +131,14 @@ export async function getCredits(companyId) {
 
 // GET /admin/audit
 export async function listAudit({ companyId = null, limit = 50, actions = null } = {}) {
+  if (real()) return []; // todavía no hay escrituras que auditar
   return copy(audit.filter((a) => (!companyId || a.companyId === companyId) && (!actions || actions.includes(a.action))).slice(0, limit));
 }
 
 // ── Escritura (cada una deja una entrada en la auditoría) ─────────────────────────────────────────
 // PATCH /admin/companies/:id
 export async function updateCompany(companyId, fields, actor) {
+  readOnly();
   needActor(actor);
   const co = byId("companies", companyId) || fail("No se encontró la company.");
   const v = validateCompanyEdit(fields);
@@ -114,6 +151,7 @@ export async function updateCompany(companyId, fields, actor) {
 
 // PATCH /admin/users/:id   (ficha de contacto)
 export async function updateUserContact(userId, fields, actor) {
+  readOnly();
   needActor(actor);
   const u = byId("users", userId) || fail("No se encontró el usuario.");
   const v = validateContactEdit(fields);
@@ -127,6 +165,7 @@ export async function updateUserContact(userId, fields, actor) {
 
 // PATCH /admin/companies/:id/status
 export async function setCompanyStatus(companyId, status, actor) {
+  readOnly();
   needActor(actor);
   if (status !== "paused" && status !== "active") fail("Estado inválido: " + status);
   const co = byId("companies", companyId) || fail("No se encontró la company.");
@@ -154,6 +193,7 @@ export async function listPrices() {
 
 // POST /webhooks/backoffice/subscription   → 201. COBRA la tarjeta al instante; si el cobro falla no cambia nada.
 export async function assignPlan(userId, { plan, stripePriceId, idempotencyKey } = {}, actor) {
+  readOnly();
   needActor(actor);
   const u = byId("users", userId) || wh(404, "USUARIO_NO_ENCONTRADO", "No Spicytool account with that email");
   const target = { targetType: "user", targetId: userId, targetLabel: userFullName(u), companyId: companyIdOf(u) };
@@ -184,6 +224,7 @@ export async function assignPlan(userId, { plan, stripePriceId, idempotencyKey }
 
 // POST /webhooks/backoffice/payment-method-url   → 200. No cobra ni cambia la suscripción; el link es de un solo uso.
 export async function getPaymentMethodUrl(userId, actor) {
+  readOnly();
   needActor(actor);
   const u = byId("users", userId) || wh(404, "USUARIO_NO_ENCONTRADO", "No Spicytool account with that email");
   const url = cardUrl();
@@ -193,6 +234,7 @@ export async function getPaymentMethodUrl(userId, actor) {
 
 // DELETE /admin/workflows/:id
 export async function deleteWorkflow(workflowId, actor) {
+  readOnly();
   needActor(actor);
   const i = db.workflows.findIndex((w) => w._id === workflowId);
   if (i < 0) fail("No se encontró el workflow.");
@@ -215,12 +257,14 @@ const SUPPORT_LINK_MINUTES = 15; // supuesto
 
 // GET /admin/me/permissions
 export async function getMyPermissions(actor) {
+  if (real()) return { support: false, disabledReason: "Entrar como usuario todavía no está conectado." };
   needActor(actor);
   return { support: !SUPPORT_DENIED.includes(String(actor).trim().toLowerCase()) };
 }
 
 // POST /admin/support-sessions/link
 export async function createSupportLink(userId, reason, actor, now = new Date()) {
+  readOnly();
   needActor(actor);
   const u = byId("users", userId);
   const co = u && byId("companies", companyIdOf(u));
@@ -242,6 +286,7 @@ export async function createSupportLink(userId, reason, actor, now = new Date())
 
 // GET /admin/support-sessions   (el registro; sin links)
 export async function listSupportLog({ search = "", page = 1, pageSize = 10 } = {}) {
+  if (real()) return http("/support-sessions", { search, page, pageSize });
   const q = String(search || "").trim().toLowerCase();
   const rows = (await listAudit({ actions: SUPPORT_ACTIONS, limit: 1000 })).filter((a) => !q || [a.actor, a.targetLabel, a.detail?.targetEmail, a.detail?.companyName, a.detail?.reason].some((v) => v && String(v).toLowerCase().includes(q)));
   return paginate(rows, page, pageSize);

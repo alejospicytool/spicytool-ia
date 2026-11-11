@@ -11,11 +11,14 @@ import { dayBA, weekStartBA, closureEvents, scoreRequiredForStatus } from "./met
 import CrmApp from "./crm/CrmApp.jsx";
 import RevenueApp from "./revenue/RevenueApp.jsx";
 import AdminApp from "./admin/AdminApp.jsx";
+import { configureAdminApi } from "./admin/adminApi.js";
 
 // ── Supabase ───────────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://khuavhbraikzreyhptog.supabase.co";
 const SUPABASE_KEY = "sb_publishable_O8UPfP8BYLWhlIg0Fv45Gg_coidezqc";
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
+// Admin Spicy habla con el backend del servidor usando el token de esta sesión.
+configureAdminApi(async () => (await sb.auth.getSession()).data.session?.access_token || null);
 
 // ── SpicyTool Brand ────────────────────────────────────────────────────────
 const ST_RED    = "#EF3E3E";

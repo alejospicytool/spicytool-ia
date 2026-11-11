@@ -2,14 +2,16 @@
   "name": "spicytool-backoffice-server",
   "private": true,
   "type": "module",
-  "description": "Backend del backoffice (corre en el droplet). Guarda las claves; el front nunca las ve.",
+  "description": "Backend del backoffice (corre en el droplet, solo lectura). Guarda las claves; el front nunca las ve.",
   "scripts": {
     "mongo:check": "node --env-file=/etc/spicytool-backoffice.env mongo-check.mjs",
     "mongo:schema": "node --env-file=/etc/spicytool-backoffice.env mongo-schema.mjs",
-    "mongo:values": "node --env-file=/etc/spicytool-backoffice.env mongo-values.mjs"
+    "mongo:values": "node --env-file=/etc/spicytool-backoffice.env mongo-values.mjs",
+    "start": "node --env-file=/etc/spicytool-backoffice.env index.js"
   },
   "dependencies": {
-    "mongodb": "^6.10.0"
+    "mongodb": "^6.10.0",
+    "express": "^4.21.2"
   },
   "engines": {
     "node": ">=20.6"

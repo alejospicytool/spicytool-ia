@@ -28,3 +28,6 @@ _import/
 
 # Histórico real de ingresos exportado de ChartMogul (repo público: no subir)
 docs/revenue/chartmogul_historico_mensual.json
+
+# Backend del backoffice: el lock se genera en el servidor al hacer npm install
+server/package-lock.json

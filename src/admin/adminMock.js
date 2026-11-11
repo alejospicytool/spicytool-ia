@@ -106,7 +106,7 @@ COMPANIES.forEach((co, ci) => {
     });
   }
 
-  landings.push({ _id: nid(), companyId, userEmail, name: `Landing ${co.name}`, keyword: KEYWORDS[ci % KEYWORDS.length], phoneNumber: co.phone, source: "google" });
+  landings.push({ _id: nid(), companyId, userEmail, name: `Landing ${co.name}`, description: `Página para captar consultas de ${KEYWORDS[ci % KEYWORDS.length]}.`, status: ci % 2 ? "draft" : "published", createdWithIA: ci % 2 === 0 });
 
   companyconversions.push(
     { _id: nid(), companyId, condition: "Mensaje de WhatsApp recibido", conversionCategory: "LEAD" },

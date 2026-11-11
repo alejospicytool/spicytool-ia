@@ -26,4 +26,9 @@ export default defineConfig([
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
     },
   },
+  // El backend del backoffice corre en Node (no en el navegador).
+  {
+    files: ['server/**/*.{js,mjs}'],
+    languageOptions: { globals: globals.node },
+  },
 ])

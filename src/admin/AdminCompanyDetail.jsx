@@ -3,13 +3,14 @@
 // (editar, pausar/activar, cambiar plan, eliminar workflow), todas con confirmación o formulario y con auditoría.
 import { useState } from "react";
 import { Kpi, fmtDate, fmtDateTime } from "../revenue/revenueUi.jsx";
-import { getUser, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, getPaymentMethodUrl, createSupportLink, getMyPermissions, deleteWorkflow } from "./adminApi.js";
+import { adminMode, getUser, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, getPaymentMethodUrl, createSupportLink, getMyPermissions, deleteWorkflow } from "./adminApi.js";
 import { companyIdOf, userFullName, whatsappProvider, planOf, planLabel, sortByPosition } from "./adminLogic.js";
 import { Tabs, DataTable, StatusBadge, ConfirmDialog, AuditList } from "./adminUi.jsx";
 import { useAsync } from "./adminHooks.js";
 import { EditCompanyDialog, EditContactDialog, AssignPlanDialog, CardLinkDialog, SupportSessionDialog } from "./AdminDialogs.jsx";
 
 const yesNo = (v) => (v ? "Sí" : "No");
+const RO_TITLE = "Todavía no está conectado: por ahora esta sección es de solo lectura.";
 const num = (v) => (v == null ? "—" : Number(v).toLocaleString("es-AR"));
 const Card = ({ title, sub, children }) => <div className="card"><div className="card-title"><span>{title}{sub != null && <span className="card-sub">{sub}</span>}</span></div>{children}</div>;
 
@@ -69,7 +70,8 @@ function CreditsTab({ companyId, version }) {
   const r = useAsync(() => getCredits(companyId), `credits:${companyId}:${version}`);
   if (r.loading) return <div className="empty">Cargando créditos…</div>;
   if (r.error) return <div className="err">{r.error}</div>;
-  const { balance, transactions } = r.data;
+  const { balance, transactions, unavailable } = r.data;
+  if (unavailable) return <div className="notice" style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #FCE4A0" }}>El saldo y las transacciones de créditos de WhatsApp viven en la base de billing, que todavía no está conectada.</div>;
   return (
     <>
       <div className="kpi-grid">
@@ -94,7 +96,7 @@ function AuditTab({ companyId, version }) {
 }
 
 // Usuario que se registró pero no tiene company (en la base real es la mayoría): solo se ven sus datos y la suscripción.
-function NoCompanyView({ user, actor, onBack, refresh, dialog, setDialog }) {
+function NoCompanyView({ user, actor, ro, onBack, refresh, dialog, setDialog }) {
   const wa = whatsappProvider(user), submitted = (fn) => async (v) => { await fn(v); refresh(); };
   return (
     <div>
@@ -105,9 +107,9 @@ function NoCompanyView({ user, actor, onBack, refresh, dialog, setDialog }) {
           <div className="page-sub">{user.email} · Plan: {planLabel(planOf(user))}</div>
         </div>
         <div className="detail-actions">
-          <button className="btn-secondary" onClick={() => setDialog("contact")}>Editar contacto</button>
-          <button className="btn-secondary" onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
-          <button className="btn-secondary" onClick={() => setDialog("card")}>Link de tarjeta</button>
+          <button className="btn-secondary" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => setDialog("contact")}>Editar contacto</button>
+          <button className="btn-secondary" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
+          <button className="btn-secondary" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => setDialog("card")}>Link de tarjeta</button>
           <button className="btn-warn" disabled title="Este usuario no tiene company: no hay cuenta para revisar.">Entrar como usuario</button>
         </div>
       </div>
@@ -133,7 +135,7 @@ function NoCompanyView({ user, actor, onBack, refresh, dialog, setDialog }) {
 export default function AdminCompanyDetail({ userId, actor, onBack, onChanged }) {
   const [version, setVersion] = useState(0), [tab, setTab] = useState("resumen"), [dialog, setDialog] = useState(null), [confirm, setConfirm] = useState(null);
   const [confirmBusy, setConfirmBusy] = useState(false), [confirmError, setConfirmError] = useState("");
-  const perms = useAsync(() => getMyPermissions(actor), "perms:" + actor);
+  const perms = useAsync(() => getMyPermissions(actor), "perms:" + actor), ro = adminMode() === "real";
   const res = useAsync(async () => { const user = await getUser(userId); if (!user) throw new Error("No se encontró el usuario."); const cid = companyIdOf(user); return { user, bundle: cid ? await getCompanyBundle(cid) : null }; }, `detail:${userId}:${version}`);
 
   const refresh = () => { setVersion((v) => v + 1); onChanged(); };
@@ -148,11 +150,11 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
   if (res.loading) return <div className="empty">Cargando…</div>;
   if (res.error) return <div><button className="btn-secondary" onClick={onBack}>← Volver</button><div className="err" style={{ marginTop: 12 }}>{res.error}</div></div>;
   const { user, bundle: b } = res.data;
-  if (!b) return <NoCompanyView user={user} actor={actor} onBack={onBack} refresh={refresh} dialog={dialog} setDialog={setDialog} />;
+  if (!b) return <NoCompanyView user={user} actor={actor} ro={ro} onBack={onBack} refresh={refresh} dialog={dialog} setDialog={setDialog} />;
   const co = b.company, paused = co.status === "paused";
 
   const tabs = [
-    { key: "resumen", label: "Resumen" }, { key: "contactos", label: "Contactos", count: b.contacts.length }, { key: "campanas", label: "Campañas", count: b.campaigns.length },
+    { key: "resumen", label: "Resumen" }, { key: "contactos", label: "Contactos", count: b.counts?.contacts ?? b.contacts.length }, { key: "campanas", label: "Campañas", count: b.campaigns.length },
     { key: "landings", label: "Landings", count: b.landings.length }, { key: "conversiones", label: "Conversiones", count: b.conversions.length }, { key: "whatsapp", label: "WhatsApp" },
     { key: "pipelines", label: "Pipelines", count: b.pipelines.length }, { key: "forms", label: "Formularios y listas" }, { key: "workflows", label: "Workflows", count: b.workflows.length },
     { key: "creditos", label: "Créditos" }, { key: "auditoria", label: "Auditoría" },
@@ -167,21 +169,21 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
           <div className="page-sub">{user.email} · {co.name} · Plan: {planLabel(planOf(user))}</div>
         </div>
         <div className="detail-actions">
-          <button className="btn-secondary" onClick={() => setDialog("company")}>Editar company</button>
-          <button className="btn-secondary" onClick={() => setDialog("contact")}>Editar contacto</button>
-          <button className="btn-secondary" onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
-          <button className="btn-secondary" onClick={() => setDialog("card")}>Link de tarjeta</button>
-          <button className="btn-warn" disabled={!perms.data || !perms.data.support} title={perms.data && !perms.data.support ? "Tu usuario no tiene permiso de soporte. Pedile a un admin que te habilite." : "Generar un link para entrar a la cuenta de este usuario"} onClick={() => setDialog("support")}>Entrar como usuario</button>
+          <button className="btn-secondary" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => setDialog("company")}>Editar company</button>
+          <button className="btn-secondary" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => setDialog("contact")}>Editar contacto</button>
+          <button className="btn-secondary" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
+          <button className="btn-secondary" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => setDialog("card")}>Link de tarjeta</button>
+          <button className="btn-warn" disabled={!perms.data || !perms.data.support} title={perms.data && !perms.data.support ? (perms.data.disabledReason || "Tu usuario no tiene permiso de soporte. Pedile a un admin que te habilite.") : "Generar un link para entrar a la cuenta de este usuario"} onClick={() => setDialog("support")}>Entrar como usuario</button>
           {paused
-            ? <button className="btn-primary" onClick={() => ask({ title: "Activar company", label: "Activar", text: <>Vas a <b>activar</b> la company <b>{co.name}</b>. Sus usuarios vuelven a poder usar la cuenta.</>, action: () => setCompanyStatus(co._id, "active", actor) })}>Activar company</button>
-            : <button className="btn-warn" onClick={() => ask({ title: "Pausar company", label: "Pausar", danger: true, text: <>Vas a <b>pausar</b> la company <b>{co.name}</b>. Sus usuarios dejan de poder usar la cuenta hasta que la actives de nuevo.</>, action: () => setCompanyStatus(co._id, "paused", actor) })}>Pausar company</button>}
+            ? <button className="btn-primary" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => ask({ title: "Activar company", label: "Activar", text: <>Vas a <b>activar</b> la company <b>{co.name}</b>. Sus usuarios vuelven a poder usar la cuenta.</>, action: () => setCompanyStatus(co._id, "active", actor) })}>Activar company</button>
+            : <button className="btn-warn" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => ask({ title: "Pausar company", label: "Pausar", danger: true, text: <>Vas a <b>pausar</b> la company <b>{co.name}</b>. Sus usuarios dejan de poder usar la cuenta hasta que la actives de nuevo.</>, action: () => setCompanyStatus(co._id, "paused", actor) })}>Pausar company</button>}
         </div>
       </div>
 
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
 
       {tab === "resumen" && <Summary b={b} user={user} />}
-      {tab === "contactos" && <Card title="Contactos" sub={b.contacts.length}><DataTable rows={b.contacts} empty="Sin contactos." columns={[
+      {tab === "contactos" && <Card title="Contactos" sub={b.counts && b.counts.contacts > b.contacts.length ? `últimos ${b.contacts.length} de ${num(b.counts.contacts)}` : b.contacts.length}><DataTable rows={b.contacts} empty="Sin contactos." columns={[
         { key: "name", label: "Nombre", render: (c) => [c.name, c.surname].filter(Boolean).join(" ") }, { key: "email", label: "Email" }, { key: "phoneNumber", label: "Teléfono" },
         { key: "source", label: "Origen" }, { key: "keyword", label: "Keyword", muted: true }, { key: "createdFrom", label: "Creado desde", muted: true }, { key: "createdAt", label: "Alta", render: (c) => fmtDate(c.createdAt) },
       ]} /></Card>}
@@ -190,7 +192,8 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
         { key: "budgetPerDay", label: "Presupuesto/día", num: true }, { key: "investedPerDay", label: "Invertido/día", num: true }, { key: "accountId", label: "Account", muted: true },
       ]} /></Card>}
       {tab === "landings" && <Card title="Landings" sub={b.landings.length}><DataTable rows={b.landings} empty="Sin landings." columns={[
-        { key: "name", label: "Nombre" }, { key: "keyword", label: "Keyword" }, { key: "phoneNumber", label: "Teléfono" }, { key: "source", label: "Origen", muted: true },
+        { key: "name", label: "Nombre" }, { key: "description", label: "Descripción", muted: true }, { key: "status", label: "Estado", render: (l) => <span className={"badge " + (l.status === "published" ? "badge-green" : "badge-muted")}>{l.status || "—"}</span> },
+        { key: "createdWithIA", label: "Creada con IA", render: (l) => yesNo(l.createdWithIA) },
       ]} /></Card>}
       {tab === "conversiones" && <Card title="Conversiones" sub={b.conversions.length}><DataTable rows={b.conversions} empty="Sin conversiones configuradas." columns={[
         { key: "condition", label: "Condición" }, { key: "conversionCategory", label: "Categoría", render: (c) => <span className="badge badge-blue">{c.conversionCategory}</span> },
@@ -211,7 +214,7 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
       </>)}
       {tab === "workflows" && <Card title="Workflows" sub={b.workflows.length}><DataTable rows={b.workflows} empty="Sin workflows." columns={[
         { key: "name", label: "Nombre" }, { key: "description", label: "Descripción", muted: true }, { key: "triggerProperty", label: "Disparador", render: (w) => `${w.triggerProperty} = ${w.triggerValue}` },
-        { key: "act", label: "", render: (w) => <button className="btn-sm danger" onClick={(e) => { e.stopPropagation(); ask({ title: "Eliminar workflow", label: "Eliminar", danger: true, text: <>Vas a <b>eliminar</b> el workflow <b>{w.name}</b>. Esta acción no se puede deshacer.</>, action: () => deleteWorkflow(w._id, actor) }); }}>Eliminar</button> },
+        { key: "act", label: "", render: (w) => <button className="btn-sm danger" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={(e) => { e.stopPropagation(); ask({ title: "Eliminar workflow", label: "Eliminar", danger: true, text: <>Vas a <b>eliminar</b> el workflow <b>{w.name}</b>. Esta acción no se puede deshacer.</>, action: () => deleteWorkflow(w._id, actor) }); }}>Eliminar</button> },
       ]} /></Card>}
       {tab === "creditos" && <CreditsTab companyId={co._id} version={version} />}
       {tab === "auditoria" && <AuditTab companyId={co._id} version={version} />}
