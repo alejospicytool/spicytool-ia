@@ -62,10 +62,9 @@ describe("colecciones hijas", () => {
     expect(l.status).toBe("published");
     expect(JSON.stringify(l)).not.toContain("no@sale.test");
   });
-  it("contacto: solo los campos de la tabla (no custom fields, ip, fbp, etc.)", () => {
-    const c = CHILD.contacts.shape({ _id: "1", name: "Ana", email: "a@b.test", ip: "1.2.3.4", fbp: "fb", customFields: { Edad: 3 }, createdAt: new Date("2026-02-03T00:00:00Z") });
-    expect(Object.keys(c).sort()).toEqual(["_id", "createdAt", "createdFrom", "email", "keyword", "name", "phoneNumber", "source", "surname"]);
-    expect(c.createdAt).toBe("2026-02-03T00:00:00.000Z");
+  it("los contactos de la company NO se exponen (son datos personales de terceros y hay decenas de miles por company)", () => {
+    expect(CHILD.contacts).toBeUndefined();
+    expect(Object.keys(CHILD)).not.toContain("contacts");
   });
   it("workflow: no trae el historial de ejecuciones ni las tareas (son enormes)", () => {
     expect(Object.keys(CHILD.workflows.projection)).not.toContain("executions");

@@ -109,7 +109,6 @@ export async function getCompanyBundle(companyId) {
   return {
     company: copy(company),
     users: copy(db.users.filter((u) => (u.companies || []).includes(companyId))),
-    contacts: [...own("contacts")].reverse(),
     campaigns: own("campaigns"),
     landings: own("landings"),
     conversions: own("companyconversions"),

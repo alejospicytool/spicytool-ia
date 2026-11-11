@@ -43,8 +43,6 @@ export function shapeCompany(d) {
 
 // ── Colecciones hijas de una company: solo los campos que muestra cada pestaña ───────────────────────
 export const CHILD = {
-  contacts: { projection: { name: 1, surname: 1, email: 1, phoneNumber: 1, source: 1, keyword: 1, createdFrom: 1, createdAt: 1 },
-    shape: (d) => ({ _id: str(d._id), name: d.name || "", surname: d.surname || "", email: d.email || "", phoneNumber: d.phoneNumber || "", source: d.source || "", keyword: d.keyword || "", createdFrom: d.createdFrom || "", createdAt: iso(d.createdAt) }) },
   campaigns: { projection: { campaignName: 1, campaignId: 1, campaignStatus: 1, budgetPerDay: 1, investedPerDay: 1, accountId: 1 },
     shape: (d) => ({ _id: str(d._id), campaignName: d.campaignName || "", campaignId: d.campaignId || "", campaignStatus: d.campaignStatus && d.campaignStatus.status ? "ENABLED" : "PAUSED", budgetPerDay: d.budgetPerDay ?? null, investedPerDay: d.investedPerDay ?? null, accountId: d.accountId || "" }) },
   landings: { projection: { companyName: 1, businessDescription: 1, landingStatus: 1, createdWithIA: 1 },

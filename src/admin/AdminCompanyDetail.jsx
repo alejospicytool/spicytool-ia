@@ -1,15 +1,17 @@
-// Detalle de un usuario y su company: datos, usuarios de la company, contactos, campañas, landings, conversiones,
+// Detalle de un usuario y su company: datos, usuarios de la company, campañas, landings, conversiones,
 // WhatsApp, pipelines, formularios, workflows, créditos y registro de auditoría. Desde acá se ejecutan las acciones
 // (editar, pausar/activar, cambiar plan, eliminar workflow), todas con confirmación o formulario y con auditoría.
 import { useState } from "react";
 import { Kpi, fmtDate, fmtDateTime } from "../revenue/revenueUi.jsx";
 import { adminMode, getUser, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, getPaymentMethodUrl, createSupportLink, getMyPermissions, deleteWorkflow } from "./adminApi.js";
 import { companyIdOf, userFullName, whatsappProvider, planOf, planLabel, sortByPosition } from "./adminLogic.js";
-import { Tabs, DataTable, StatusBadge, ConfirmDialog, AuditList } from "./adminUi.jsx";
+import { Tabs, DataTable, StatusBadge, ConfirmDialog, AuditList, IdCell } from "./adminUi.jsx";
 import { useAsync } from "./adminHooks.js";
 import { EditCompanyDialog, EditContactDialog, AssignPlanDialog, CardLinkDialog, SupportSessionDialog } from "./AdminDialogs.jsx";
 
 const yesNo = (v) => (v ? "Sí" : "No");
+// Columna con el id de Mongo (copiable) para que se pueda buscar el documento en la base.
+const ID_COL = { key: "_id", label: "ID de Mongo", render: (r) => <IdCell id={r._id} /> };
 const RO_TITLE = "Todavía no está conectado: por ahora esta sección es de solo lectura.";
 const num = (v) => (v == null ? "—" : Number(v).toLocaleString("es-AR"));
 const Card = ({ title, sub, children }) => <div className="card"><div className="card-title"><span>{title}{sub != null && <span className="card-sub">{sub}</span>}</span></div>{children}</div>;
@@ -19,7 +21,7 @@ function Summary({ b, user }) {
   const fields = [
     ["Estado", <StatusBadge key="s" status={c.status} />], ["Vertical", c.vertical], ["Tamaño del equipo", c.teamSize], ["Créditos", `${num(c.credits)} ${c.currency || ""}`],
     ["Teléfono", c.phoneNumber], ["Email del dueño", c.userEmail], ["Alta", fmtDate(c.creationDate)], ["Account ID", c.accountId], ["Conversaciones de WhatsApp activas", num(c.activeWhatsAppConversations)],
-    ["Configurada", yesNo(c.isConfigured)], ["Onboarding terminado", yesNo(c.onboardingEnded)], ["Track ID", c.trackId], ["Última factura impaga", c.lastUnpaidBill ? fmtDate(c.lastUnpaidBill) : "—"],
+    ["ID de la company (Mongo)", <IdCell key="cid" id={c._id} />], ["Configurada", yesNo(c.isConfigured)], ["Onboarding terminado", yesNo(c.onboardingEnded)], ["Track ID", c.trackId], ["Última factura impaga", c.lastUnpaidBill ? fmtDate(c.lastUnpaidBill) : "—"],
   ];
   return (
     <>
@@ -28,7 +30,7 @@ function Summary({ b, user }) {
       </Card>
       <Card title="Usuario seleccionado">
         <dl className="kv">
-          {[["Nombre", userFullName(user)], ["Email", user.email], ["Teléfono", user.phoneNumber], ["Plan", planLabel(planOf(user))],
+          {[["Nombre", userFullName(user)], ["Email", user.email], ["Teléfono", user.phoneNumber], ["Plan", planLabel(planOf(user))], ["ID del usuario (Mongo)", <IdCell key="uid" id={user._id} />],
             ["Proveedor de WhatsApp", wa ? `${wa.provider}${wa.appId ? " · " + wa.appId : ""}` : "Sin configurar"]].map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v || "—"}</dd></div>)}
         </dl>
       </Card>
@@ -41,7 +43,7 @@ function Summary({ b, user }) {
       <Card title="Usuarios de la company" sub={b.users.length}>
         <DataTable rows={b.users} columns={[
           { key: "name", label: "Nombre", render: (u) => userFullName(u) }, { key: "email", label: "Email" }, { key: "phoneNumber", label: "Teléfono" },
-          { key: "plan", label: "Plan", render: (u) => planLabel(planOf(u)) },
+          { key: "plan", label: "Plan", render: (u) => planLabel(planOf(u)) }, ID_COL,
         ]} />
       </Card>
     </>
@@ -54,12 +56,12 @@ function PipelinesTab({ pipelines }) {
   return (
     <>
       <Card title="Pipelines" sub={pipelines.length}>
-        <DataTable rows={pipelines} selectedId={sel} onRowClick={(p) => setSel(p._id)} empty="Esta company no tiene pipelines." columns={[{ key: "name", label: "Nombre" }, { key: "description", label: "Descripción", muted: true }]} />
+        <DataTable rows={pipelines} selectedId={sel} onRowClick={(p) => setSel(p._id)} empty="Esta company no tiene pipelines." columns={[{ key: "name", label: "Nombre" }, { key: "description", label: "Descripción", muted: true }, ID_COL]} />
       </Card>
       {sel && (
         <Card title="Stages" sub={pipelines.find((p) => p._id === sel)?.name}>
           {st.loading ? <div className="empty">Cargando…</div> : st.error ? <div className="err">{st.error}</div> :
-            <DataTable rows={sortByPosition(st.data)} empty="Este pipeline no tiene stages." columns={[{ key: "position", label: "#", num: true }, { key: "name", label: "Nombre" }, { key: "description", label: "Descripción", muted: true }]} />}
+            <DataTable rows={sortByPosition(st.data)} empty="Este pipeline no tiene stages." columns={[{ key: "position", label: "#", num: true }, { key: "name", label: "Nombre" }, { key: "description", label: "Descripción", muted: true }, ID_COL]} />}
         </Card>
       )}
     </>
@@ -116,7 +118,7 @@ function NoCompanyView({ user, actor, onBack, refresh, dialog, setDialog }) {
       <div className="notice" style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #FCE4A0" }}>Este usuario todavía no tiene company (no terminó el alta). No hay contactos, campañas ni créditos para mostrar.</div>
       <Card title="Usuario">
         <dl className="kv">
-          {[["Nombre", userFullName(user)], ["Email", user.email], ["Teléfono", user.phoneNumber], ["Plan", planLabel(planOf(user))],
+          {[["Nombre", userFullName(user)], ["Email", user.email], ["Teléfono", user.phoneNumber], ["Plan", planLabel(planOf(user))], ["ID del usuario (Mongo)", <IdCell key="uid" id={user._id} />],
             ["Proveedor de WhatsApp", wa ? `${wa.provider}${wa.appId ? " · " + wa.appId : ""}` : "Sin configurar"]].map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v || "—"}</dd></div>)}
         </dl>
       </Card>
@@ -154,7 +156,7 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
   const co = b.company, paused = co.status === "paused";
 
   const tabs = [
-    { key: "resumen", label: "Resumen" }, { key: "contactos", label: "Contactos", count: b.counts?.contacts ?? b.contacts.length }, { key: "campanas", label: "Campañas", count: b.campaigns.length },
+    { key: "resumen", label: "Resumen" }, { key: "campanas", label: "Campañas", count: b.campaigns.length },
     { key: "landings", label: "Landings", count: b.landings.length }, { key: "conversiones", label: "Conversiones", count: b.conversions.length }, { key: "whatsapp", label: "WhatsApp" },
     { key: "pipelines", label: "Pipelines", count: b.pipelines.length }, { key: "forms", label: "Formularios y listas" }, { key: "workflows", label: "Workflows", count: b.workflows.length },
     { key: "creditos", label: "Créditos" }, { key: "auditoria", label: "Auditoría" },
@@ -183,38 +185,34 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
 
       {tab === "resumen" && <Summary b={b} user={user} />}
-      {tab === "contactos" && <Card title="Contactos" sub={b.counts && b.counts.contacts > b.contacts.length ? `últimos ${b.contacts.length} de ${num(b.counts.contacts)}` : b.contacts.length}><DataTable rows={b.contacts} empty="Sin contactos." columns={[
-        { key: "name", label: "Nombre", render: (c) => [c.name, c.surname].filter(Boolean).join(" ") }, { key: "email", label: "Email" }, { key: "phoneNumber", label: "Teléfono" },
-        { key: "source", label: "Origen" }, { key: "keyword", label: "Keyword", muted: true }, { key: "createdFrom", label: "Creado desde", muted: true }, { key: "createdAt", label: "Alta", render: (c) => fmtDate(c.createdAt) },
-      ]} /></Card>}
       {tab === "campanas" && <Card title="Campañas" sub={b.campaigns.length}><DataTable rows={b.campaigns} empty="Sin campañas." columns={[
-        { key: "campaignName", label: "Campaña" }, { key: "campaignId", label: "ID", muted: true }, { key: "campaignStatus", label: "Estado", render: (c) => <span className={"badge " + (c.campaignStatus === "ENABLED" ? "badge-green" : "badge-muted")}>{c.campaignStatus}</span> },
+        { key: "campaignName", label: "Campaña" }, { key: "campaignId", label: "ID de Google Ads", muted: true }, { key: "campaignStatus", label: "Estado", render: (c) => <span className={"badge " + (c.campaignStatus === "ENABLED" ? "badge-green" : "badge-muted")}>{c.campaignStatus}</span> },
         { key: "budgetPerDay", label: "Presupuesto/día", num: true }, { key: "investedPerDay", label: "Invertido/día", num: true }, { key: "accountId", label: "Account", muted: true },
-      ]} /></Card>}
+      ID_COL]} /></Card>}
       {tab === "landings" && <Card title="Landings" sub={b.landings.length}><DataTable rows={b.landings} empty="Sin landings." columns={[
         { key: "name", label: "Nombre" }, { key: "description", label: "Descripción", muted: true }, { key: "status", label: "Estado", render: (l) => <span className={"badge " + (l.status === "published" ? "badge-green" : "badge-muted")}>{l.status || "—"}</span> },
         { key: "createdWithIA", label: "Creada con IA", render: (l) => yesNo(l.createdWithIA) },
-      ]} /></Card>}
+      ID_COL]} /></Card>}
       {tab === "conversiones" && <Card title="Conversiones" sub={b.conversions.length}><DataTable rows={b.conversions} empty="Sin conversiones configuradas." columns={[
         { key: "condition", label: "Condición" }, { key: "conversionCategory", label: "Categoría", render: (c) => <span className="badge badge-blue">{c.conversionCategory}</span> },
-      ]} /></Card>}
+      ID_COL]} /></Card>}
       {tab === "whatsapp" && (<>
         <Card title="Conversaciones de WhatsApp" sub={b.whatsappConversions.length}><DataTable rows={b.whatsappConversions} empty="Sin conversiones de WhatsApp." columns={[
           { key: "date", label: "Fecha", render: (c) => fmtDate(c.date) }, { key: "behavior", label: "Comportamiento" }, { key: "checked", label: "Verificada", render: (c) => yesNo(c.checked) }, { key: "source", label: "Origen", muted: true }, { key: "trackId", label: "Track ID", muted: true },
-        ]} /></Card>
+        ID_COL]} /></Card>
         <Card title="Templates" sub={b.templates.length}><DataTable rows={b.templates} empty="Sin templates." columns={[
           { key: "name", label: "Nombre" }, { key: "category", label: "Categoría", render: (t) => <span className="badge badge-muted">{t.category}</span> }, { key: "header", label: "Encabezado", muted: true },
           { key: "message", label: "Mensaje" }, { key: "variables", label: "Variables", muted: true, render: (t) => (t.variables || []).join(", ") || "—" }, { key: "gupshup", label: "Gupshup", muted: true, render: (t) => t.gupshup?.status || "—" },
-        ]} /></Card>
+        ID_COL]} /></Card>
       </>)}
       {tab === "pipelines" && <PipelinesTab key={co._id} pipelines={b.pipelines} />}
       {tab === "forms" && (<>
-        <Card title="Webforms" sub={b.webforms.length}><DataTable rows={b.webforms} empty="Sin webforms." columns={[{ key: "position", label: "#", num: true }, { key: "name", label: "Nombre" }, { key: "description", label: "Descripción", muted: true }]} /></Card>
-        <Card title="Listas de contactos" sub={b.contactLists.length}><DataTable rows={b.contactLists} empty="Sin listas." columns={[{ key: "position", label: "#", num: true }, { key: "name", label: "Nombre" }]} /></Card>
+        <Card title="Webforms" sub={b.webforms.length}><DataTable rows={b.webforms} empty="Sin webforms." columns={[{ key: "position", label: "#", num: true }, { key: "name", label: "Nombre" }, { key: "description", label: "Descripción", muted: true }, ID_COL]} /></Card>
+        <Card title="Listas de contactos" sub={b.contactLists.length}><DataTable rows={b.contactLists} empty="Sin listas." columns={[{ key: "position", label: "#", num: true }, { key: "name", label: "Nombre" }, ID_COL]} /></Card>
       </>)}
       {tab === "workflows" && <Card title="Workflows" sub={b.workflows.length}><DataTable rows={b.workflows} empty="Sin workflows." columns={[
         { key: "name", label: "Nombre" }, { key: "description", label: "Descripción", muted: true }, { key: "triggerProperty", label: "Disparador", render: (w) => `${w.triggerProperty} = ${w.triggerValue}` },
-        { key: "act", label: "", render: (w) => <button className="btn-sm danger" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={(e) => { e.stopPropagation(); ask({ title: "Eliminar workflow", label: "Eliminar", danger: true, text: <>Vas a <b>eliminar</b> el workflow <b>{w.name}</b>. Esta acción no se puede deshacer.</>, action: () => deleteWorkflow(w._id, actor) }); }}>Eliminar</button> },
+        ID_COL, { key: "act", label: "", render: (w) => <button className="btn-sm danger" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={(e) => { e.stopPropagation(); ask({ title: "Eliminar workflow", label: "Eliminar", danger: true, text: <>Vas a <b>eliminar</b> el workflow <b>{w.name}</b>. Esta acción no se puede deshacer.</>, action: () => deleteWorkflow(w._id, actor) }); }}>Eliminar</button> },
       ]} /></Card>}
       {tab === "creditos" && <CreditsTab companyId={co._id} version={version} />}
       {tab === "auditoria" && <AuditTab companyId={co._id} version={version} />}

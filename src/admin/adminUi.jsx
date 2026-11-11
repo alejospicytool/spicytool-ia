@@ -1,9 +1,12 @@
 // Piezas visuales propias de "Admin Spicy". Reutiliza el estilo `.rv` de Métricas (revenueUi.jsx) y suma lo que falta:
 // pestañas, tablas de texto, diálogo de confirmación y la lista del registro de auditoría.
+import { useState } from "react";
 import { Modal, fmtDateTime } from "../revenue/revenueUi.jsx";
 import { auditLabel } from "./adminLogic.js";
 
 const ADMIN_CSS = `
+.rv .id-chip{background:transparent;border:1px dashed var(--border);border-radius:6px;padding:1px 6px;font-size:11px;color:var(--muted);cursor:pointer;white-space:nowrap}
+.rv .id-chip:hover{color:var(--text);border-color:var(--muted)}
 .rv .tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:18px;overflow-x:auto}
 .rv .tab{padding:9px 14px;background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;margin-bottom:-1px}
 .rv .tab:hover{color:var(--text)}
@@ -31,6 +34,17 @@ const ADMIN_CSS = `
 @media (max-width:640px){.rv .detail-actions{width:100%}.rv .audit-row{flex-wrap:wrap}}
 `;
 export const AdminStyles = () => <style>{ADMIN_CSS}</style>;
+
+// Id de Mongo completo, en monoespaciado. Un clic lo copia (y no dispara el clic de la fila).
+export function IdCell({ id }) {
+  const [copied, setCopied] = useState(false);
+  if (!id) return <span style={{ color: "var(--muted)" }}>—</span>;
+  async function copy(e) {
+    e.stopPropagation();
+    try { await navigator.clipboard.writeText(String(id)); setCopied(true); setTimeout(() => setCopied(false), 1200); } catch { /* sin permiso para usar el portapapeles */ }
+  }
+  return <button type="button" className="mono id-chip" title="Clic para copiar" aria-label={`Copiar id ${id}`} onClick={copy}>{copied ? "Copiado ✓" : String(id)}</button>;
+}
 
 export function Tabs({ tabs, active, onChange }) {
   return (

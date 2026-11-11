@@ -1,5 +1,5 @@
 // Pantalla principal de "Admin Spicy": tabla de usuarios (más recientes primero) con buscador y paginación.
-// Al elegir un usuario se abre su detalle (company, contactos, créditos, etc.).
+// Al elegir un usuario se abre su detalle (company, campañas, créditos, etc.).
 import { useState } from "react";
 import { listUsers, listAudit } from "./adminApi.js";
 import { userFullName, planOf, planLabel, whatsappProvider } from "./adminLogic.js";
@@ -21,7 +21,7 @@ export default function AdminUsersPage({ actor }) {
   return (
     <div>
       <div className="page-header">
-        <div><div className="page-title">Usuarios y companies</div><div className="page-sub">Buscá un usuario para ver su company, contactos, créditos y más.</div></div>
+        <div><div className="page-title">Usuarios y companies</div><div className="page-sub">Buscá un usuario para ver su company, campañas, créditos y más.</div></div>
       </div>
       <div className="card">
         <div style={{ marginBottom: 14, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>

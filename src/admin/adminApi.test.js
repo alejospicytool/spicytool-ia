@@ -349,7 +349,8 @@ describe("detalle de la company", () => {
   it("solo trae datos de esa company", async () => {
     const co = MOCK.companies[0];
     const b = await getCompanyBundle(co._id);
-    for (const k of ["contacts", "campaigns", "landings", "conversions", "whatsappConversions", "pipelines", "templates", "webforms", "contactLists", "workflows"]) {
+    expect(b.contacts).toBeUndefined(); // la pestaña de contactos se quitó: ni se piden ni se devuelven
+    for (const k of ["campaigns", "landings", "conversions", "whatsappConversions", "pipelines", "templates", "webforms", "contactLists", "workflows"]) {
       expect(b[k].length).toBeGreaterThan(0);
       expect(b[k].every((x) => x.companyId === co._id)).toBe(true);
     }

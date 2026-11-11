@@ -6,7 +6,6 @@ import { USER_PROJECTION, COMPANY_PROJECTION, CHILD, SUPPORT_PROJECTION, shapeUs
 
 const MAX_MS = 8000;
 const SNAPSHOT_MS = 30_000;
-const CONTACTS_LIMIT = 100;
 const oid = (id) => (/^[0-9a-f]{24}$/i.test(String(id)) ? new ObjectId(String(id)) : null);
 
 export function makeQueries(db) {
@@ -73,17 +72,15 @@ export function makeQueries(db) {
       return d ? shapeUser(d) : null;
     },
 
-    // Todo lo de una company. Contactos: solo los últimos 100 (hay companies con decenas de miles) más el total real en "counts".
+    // Todo lo de una company. NO incluye los contactos de la company (decenas de miles por company y datos personales de terceros).
     async getCompanyBundle(companyId) {
       const _id = oid(companyId);
       if (!_id) return null;
       const d = await col("companies").findOne({ _id }, { projection: COMPANY_PROJECTION, maxTimeMS: MAX_MS });
       if (!d) return null;
       const byCompany = { companyId };
-      const [users, contacts, contactsTotal, campaigns, landings, conversions, whatsappConversions, pipelines, templates, webforms, contactLists, workflows] = await Promise.all([
+      const [users, campaigns, landings, conversions, whatsappConversions, pipelines, templates, webforms, contactLists, workflows] = await Promise.all([
         col("users").find({ companies: companyId }, { projection: USER_PROJECTION }).maxTimeMS(MAX_MS).toArray(),
-        find("contacts", byCompany, { sort: { _id: -1 }, limit: CONTACTS_LIMIT }),
-        col("contacts").countDocuments(byCompany, { maxTimeMS: MAX_MS }),
         find("campaigns", byCompany), find("landings", byCompany), find("companyconversions", byCompany),
         find("whatsappconversions", byCompany, { sort: { _id: -1 }, limit: 100 }),
         find("pipelines", byCompany), find("whatsapptemplates", byCompany), find("webforms", byCompany, { sort: { created: 1 } }),
@@ -92,10 +89,9 @@ export function makeQueries(db) {
       const sh = (name, rows) => rows.map(CHILD[name].shape);
       return {
         company: shapeCompany(d), users: users.map(shapeUser),
-        contacts: sh("contacts", contacts), campaigns: sh("campaigns", campaigns), landings: sh("landings", landings), conversions: sh("companyconversions", conversions),
+        campaigns: sh("campaigns", campaigns), landings: sh("landings", landings), conversions: sh("companyconversions", conversions),
         whatsappConversions: sh("whatsappconversions", whatsappConversions), pipelines: sh("pipelines", pipelines), templates: sh("whatsapptemplates", templates),
         webforms: numbered(sh("webforms", webforms)), contactLists: numbered(sh("contactlists", contactLists)), workflows: sh("workflows", workflows),
-        counts: { contacts: contactsTotal },
       };
     },
 
