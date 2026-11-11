@@ -108,8 +108,8 @@ function NoCompanyView({ user, actor, ro, onBack, refresh, dialog, setDialog }) 
         </div>
         <div className="detail-actions">
           <button className="btn-secondary" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => setDialog("contact")}>Editar contacto</button>
-          <button className="btn-secondary" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
-          <button className="btn-secondary" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => setDialog("card")}>Link de tarjeta</button>
+          <button className="btn-secondary" onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
+          <button className="btn-secondary" onClick={() => setDialog("card")}>Link de tarjeta</button>
           <button className="btn-warn" disabled title="Este usuario no tiene company: no hay cuenta para revisar.">Entrar como usuario</button>
         </div>
       </div>
@@ -171,8 +171,8 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
         <div className="detail-actions">
           <button className="btn-secondary" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => setDialog("company")}>Editar company</button>
           <button className="btn-secondary" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => setDialog("contact")}>Editar contacto</button>
-          <button className="btn-secondary" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
-          <button className="btn-secondary" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => setDialog("card")}>Link de tarjeta</button>
+          <button className="btn-secondary" onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
+          <button className="btn-secondary" onClick={() => setDialog("card")}>Link de tarjeta</button>
           <button className="btn-warn" disabled={!perms.data || !perms.data.support} title={perms.data && !perms.data.support ? (perms.data.disabledReason || "Tu usuario no tiene permiso de soporte. Pedile a un admin que te habilite.") : "Generar un link para entrar a la cuenta de este usuario"} onClick={() => setDialog("support")}>Entrar como usuario</button>
           {paused
             ? <button className="btn-primary" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => ask({ title: "Activar company", label: "Activar", text: <>Vas a <b>activar</b> la company <b>{co.name}</b>. Sus usuarios vuelven a poder usar la cuenta.</>, action: () => setCompanyStatus(co._id, "active", actor) })}>Activar company</button>

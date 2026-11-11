@@ -69,6 +69,18 @@ describe("planes y suscripciones", () => {
     expect(explainWebhookError("CODIGO_NUEVO")).toBe(WEBHOOK_ERRORS.ERROR);
     expect(explainWebhookError(undefined)).toBe(WEBHOOK_ERRORS.ERROR);
   });
+  it("los códigos que agrega el servidor (lista de habilitados, tope, auditoría, resultado incierto) también se explican", () => {
+    for (const c of ["FUERA_DE_LA_LISTA", "DEMASIADOS_INTENTOS", "AUDITORIA_NO_DISPONIBLE", "WEBHOOK_NO_CONFIGURADO", "RESULTADO_INCIERTO", "CLAVE_INVALIDA"]) {
+      expect(WEBHOOK_ERRORS[c].title).toBeTruthy();
+      expect(WEBHOOK_ERRORS[c].action).toBeTruthy();
+    }
+    expect(explainWebhookError("RESULTADO_INCIERTO").action).toMatch(/Stripe/);
+    expect(explainWebhookError("AUDITORIA_NO_DISPONIBLE").action).toMatch(/no se cobró/i);
+  });
+  it("las acciones de auditoría del cobro (iniciado, sin confirmar) tienen texto", () => {
+    expect(AUDIT_ACTIONS.plan_assign_started).toBeTruthy();
+    expect(AUDIT_ACTIONS.plan_assign_unknown).toMatch(/Stripe/);
+  });
 });
 
 describe("búsqueda", () => {

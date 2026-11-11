@@ -73,21 +73,22 @@ export function AssignPlanDialog({ user, onSubmit, onClose, onDone }) {
   const prices = useAsync(() => listPrices(), "prices");
   const current = planOf(user);
   const [step, setStep] = useState("form"), [plan, setPlan] = useState(PAID_PLANS.includes(current) ? current : "SpicyStart"), [priceId, setPriceId] = useState(""), [custom, setCustom] = useState(false), [manualPrice, setManualPrice] = useState("");
-  const [ack, setAck] = useState(false), [busy, setBusy] = useState(false), [errors, setErrors] = useState({}), [result, setResult] = useState(null);
+  const [ack, setAck] = useState(false), [typed, setTyped] = useState(""), [busy, setBusy] = useState(false), [errors, setErrors] = useState({}), [result, setResult] = useState(null);
   const keys = useRef({}); // una clave por combinación plan+precio: reintentar la MISMA operación no cobra dos veces
   const list = prices.data || [];
   const forPlan = list.filter((p) => p.plan === plan);
   const effectivePrice = custom ? manualPrice.trim() : (priceId || (forPlan[0] && forPlan[0].id) || "");
   const known = list.find((p) => p.id === effectivePrice);
+  const emailTyped = typed.trim().toLowerCase() === String(user.email || "").trim().toLowerCase() && typed.trim() !== "";
 
   const finish = () => { if (result) onDone(); onClose(); }; // tras un intento (cobrado o no) se refresca el detalle y la auditoría
   function toConfirm() {
     const v = validatePlanAssignment({ email: user.email, plan, stripePriceId: effectivePrice });
     const errs = { ...v.errors };
     // el webhook lo rechazaría igual (YA_SUSCRIPTO): se avisa antes de llegar a la confirmación
-    if (v.ok && user.subscription && user.subscription.priceId === v.value.stripePriceId) errs.stripePriceId = "El cliente ya tiene este precio. Elegí otro (otro plan, u otro precio del mismo plan).";
+    if (v.ok && user.stripe && user.stripe.priceId === v.value.stripePriceId) errs.stripePriceId = "El cliente ya tiene este precio. Elegí otro (otro plan, u otro precio del mismo plan).";
     setErrors(errs);
-    if (Object.keys(errs).length === 0) { setAck(false); setStep("confirm"); }
+    if (Object.keys(errs).length === 0) { setAck(false); setTyped(""); setStep("confirm"); }
   }
   async function charge() {
     const sig = plan + "|" + effectivePrice;
@@ -125,8 +126,10 @@ export function AssignPlanDialog({ user, onSubmit, onClose, onDone }) {
       </dl>
       <div className="alert" style={{ background: "#FEF0F0", color: "#C42F2F", border: "1px solid #F8CACA" }}>Se cobra <b>ahora</b> a la tarjeta que el cliente ya tiene guardada en Stripe. Esto no se puede deshacer desde el backoffice.</div>
       <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, marginTop: 10 }}><input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />Entiendo que se le cobra al cliente en este momento.</label>
+      <div className="field" style={{ marginTop: 12 }}><label className="field-label">Para confirmar, escribí el email del cliente</label>
+        <input className="inp" aria-label="Email del cliente para confirmar" autoComplete="off" placeholder={user.email} value={typed} onChange={(e) => setTyped(e.target.value)} /></div>
     </>);
-    footer = <><button className="btn-secondary" disabled={busy} onClick={() => setStep("form")}>Volver</button><button className="btn-primary" disabled={!ack || busy} onClick={charge}>{busy ? "Cobrando…" : "Cobrar y asignar plan"}</button></>;
+    footer = <><button className="btn-secondary" disabled={busy} onClick={() => setStep("form")}>Volver</button><button className="btn-primary" disabled={!ack || !emailTyped || busy} onClick={charge}>{busy ? "Cobrando…" : "Cobrar y asignar plan"}</button></>;
   } else if (result.ok) {
     const d = result.data, warn = !d.oldSubscriptionCancelled || (d.billingFailures || []).length > 0;
     body = (<>
@@ -134,6 +137,7 @@ export function AssignPlanDialog({ user, onSubmit, onClose, onDone }) {
       <dl className="kv"><div><dt>Suscripción nueva</dt><dd>{d.stripeSubscriptionId}</dd></div><div><dt>Precio</dt><dd>{d.stripePriceId}</dd></div></dl>
       {!d.oldSubscriptionCancelled && <div className="alert" style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #FCE4A0", marginTop: 12 }}>La suscripción anterior <b>no se pudo cancelar</b>: cancelala a mano en Stripe.</div>}
       {(d.billingFailures || []).length > 0 && <div className="alert" style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #FCE4A0", marginTop: 12 }}>No se pudieron actualizar los créditos de {d.billingFailures.length} company(s).</div>}
+      {d.auditWarning && <div className="alert" style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #FCE4A0", marginTop: 12 }}>El cobro salió bien, pero <b>no se pudo guardar el registro de auditoría</b>. Avisá a un desarrollador (queda en el log del servidor).</div>}
       {!warn && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 12 }}>El equipo recibe el aviso en Discord automáticamente.</div>}
     </>);
     footer = <button className="btn-primary" onClick={finish}>Cerrar</button>;
@@ -145,9 +149,11 @@ export function AssignPlanDialog({ user, onSubmit, onClose, onDone }) {
         <span style={{ fontSize: 11 }}>{result.code}{result.extra.decline_code ? ` · ${result.extra.decline_code}` : ""}{result.message ? ` · ${result.message}` : ""}</span>
       </div>
       {result.extra.paymentMethodUpdateUrl && <div style={{ marginTop: 12 }}><div className="field-label">Link para que el cliente cargue o cambie la tarjeta</div><LinkBox url={result.extra.paymentMethodUpdateUrl} /></div>}
-      <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 12 }}>No se cobró nada y el plan del cliente no cambió.</div>
+      {result.code === "RESULTADO_INCIERTO"
+        ? <div style={{ fontSize: 11, color: "#92400E", marginTop: 12 }}><b>Puede que sí se haya cobrado.</b> Mirá Stripe antes de reintentar.</div>
+        : <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 12 }}>No se cobró nada y el plan del cliente no cambió.</div>}
     </>);
-    footer = <><button className="btn-secondary" onClick={finish}>Cerrar</button><button className="btn-primary" onClick={() => setStep("confirm")}>Reintentar</button></>;
+    footer = <><button className="btn-secondary" onClick={finish}>Cerrar</button><button className="btn-primary" onClick={() => { setAck(false); setTyped(""); setStep("confirm"); }}>Reintentar</button></>;
   }
   return <Modal title="Asignar plan (cobra la tarjeta)" onClose={busy ? () => {} : finish} footer={footer}>{body}</Modal>;
 }

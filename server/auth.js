@@ -1,8 +1,8 @@
 // Autenticación: reutiliza el login de Supabase del backoffice. El front manda su token (Authorization: Bearer ...); acá se
 // comprueba con Supabase que el token es válido y que ese usuario es admin (tabla user_roles). No hace falta ninguna clave secreta:
 // la URL y la clave "publishable" son públicas (están en el front) y la consulta de rol va con el propio token del usuario.
-const SUPABASE_URL = process.env.SUPABASE_URL || "https://khuavhbraikzreyhptog.supabase.co";
-const SUPABASE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || "sb_publishable_O8UPfP8BYLWhlIg0Fv45Gg_coidezqc";
+export const SUPABASE_URL = process.env.SUPABASE_URL || "https://khuavhbraikzreyhptog.supabase.co";
+export const SUPABASE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || "sb_publishable_O8UPfP8BYLWhlIg0Fv45Gg_coidezqc";
 
 export function makeAuthenticator({ fetchImpl = globalThis.fetch, now = () => Date.now(), ttlMs = 60_000 } = {}) {
   const cache = new Map(); // token → { admin, at }  (solo aciertos, y solo 1 minuto)

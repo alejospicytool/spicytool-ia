@@ -14,14 +14,21 @@ const real = () => mode === "real";
 const READ_ONLY_MSG = "Todavía no está conectado: por ahora esta sección es de solo lectura.";
 const readOnly = () => { if (real()) throw new Error(READ_ONLY_MSG); };
 
-async function http(path, params = {}) {
+async function http(path, params = {}, { method = "GET", body: payload } = {}) {
   const token = tokenProvider ? await tokenProvider() : null;
   if (!token) throw new Error("No hay sesión.");
   const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== "" && v !== false).map(([k, v]) => [k, String(v)])).toString();
-  const res = await fetch(`/api/admin${path}${qs ? "?" + qs : ""}`, { headers: { Authorization: `Bearer ${token}` } });
+  const headers = { Authorization: `Bearer ${token}` };
+  if (payload !== undefined) headers["Content-Type"] = "application/json";
+  const res = await fetch(`/api/admin${path}${qs ? "?" + qs : ""}`, { method, headers, body: payload === undefined ? undefined : JSON.stringify(payload) });
   let body = null;
   try { body = await res.json(); } catch { /* sin cuerpo JSON */ }
-  if (!res.ok) { const e = new Error((body && body.error) || `Error ${res.status}`); e.status = res.status; throw e; }
+  if (!res.ok) {
+    // Los webhooks devuelven { code, message, decline_code?, paymentMethodUpdateUrl? }; el resto { error }.
+    const e = body && body.code ? new WebhookError(res.status, body.code, body.message || body.code, { decline_code: body.decline_code, paymentMethodUpdateUrl: body.paymentMethodUpdateUrl, auditWarning: body.auditWarning })
+      : Object.assign(new Error((body && body.error) || `Error ${res.status}`), { status: res.status });
+    throw e;
+  }
   return body;
 }
 
@@ -131,7 +138,7 @@ export async function getCredits(companyId) {
 
 // GET /admin/audit
 export async function listAudit({ companyId = null, limit = 50, actions = null } = {}) {
-  if (real()) return []; // todavía no hay escrituras que auditar
+  if (real()) return http("/audit", { companyId, limit });
   return copy(audit.filter((a) => (!companyId || a.companyId === companyId) && (!actions || actions.includes(a.action))).slice(0, limit));
 }
 
@@ -188,12 +195,13 @@ const cardUrl = () => `https://billing.stripe.com/p/session/mock_${++sessionSeq}
 
 // Precios que se pueden usar: activos y mensuales (el webhook rechaza el resto con PRECIO_INVALIDO).
 export async function listPrices() {
+  if (real()) return http("/prices");
   return copy(db.stripe_prices.filter((p) => p.active && p.interval === "month"));
 }
 
 // POST /webhooks/backoffice/subscription   → 201. COBRA la tarjeta al instante; si el cobro falla no cambia nada.
 export async function assignPlan(userId, { plan, stripePriceId, idempotencyKey } = {}, actor) {
-  readOnly();
+  if (real()) return http(`/users/${userId}/subscription`, {}, { method: "POST", body: { plan, stripePriceId, idempotencyKey } }); // COBRA de verdad; el actor sale de la sesión
   needActor(actor);
   const u = byId("users", userId) || wh(404, "USUARIO_NO_ENCONTRADO", "No Spicytool account with that email");
   const target = { targetType: "user", targetId: userId, targetLabel: userFullName(u), companyId: companyIdOf(u) };
@@ -224,7 +232,7 @@ export async function assignPlan(userId, { plan, stripePriceId, idempotencyKey }
 
 // POST /webhooks/backoffice/payment-method-url   → 200. No cobra ni cambia la suscripción; el link es de un solo uso.
 export async function getPaymentMethodUrl(userId, actor) {
-  readOnly();
+  if (real()) return http(`/users/${userId}/payment-method-url`, {}, { method: "POST", body: {} });
   needActor(actor);
   const u = byId("users", userId) || wh(404, "USUARIO_NO_ENCONTRADO", "No Spicytool account with that email");
   const url = cardUrl();

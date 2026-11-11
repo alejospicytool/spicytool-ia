@@ -4,6 +4,10 @@ import { MongoClient } from "mongodb";
 import { createApp } from "./app.js";
 import { makeAuthenticator } from "./auth.js";
 import { makeQueries } from "./queries.js";
+import { makeAudit } from "./audit.js";
+import { makeBilling } from "./billing.js";
+import { makeWebhookClient } from "./webhooks.js";
+import { STANDARD_PRICES } from "./prices.js";
 
 const uri = process.env.MONGODB_URI;
 if (!uri) { console.error("Falta MONGODB_URI en /etc/spicytool-backoffice.env"); process.exit(1); }
@@ -12,5 +16,13 @@ const client = new MongoClient(uri, { serverSelectionTimeoutMS: 10000, maxPoolSi
 await client.connect();
 const db = client.db(process.env.MONGODB_DB || "spicytool");
 
+// Cobros (webhooks de Spicytool). Sin BACKOFFICE_WEBHOOK_TOKEN esas acciones responden "no configurado" y no hacen nada.
+// WEBHOOK_ALLOWED_EMAILS (opcional, separados por coma): si está, SOLO esos clientes se pueden tocar. Útil para la primera prueba real.
+const queries = makeQueries(db);
+const audit = makeAudit();
+const allowedEmails = String(process.env.WEBHOOK_ALLOWED_EMAILS || "").split(",").map((e) => e.trim()).filter(Boolean);
+const billing = makeBilling({ getUser: queries.getUser, audit, allowedEmails, webhook: makeWebhookClient({ token: process.env.BACKOFFICE_WEBHOOK_TOKEN, baseUrl: process.env.WEBHOOK_BASE_URL || "https://api.spicytool.net" }) });
+console.log(`Cobros: ${process.env.BACKOFFICE_WEBHOOK_TOKEN ? "token cargado" : "SIN token (desactivados)"} · ${allowedEmails.length ? `solo ${allowedEmails.length} email(s) habilitado(s)` : "todos los clientes habilitados"}`);
+
 const port = Number(process.env.PORT || 3100);
-createApp({ queries: makeQueries(db), authenticate: makeAuthenticator() }).listen(port, "127.0.0.1", () => console.log(`Backoffice API escuchando en 127.0.0.1:${port}`));
+createApp({ queries, authenticate: makeAuthenticator(), billing, audit, prices: STANDARD_PRICES }).listen(port, "127.0.0.1", () => console.log(`Backoffice API escuchando en 127.0.0.1:${port}`));
