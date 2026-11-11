@@ -10,6 +10,7 @@ import { entitySearch, buildEntityLink, parseEntityLink, clearedSearch, LINK_TAR
 import { dayBA, weekStartBA, closureEvents, scoreRequiredForStatus } from "./metricsLogic.js";
 import CrmApp from "./crm/CrmApp.jsx";
 import RevenueApp from "./revenue/RevenueApp.jsx";
+import AdminApp from "./admin/AdminApp.jsx";
 
 // ── Supabase ───────────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://khuavhbraikzreyhptog.supabase.co";
@@ -137,6 +138,7 @@ const NAV_ICONS = {
   devdash:"📈", devtasks:"🛠️",
   crm:"💼",
   metrics:"💹", metrics_mrr:"↗", metrics_churn:"↘", metrics_retention:"⟳", metrics_failed:"⚠️", metrics_customers:"👤", metrics_projection:"⇢", metrics_plans:"🏷️",
+  adm_users:"🛡️",
 };
 const NAV_LABELS = {
   inicio:"Inicio", notes:"Notas", mytime:"Mi tiempo", timeadmin:"Control de jornada",
@@ -147,10 +149,11 @@ const NAV_LABELS = {
   devdash:"Resumen", devtasks:"Tareas",
   crm:"CRM comercial",
   metrics:"Overview", metrics_mrr:"MRR & ARR", metrics_churn:"Churn", metrics_retention:"Retención", metrics_failed:"Pagos fallidos", metrics_customers:"Clientes", metrics_projection:"Proyección", metrics_plans:"Planes",
+  adm_users:"Usuarios y companies",
 };
-const ADMIN_ONLY_VIEWS = ["add","usuarios","timeadmin","metrics","metrics_mrr","metrics_churn","metrics_retention","metrics_failed","metrics_customers","metrics_projection","metrics_plans"];
+const ADMIN_ONLY_VIEWS = ["add","usuarios","timeadmin","metrics","metrics_mrr","metrics_churn","metrics_retention","metrics_failed","metrics_customers","metrics_projection","metrics_plans","adm_users"];
 // Secciones solo para admins: no se asignan desde el panel de Usuarios (la base también lo exige, ver supabase_revenue.sql).
-const ADMIN_ONLY_SECTIONS = ["Métricas"];
+const ADMIN_ONLY_SECTIONS = ["Métricas","Admin Spicy"];
 // Inicio, Notas y Tiempo son visibles para todos sin pasar por allowed_sections — Inicio
 // es la landing personal, Notas es información de equipo que cualquiera puede
 // ver y crear (según el pedido), y Tiempo es el control de jornada de cada persona
@@ -202,6 +205,11 @@ const NAV_SECTIONS = [
   {
     label: "Métricas",
     views: ["metrics","metrics_mrr","metrics_churn","metrics_retention","metrics_failed","metrics_customers","metrics_projection","metrics_plans"],
+    adminOnly: true,
+  },
+  {
+    label: "Admin Spicy",
+    views: ["adm_users"],
     adminOnly: true,
   },
   {
@@ -5997,6 +6005,7 @@ export default function SpicyFinanzas() {
       {view==="timeadmin"&&isAdmin&&<ControlJornadaView allUsers={allUsers}/>}
       {view==="crm"&&<CrmApp sb={sb}/>}
       {isAdmin&&view.startsWith("metrics")&&<RevenueApp sb={sb} view={view} setView={setView}/>}
+      {isAdmin&&view.startsWith("adm_")&&<AdminApp view={view} actor={session.user.email}/>}
       {view==="notes"&&<NotesView notes={notes} currentUserId={session.user.id} currentUserEmail={session.user.email} isAdmin={isAdmin} onRefresh={loadAll}/>}
 
       {/* ADD */}
