@@ -7,6 +7,7 @@ import { makeQueries } from "./queries.js";
 import { makeAudit } from "./audit.js";
 import { makeBilling } from "./billing.js";
 import { makeCompanyAdmin } from "./companies.js";
+import { makeUserAdmin } from "./users.js";
 import { makeWebhookClient } from "./webhooks.js";
 import { STANDARD_PRICES } from "./prices.js";
 
@@ -34,7 +35,8 @@ if (process.env.MONGODB_WRITE_URI) {
   writeDb = writeClient.db(process.env.MONGODB_DB || "spicytool");
 }
 const companies = makeCompanyAdmin({ db: writeDb, audit, invalidate: queries.invalidate });
+const users = makeUserAdmin({ db: writeDb, audit, invalidate: queries.invalidate });
 console.log(`Escrituras en Mongo: ${process.env.MONGODB_WRITE_URI ? "usuario de escritura aparte" : "misma conexión que la lectura"}`);
 
 const port = Number(process.env.PORT || 3100);
-createApp({ queries, authenticate: makeAuthenticator(), billing, companies, audit, prices: STANDARD_PRICES }).listen(port, "127.0.0.1", () => console.log(`Backoffice API escuchando en 127.0.0.1:${port}`));
+createApp({ queries, authenticate: makeAuthenticator(), billing, companies, users, audit, prices: STANDARD_PRICES }).listen(port, "127.0.0.1", () => console.log(`Backoffice API escuchando en 127.0.0.1:${port}`));

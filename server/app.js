@@ -1,5 +1,5 @@
 // API del backoffice. Casi todo es LECTURA. Escribe solo: el cambio de suscripción y el link de tarjeta (billing.js, vía los webhooks
-// de Spicytool) y pausar/activar/editar una company (companies.js, un $set en Mongo). Cada pedido exige un admin autenticado; los errores nunca devuelven detalles internos.
+// de Spicytool) pausar/activar/editar una company (companies.js) y editar la ficha de un usuario (users.js): todos un $set en Mongo. Cada pedido exige un admin autenticado; los errores nunca devuelven detalles internos.
 // "queries" y "authenticate" se inyectan: así se prueba sin Mongo ni Supabase (app.test.js).
 import express from "express";
 
@@ -8,7 +8,7 @@ const int = (v, def, min, max) => { const n = Math.floor(Number(v)); return Numb
 const text = (v) => String(v ?? "").slice(0, 100);
 const flag = (v) => v === "1" || v === "true";
 
-export function createApp({ queries, authenticate, billing, companies, audit, prices = [], log = console.error }) {
+export function createApp({ queries, authenticate, billing, companies, users, audit, prices = [], log = console.error }) {
   const app = express();
   app.disable("x-powered-by");
   app.use((req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
@@ -73,6 +73,13 @@ export function createApp({ queries, authenticate, billing, companies, audit, pr
   app.post("/api/admin/companies/:id", route(async (req, res) => {
     if (!needId(req, res)) return;
     const r = await companies.edit(req.admin, req.token, req.params.id, req.body);
+    res.status(r.status).json(r.body);
+  }));
+
+  // Editar la ficha de contacto de un usuario: nombre, apellido y teléfono (el email NO se edita desde acá).
+  app.post("/api/admin/users/:id", route(async (req, res) => {
+    if (!needId(req, res)) return;
+    const r = await users.editContact(req.admin, req.token, req.params.id, req.body);
     res.status(r.status).json(r.body);
   }));
 

@@ -21,12 +21,13 @@ const companies = {
   setStatus: vi.fn(async () => ({ status: 200, body: { _id: "x", status: "paused" } })),
   edit: vi.fn(async () => ({ status: 200, body: { _id: "x", changed: true } })),
 };
+const users = { editContact: vi.fn(async () => ({ status: 200, body: { _id: "x", changed: true } })) };
 const audit = { list: vi.fn(async (token, a) => [{ id: "1", echo: { token, ...a } }]) };
 const prices = [{ id: "price_1", plan: "SpicyPro", amount: 40000 }];
 
 let server, base;
 beforeAll(async () => {
-  const app = createApp({ queries, authenticate, billing, companies, audit, prices, log: () => {} });
+  const app = createApp({ queries, authenticate, billing, companies, users, audit, prices, log: () => {} });
   await new Promise((r) => { server = app.listen(0, "127.0.0.1", r); });
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -71,9 +72,17 @@ describe("API del backoffice (solo lectura)", () => {
   });
   it("es casi todo lectura: POST, PATCH, PUT y DELETE sobre cualquier otra ruta no existen (con admin y sin admin)", async () => {
     for (const method of ["POST", "PATCH", "PUT", "DELETE"]) {
-      expect((await call("/api/admin/users/" + ID, { method })).status).toBe(404);
+      expect((await call("/api/admin/users", { method })).status).toBe(404); // la colección no se escribe
       expect((await call("/api/admin/users", { method, token: null })).status).toBe(401);
     }
+    for (const method of ["PATCH", "PUT", "DELETE"]) expect((await call("/api/admin/users/" + ID, { method })).status).toBe(404);
+  });
+  it("editar contacto: solo POST con admin; pasa admin, token, id y el cuerpo tal cual (el servicio valida)", async () => {
+    const body = { name: "Ana", surname: "Paz", phoneNumber: "+54 11 5555-0101" };
+    expect((await call(`/api/admin/users/${ID}`, { method: "POST", body })).status).toBe(200);
+    expect(users.editContact).toHaveBeenCalledWith({ id: "u1", email: "nico@spicytool.test" }, "admin", ID, body);
+    expect((await call(`/api/admin/users/${ID}`, { method: "POST", token: null, body })).status).toBe(401);
+    expect((await call("/api/admin/users/xyz", { method: "POST", body })).status).toBe(400);
   });
   it("un error interno devuelve 500 sin detalles", async () => {
     queries.listSupportSessions.mockRejectedValueOnce(new Error("mongodb://usuario:CLAVE@host falló"));

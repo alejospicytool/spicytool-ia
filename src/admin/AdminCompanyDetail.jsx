@@ -96,7 +96,7 @@ function AuditTab({ companyId, version }) {
 }
 
 // Usuario que se registró pero no tiene company (en la base real es la mayoría): solo se ven sus datos y la suscripción.
-function NoCompanyView({ user, actor, ro, onBack, refresh, dialog, setDialog }) {
+function NoCompanyView({ user, actor, onBack, refresh, dialog, setDialog }) {
   const wa = whatsappProvider(user), submitted = (fn) => async (v) => { await fn(v); refresh(); };
   return (
     <div>
@@ -107,7 +107,7 @@ function NoCompanyView({ user, actor, ro, onBack, refresh, dialog, setDialog }) 
           <div className="page-sub">{user.email} · Plan: {planLabel(planOf(user))}</div>
         </div>
         <div className="detail-actions">
-          <button className="btn-secondary" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => setDialog("contact")}>Editar contacto</button>
+          <button className="btn-secondary" onClick={() => setDialog("contact")}>Editar contacto</button>
           <button className="btn-secondary" onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
           <button className="btn-secondary" onClick={() => setDialog("card")}>Link de tarjeta</button>
           <button className="btn-warn" disabled title="Este usuario no tiene company: no hay cuenta para revisar.">Entrar como usuario</button>
@@ -150,7 +150,7 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
   if (res.loading) return <div className="empty">Cargando…</div>;
   if (res.error) return <div><button className="btn-secondary" onClick={onBack}>← Volver</button><div className="err" style={{ marginTop: 12 }}>{res.error}</div></div>;
   const { user, bundle: b } = res.data;
-  if (!b) return <NoCompanyView user={user} actor={actor} ro={ro} onBack={onBack} refresh={refresh} dialog={dialog} setDialog={setDialog} />;
+  if (!b) return <NoCompanyView user={user} actor={actor} onBack={onBack} refresh={refresh} dialog={dialog} setDialog={setDialog} />;
   const co = b.company, paused = co.status === "paused";
 
   const tabs = [
@@ -170,7 +170,7 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
         </div>
         <div className="detail-actions">
           <button className="btn-secondary" onClick={() => setDialog("company")}>Editar company</button>
-          <button className="btn-secondary" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => setDialog("contact")}>Editar contacto</button>
+          <button className="btn-secondary" onClick={() => setDialog("contact")}>Editar contacto</button>
           <button className="btn-secondary" onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
           <button className="btn-secondary" onClick={() => setDialog("card")}>Link de tarjeta</button>
           <button className="btn-warn" disabled={!perms.data || !perms.data.support} title={perms.data && !perms.data.support ? (perms.data.disabledReason || "Tu usuario no tiene permiso de soporte. Pedile a un admin que te habilite.") : "Generar un link para entrar a la cuenta de este usuario"} onClick={() => setDialog("support")}>Entrar como usuario</button>

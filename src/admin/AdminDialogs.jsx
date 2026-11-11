@@ -38,8 +38,8 @@ export function EditCompanyDialog({ company, onSubmit, onClose }) {
 }
 
 export function EditContactDialog({ user, onSubmit, onClose }) {
-  const [f, setF] = useState({ name: user.name || "", surname: user.surname || "", email: user.email || "", phoneNumber: user.phoneNumber || "" });
-  const { errors, busy, error, submit } = useSubmit(validateContactEdit, onSubmit, onClose);
+  const [f, setF] = useState({ name: user.name || "", surname: user.surname || "", phoneNumber: user.phoneNumber || "" });
+  const { errors, busy, error, submit } = useSubmit((v) => validateContactEdit(v, { currentPhone: user.phoneNumber }), onSubmit, onClose);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   return (
     <Modal title="Editar ficha de contacto" onClose={onClose} footer={<><button className="btn-secondary" disabled={busy} onClick={onClose}>Cancelar</button><button className="btn-primary" disabled={busy} onClick={() => submit(f)}>{busy ? "Guardando…" : "Guardar"}</button></>}>
@@ -47,7 +47,8 @@ export function EditContactDialog({ user, onSubmit, onClose }) {
         <Field label="Nombre" error={errors.name}><input className="inp" value={f.name} onChange={set("name")} /></Field>
         <Field label="Apellido" error={errors.surname}><input className="inp" value={f.surname} onChange={set("surname")} /></Field>
       </div>
-      <Field label="Email" error={errors.email}><input className="inp" type="email" value={f.email} onChange={set("email")} /></Field>
+      <Field label="Email"><input className="inp" type="email" value={user.email || ""} disabled aria-label="Email (no editable)" /></Field>
+      <div style={{ fontSize: 11, color: "var(--muted)", margin: "-4px 0 8px" }}>El email no se puede cambiar desde acá: es el login del usuario, con él se le cobra y vincula su company, campañas y landings. Solo se guardan los campos que cambies.</div>
       <Field label="Teléfono" error={errors.phoneNumber}><input className="inp" value={f.phoneNumber} onChange={set("phoneNumber")} /></Field>
       {error && <div className="err" role="alert">{error}</div>}
     </Modal>

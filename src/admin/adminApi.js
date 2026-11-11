@@ -160,13 +160,14 @@ export async function updateCompany(companyId, fields, actor) {
 
 // PATCH /admin/users/:id   (ficha de contacto)
 export async function updateUserContact(userId, fields, actor) {
-  readOnly();
+  if (real()) return http(`/users/${userId}`, {}, { method: "POST", body: fields }); // escribe solo lo que cambió; el actor sale de la sesión
   needActor(actor);
   const u = byId("users", userId) || fail("No se encontró el usuario.");
-  const v = validateContactEdit(fields);
+  // el email no se edita: si viene uno distinto se rechaza (igual que el servidor)
+  if (fields && fields.email != null && String(fields.email).trim().toLowerCase() !== String(u.email).toLowerCase()) fail("El email no se puede cambiar desde el backoffice: es el login del usuario y vincula su company, campañas y landings.");
+  const v = validateContactEdit(fields, { currentPhone: u.phoneNumber });
   if (!v.ok) fail(Object.values(v.errors)[0]);
-  if (db.users.some((x) => x._id !== userId && x.email.toLowerCase() === v.value.email.toLowerCase())) fail("Ya existe otro usuario con ese email.");
-  const changes = diffFields(u, v.value, ["name", "surname", "email", "phoneNumber"]);
+  const changes = diffFields(u, v.value, ["name", "surname", "phoneNumber"]);
   Object.assign(u, v.value);
   log(actor, "contact_edit", { targetType: "user", targetId: userId, targetLabel: userFullName(u), companyId: companyIdOf(u), detail: { changes } });
   return copy(u);

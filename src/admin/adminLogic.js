@@ -143,16 +143,16 @@ export function validateCompanyEdit(f, { currentPhone } = {}) {
   return { ok: Object.keys(errors).length === 0, errors, value: { name, phoneNumber, credits } };
 }
 
-export function validateContactEdit(f) {
+// Ficha de contacto: nombre, apellido y teléfono. El EMAIL no se edita desde el backoffice (es el login, el dato con el que se cobra y
+// el vínculo de companies, campañas y landings), así que no forma parte de lo que se valida ni de lo que se guarda.
+export function validateContactEdit(f, { currentPhone } = {}) {
   const errors = {};
   const name = String(f.name ?? "").trim();
   const surname = String(f.surname ?? "").trim();
-  const email = String(f.email ?? "").trim();
   const phoneNumber = String(f.phoneNumber ?? "").trim();
   if (!name) errors.name = "El nombre es obligatorio.";
-  if (!EMAIL_RE.test(email)) errors.email = "El email no es válido.";
-  if (phoneNumber && !PHONE_RE.test(phoneNumber)) errors.phoneNumber = "El teléfono no es válido.";
-  return { ok: Object.keys(errors).length === 0, errors, value: { name, surname, email, phoneNumber } };
+  if (phoneNumber && phoneNumber !== String(currentPhone ?? "").trim() && !PHONE_RE.test(phoneNumber)) errors.phoneNumber = "El teléfono no es válido.";
+  return { ok: Object.keys(errors).length === 0, errors, value: { name, surname, phoneNumber } };
 }
 
 // ── Auditoría ──────────────────────────────────────────────────────────────────────────────────
@@ -163,6 +163,7 @@ export const AUDIT_ACTIONS = {
   company_activate: "Activó la company",
   company_status_failed: "Intentó cambiar el estado de la company (no se guardó)",
   company_edit_failed: "Intentó editar la company (no se guardó)",
+  contact_edit_failed: "Intentó editar la ficha de contacto (no se guardó)",
   plan_assign_started: "Inició un cambio de plan (cobra)",
   plan_assign_unknown: "Cambio de plan sin confirmar (revisar Stripe)",
   plan_assign: "Asignó un plan (cobró)",

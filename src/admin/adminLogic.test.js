@@ -81,6 +81,8 @@ describe("planes y suscripciones", () => {
     expect(AUDIT_ACTIONS.plan_assign_started).toBeTruthy();
     expect(AUDIT_ACTIONS.plan_assign_unknown).toMatch(/Stripe/);
     expect(AUDIT_ACTIONS.company_status_failed).toMatch(/no se guardó/);
+    expect(AUDIT_ACTIONS.company_edit_failed).toMatch(/no se guardó/);
+    expect(AUDIT_ACTIONS.contact_edit_failed).toMatch(/no se guardó/);
   });
 });
 
@@ -201,11 +203,16 @@ describe("validaciones", () => {
   it("company: créditos 0 es válido, teléfono vacío también", () => {
     expect(validateCompanyEdit({ name: "x", phoneNumber: "", credits: 0 }).ok).toBe(true);
   });
-  it("contacto: email obligatorio y válido", () => {
-    expect(validateContactEdit({ name: "A", surname: "B", email: "a@b.test", phoneNumber: "" }).ok).toBe(true);
-    expect(validateContactEdit({ name: "A", surname: "B", email: "no-es-email", phoneNumber: "" }).errors.email).toBeTruthy();
-    expect(validateContactEdit({ name: "", surname: "B", email: "a@b.test", phoneNumber: "" }).errors.name).toBeTruthy();
-    expect(validateContactEdit({ name: "A", surname: "", email: "a@b.test", phoneNumber: "12" }).errors.phoneNumber).toBeTruthy();
+  it("contacto: nombre obligatorio y teléfono válido; el email no forma parte de lo que se valida ni se guarda", () => {
+    const ok = validateContactEdit({ name: " A ", surname: "B", email: "cualquiera", phoneNumber: "" });
+    expect(ok.ok).toBe(true);
+    expect(ok.value).toEqual({ name: "A", surname: "B", phoneNumber: "" });
+    expect(validateContactEdit({ name: "", surname: "B", phoneNumber: "" }).errors.name).toBeTruthy();
+    expect(validateContactEdit({ name: "A", surname: "", phoneNumber: "12" }).errors.phoneNumber).toBeTruthy();
+  });
+  it("contacto: un teléfono ya guardado con formato raro no impide editar el nombre; uno nuevo se valida", () => {
+    expect(validateContactEdit({ name: "A", surname: "", phoneNumber: "int. 44 / 7" }).errors.phoneNumber).toBeTruthy();
+    expect(validateContactEdit({ name: "A", surname: "", phoneNumber: "int. 44 / 7" }, { currentPhone: "int. 44 / 7" }).ok).toBe(true);
   });
 });
 

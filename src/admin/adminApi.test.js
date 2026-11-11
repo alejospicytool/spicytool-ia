@@ -398,11 +398,21 @@ describe("acciones: cambian los datos y dejan auditoría", () => {
     expect((await getCompanyBundle(co._id)).company.name).toBe(co.name);
     expect(await listAudit()).toHaveLength(0);
   });
-  it("editar ficha de contacto, con email repetido rechazado", async () => {
+  it("editar ficha de contacto: nombre, apellido y teléfono; el email NO se cambia", async () => {
+    const u1 = MOCK.users[0];
+    await updateUserContact(u1._id, { name: "Otro", surname: "Nombre", email: u1.email.toUpperCase(), phoneNumber: "+54 11 4444-0000" }, ACTOR);
+    expect(await getUser(u1._id)).toMatchObject({ name: "Otro", surname: "Nombre", phoneNumber: "+54 11 4444-0000", email: u1.email });
+    const [a] = await listAudit();
+    expect(a).toMatchObject({ action: "contact_edit", targetId: u1._id });
+    expect(a.detail.changes.map((c) => c.key).sort()).toEqual(["name", "phoneNumber", "surname"]);
+  });
+  it("cambiar el email de un usuario se rechaza (es el login y vincula company, campañas y landings) y no cambia nada", async () => {
     const [u1, u2] = MOCK.users;
-    await updateUserContact(u1._id, { name: "Otro", surname: "Nombre", email: "otro.nombre@ejemplo.test", phoneNumber: "" }, ACTOR);
-    expect(await getUser(u1._id)).toMatchObject({ name: "Otro", email: "otro.nombre@ejemplo.test" });
-    await expect(updateUserContact(u1._id, { name: "A", surname: "B", email: u2.email.toUpperCase(), phoneNumber: "" }, ACTOR)).rejects.toThrow(/ya existe/i);
+    for (const email of ["otro.nombre@ejemplo.test", u2.email]) {
+      await expect(updateUserContact(u1._id, { name: "A", surname: "B", email, phoneNumber: "" }, ACTOR)).rejects.toThrow(/email no se puede cambiar/i);
+    }
+    expect(await getUser(u1._id)).toMatchObject({ name: u1.name, email: u1.email });
+    expect(await listAudit()).toHaveLength(0);
   });
   it("pausar y activar", async () => {
     const co = MOCK.companies[0];

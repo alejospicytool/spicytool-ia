@@ -97,7 +97,7 @@ const detailText = (a) => {
   if (a.action === "plan_assign_unknown") return `${d.plan} · sin confirmar (${d.reason || "sin respuesta"}): revisar Stripe`;
   if (a.action === "plan_assign") return `${d.previousPlan || "Sin plan"} → ${d.plan} · ${d.stripePriceId}`;
   if (a.action === "plan_assign_failed") return `${d.plan || "—"} · no se cobró (${d.code})`;
-  if (a.action === "company_edit_failed") return "No se guardó en la base";
+  if (a.action === "company_edit_failed" || a.action === "contact_edit_failed") return "No se guardó en la base";
   if (a.action === "company_status_failed") return `${d.from ?? "—"} → ${d.to}: no se guardó en la base`;
   if (a.action === "card_link_created") return "Link de un solo uso";
   if (a.action === "support_link_created") return `Motivo: ${d.reason}`;
