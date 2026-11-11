@@ -15,18 +15,20 @@ const COMPANIES = [
   { n: 2, name: "Propiedades Demo Sur", vertical: "real_estate", teamSize: "2-5", status: "active", credits: 300, phone: "+54 11 5555-0102", created: "2025-05-03", plan: "SpicyStart" },
   { n: 3, name: "Estudio Ficticio & Asociados", vertical: "services", teamSize: "1", status: "paused", credits: 0, phone: "+54 351 555-0103", created: "2025-07-19", plan: "Freemium" },
   { n: 4, name: "Casas de Prueba SRL", vertical: "real_estate", teamSize: "11-25", status: "active", credits: 4500, phone: "+54 11 5555-0104", created: "2025-09-30", plan: "SpicyProMax" },
-  { n: 5, name: "Hogar Modelo", vertical: "real_estate", teamSize: "2-5", status: "active", credits: 80, phone: "+54 261 555-0105", created: "2026-01-14", plan: "Free trial" },
+  { n: 5, name: "Hogar Modelo", vertical: "real_estate", teamSize: "2-5", status: "active", credits: 80, phone: "+54 261 555-0105", created: "2026-01-14", plan: "FreeTrial" },
   { n: 6, name: "Terrenos Muestra", vertical: "real_estate", teamSize: "1", status: "paused", credits: 15, phone: "+54 11 5555-0106", created: "2026-03-02", plan: "Freemium" },
 ];
 
-// Un usuario por company (el dueño) y algunos más; companies[0] es la company del usuario.
+// Un usuario por company (el dueño) y algunos más; companies[0] es la company del usuario. Algunos no tienen company.
 const U = [
   // n, company, nombre, apellido, extra
-  [101, 1, "Lucía", "Fernández", {}], [102, 1, "Martín", "Gómez", { kapso: { kapsoAppId: "kapso_app_9001" } }],
-  [103, 2, "Camila", "Rossi", { gupshup: { whatsAppAppId: "gupshup_app_7002" } }], [104, 2, "Joaquín", "Pérez", {}],
-  [105, 3, "Valentina", "Silva", {}], [106, 4, "Tomás", "Acosta", { kapso: { kapsoAppId: "kapso_app_9004" } }],
-  [107, 4, "Sofía", "Benítez", {}], [108, 4, "Nicolás", "Ibáñez", {}], [109, 5, "Agustina", "Molina", { gupshup: { whatsAppAppId: "gupshup_app_7005" } }],
+  [101, 1, "Lucía", "Fernández", {}], [102, 1, "Martín", "Gómez", { activeWhatsAppProvider: "kapso", kapso: { kapsoAppId: "kapso_app_9001" } }],
+  [103, 2, "Camila", "Rossi", { activeWhatsAppProvider: "gupshup", gupshup: { whatsAppAppId: "gupshup_app_7002" } }], [104, 2, "Joaquín", "Pérez", {}],
+  [105, 3, "Valentina", "Silva", {}], [106, 4, "Tomás", "Acosta", { activeWhatsAppProvider: "kapso", kapso: { kapsoAppId: "kapso_app_9004" } }],
+  [107, 4, "Sofía", "Benítez", {}], [108, 4, "Nicolás", "Ibáñez", {}], [109, 5, "Agustina", "Molina", { activeWhatsAppProvider: "gupshup", gupshup: { whatsAppAppId: "gupshup_app_7005" } }],
   [110, 6, "Facundo", "Ríos", {}], [111, 5, "Julieta", "Vega", {}], [112, 1, "Bruno", "Castro", {}],
+  // company 0 = usuario SIN company (se registró y no terminó el alta): en la base real es el 62% de los usuarios.
+  [113, 0, "Rocío", "Navarro", {}], [114, 0, "Emilio", "Cruz", {}],
 ];
 
 // Planes: Freemium y free trial no se cobran; los otros cuatro son los planes pagos (ver el doc de webhooks de back office).
@@ -46,13 +48,18 @@ export const stripe_prices = [
 ];
 
 export const users = U.map(([n, c, name, surname, extra], i) => {
-  const co = COMPANIES[c - 1];
+  const co = c ? COMPANIES[c - 1] : null;
+  const plan = co ? co.plan : "Freemium";
+  const fold = (t) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   return {
-    _id: oid(n), email: `${name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")}.${surname.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")}@ejemplo.test`,
-    phoneNumber: `+54 9 11 5555-${String(2000 + i * 37).slice(-4)}`, name, surname, companies: [oid(c)],
-    subscription: { plan: co.plan, stripeSubscriptionId: PAID.includes(co.plan) ? `sub_1Mock${n}` : null, priceId: PAID.includes(co.plan) ? PRICE_OF_PLAN[co.plan] : null },
-    // paymentMethod es solo del mock: simula cómo responde Stripe al cobrar ("ok", "none" = sin tarjeta, "declined" = rechazada)
-    stripe: { customerId: `cus_Mock${String(n).padStart(4, "0")}`, paymentMethod: CARD_OVERRIDE[n] || (PAID.includes(co.plan) ? "ok" : "none") },
+    _id: oid(n), email: `${fold(name)}.${fold(surname)}@ejemplo.test`,
+    phoneNumber: `+54 9 11 5555-${String(2000 + i * 37).slice(-4)}`, name, surname, companies: c ? [oid(c)] : [],
+    // Mongo guarda el plan en subscription.subscriptionType (y el id de la suscripción en subscription.subscriptionId).
+    subscription: { subscriptionType: plan, subscriptionId: PAID.includes(plan) ? `sub_1Mock${n}` : null },
+    // stripe.customerId / subscriptionId existen en Mongo. priceId y paymentMethod son SOLO del mock: en producción el precio
+    // y la tarjeta se consultan en Stripe (paymentMethod simula la respuesta al cobrar: "ok", "none" = sin tarjeta, "declined").
+    stripe: { customerId: `cus_Mock${String(n).padStart(4, "0")}`, subscriptionId: PAID.includes(plan) ? `sub_1Mock${n}` : null, priceId: PAID.includes(plan) ? PRICE_OF_PLAN[plan] : null,
+      paymentMethod: CARD_OVERRIDE[n] || (PAID.includes(plan) ? "ok" : "none") },
     ...extra,
   };
 });

@@ -6,9 +6,10 @@
 // (cobra la tarjeta al instante); Freemium y free trial no se asignan desde acá. Fuente: doc "Back office webhooks: subscriptions".
 export const PAID_PLANS = ["SpicyOne", "SpicyStart", "SpicyPro", "SpicyProMax"];
 
-// Nombre del plan del usuario. Ojo: el campo real de Mongo hay que confirmarlo; está acá, en un solo lugar.
-export const planOf = (user) => (user && user.subscription && user.subscription.plan) || null;
-export const planLabel = (plan) => plan || "Sin plan";
+// Nombre del plan del usuario: users.subscription.subscriptionType en Mongo (confirmado con la base real; valores actuales:
+// Freemium, SpicyPro, SpicyProMax, Custom, Growth, FreeTrial, Build). Está acá, en un solo lugar.
+export const planOf = (user) => (user && user.subscription && user.subscription.subscriptionType) || null;
+export const planLabel = (plan) => (plan === "FreeTrial" ? "Free trial" : plan || "Sin plan");
 export const isPaidPlan = (plan) => PAID_PLANS.includes(plan);
 
 const PRICE_RE = /^(price|prod)_[A-Za-z0-9]+$/;
@@ -103,11 +104,14 @@ export function paginate(items, page, pageSize) {
 export const userFullName = (u) => [u && u.name, u && u.surname].filter(Boolean).join(" ") || (u && u.email) || "—";
 export const companyIdOf = (u) => (u && Array.isArray(u.companies) && u.companies[0]) || null;
 
-// Proveedor de WhatsApp: Kapso o Gupshup, según el id que tenga cargado.
+// Proveedor de WhatsApp: users.activeWhatsAppProvider ("kapso" | "gupshup"; vacío si no tiene) y, como respaldo, el id cargado.
 export function whatsappProvider(user) {
   const k = user && user.kapso && user.kapso.kapsoAppId;
-  if (k) return { provider: "Kapso", appId: k };
   const g = user && user.gupshup && user.gupshup.whatsAppAppId;
+  const active = String((user && user.activeWhatsAppProvider) || "").trim().toLowerCase();
+  if (active === "kapso") return { provider: "Kapso", appId: k || null };
+  if (active === "gupshup") return { provider: "Gupshup", appId: g || null };
+  if (k) return { provider: "Kapso", appId: k };
   if (g) return { provider: "Gupshup", appId: g };
   return null;
 }
@@ -199,6 +203,7 @@ export const SUPPORT_ERRORS = {
   SIN_PERMISO_SOPORTE: { title: "No tenés permiso de soporte", action: "Pedile a un admin que te habilite. El intento quedó registrado." },
   USUARIO_NO_ENCONTRADO: { title: "No se encontró el usuario", action: "Recargá la lista y volvé a intentar." },
   MOTIVO_INVALIDO: { title: "El motivo no es válido", action: "Escribí qué vas a revisar y por qué." },
+  SIN_COMPANY: { title: "Este usuario no tiene company", action: "La sesión de soporte necesita una company. Si el usuario no terminó el registro, no hay nada para revisar." },
   SESION_NO_DISPONIBLE: { title: "Spicytool no pudo generar la sesión", action: "Probá de nuevo en un minuto; si sigue, avisá a un desarrollador." },
   ERROR: { title: "Error inesperado", action: "Avisá a un desarrollador." },
 };

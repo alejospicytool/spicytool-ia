@@ -28,12 +28,12 @@ function Summary({ b, user }) {
       <Card title="Usuario seleccionado">
         <dl className="kv">
           {[["Nombre", userFullName(user)], ["Email", user.email], ["Teléfono", user.phoneNumber], ["Plan", planLabel(planOf(user))],
-            ["Proveedor de WhatsApp", wa ? `${wa.provider} · ${wa.appId}` : "Sin configurar"]].map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v || "—"}</dd></div>)}
+            ["Proveedor de WhatsApp", wa ? `${wa.provider}${wa.appId ? " · " + wa.appId : ""}` : "Sin configurar"]].map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v || "—"}</dd></div>)}
         </dl>
       </Card>
       <Card title="Suscripción">
         <dl className="kv">
-          {[["Plan", planLabel(planOf(user))], ["Precio (Stripe)", user.subscription?.priceId], ["Suscripción en Stripe", user.subscription?.stripeSubscriptionId], ["Cliente en Stripe", user.stripe?.customerId]].map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v || "—"}</dd></div>)}
+          {[["Plan", planLabel(planOf(user))], ["Precio (Stripe)", user.stripe?.priceId], ["Suscripción en Stripe", user.stripe?.subscriptionId || user.subscription?.subscriptionId], ["Cliente en Stripe", user.stripe?.customerId]].map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v || "—"}</dd></div>)}
         </dl>
         <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 12 }}>El plan solo se cambia con “Asignar plan”, que cobra la tarjeta del cliente.</div>
       </Card>
@@ -93,11 +93,48 @@ function AuditTab({ companyId, version }) {
   return <Card title="Registro de auditoría" sub="acciones sobre esta company y sus usuarios">{r.loading ? <div className="empty">Cargando…</div> : <AuditList entries={r.data || []} />}</Card>;
 }
 
+// Usuario que se registró pero no tiene company (en la base real es la mayoría): solo se ven sus datos y la suscripción.
+function NoCompanyView({ user, actor, onBack, refresh, dialog, setDialog }) {
+  const wa = whatsappProvider(user), submitted = (fn) => async (v) => { await fn(v); refresh(); };
+  return (
+    <div>
+      <button className="btn-secondary" style={{ marginBottom: 14 }} onClick={onBack}>← Volver a usuarios</button>
+      <div className="detail-head">
+        <div>
+          <div className="page-title">{userFullName(user)} <span className="badge badge-muted">Sin company</span></div>
+          <div className="page-sub">{user.email} · Plan: {planLabel(planOf(user))}</div>
+        </div>
+        <div className="detail-actions">
+          <button className="btn-secondary" onClick={() => setDialog("contact")}>Editar contacto</button>
+          <button className="btn-secondary" onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
+          <button className="btn-secondary" onClick={() => setDialog("card")}>Link de tarjeta</button>
+          <button className="btn-warn" disabled title="Este usuario no tiene company: no hay cuenta para revisar.">Entrar como usuario</button>
+        </div>
+      </div>
+      <div className="notice" style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #FCE4A0" }}>Este usuario todavía no tiene company (no terminó el alta). No hay contactos, campañas ni créditos para mostrar.</div>
+      <Card title="Usuario">
+        <dl className="kv">
+          {[["Nombre", userFullName(user)], ["Email", user.email], ["Teléfono", user.phoneNumber], ["Plan", planLabel(planOf(user))],
+            ["Proveedor de WhatsApp", wa ? `${wa.provider}${wa.appId ? " · " + wa.appId : ""}` : "Sin configurar"]].map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v || "—"}</dd></div>)}
+        </dl>
+      </Card>
+      <Card title="Suscripción">
+        <dl className="kv">
+          {[["Plan", planLabel(planOf(user))], ["Precio (Stripe)", user.stripe?.priceId], ["Suscripción en Stripe", user.stripe?.subscriptionId || user.subscription?.subscriptionId], ["Cliente en Stripe", user.stripe?.customerId]].map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v || "—"}</dd></div>)}
+        </dl>
+      </Card>
+      {dialog === "contact" && <EditContactDialog user={user} onClose={() => setDialog(null)} onSubmit={submitted((v) => updateUserContact(user._id, v, actor))} />}
+      {dialog === "plan" && <AssignPlanDialog user={user} onClose={() => setDialog(null)} onDone={refresh} onSubmit={(v) => assignPlan(user._id, v, actor)} />}
+      {dialog === "card" && <CardLinkDialog user={user} onClose={() => { setDialog(null); refresh(); }} onSubmit={() => getPaymentMethodUrl(user._id, actor)} />}
+    </div>
+  );
+}
+
 export default function AdminCompanyDetail({ userId, actor, onBack, onChanged }) {
   const [version, setVersion] = useState(0), [tab, setTab] = useState("resumen"), [dialog, setDialog] = useState(null), [confirm, setConfirm] = useState(null);
   const [confirmBusy, setConfirmBusy] = useState(false), [confirmError, setConfirmError] = useState("");
   const perms = useAsync(() => getMyPermissions(actor), "perms:" + actor);
-  const res = useAsync(async () => { const user = await getUser(userId); if (!user) throw new Error("No se encontró el usuario."); return { user, bundle: await getCompanyBundle(companyIdOf(user)) }; }, `detail:${userId}:${version}`);
+  const res = useAsync(async () => { const user = await getUser(userId); if (!user) throw new Error("No se encontró el usuario."); const cid = companyIdOf(user); return { user, bundle: cid ? await getCompanyBundle(cid) : null }; }, `detail:${userId}:${version}`);
 
   const refresh = () => { setVersion((v) => v + 1); onChanged(); };
   async function runConfirmed() {
@@ -110,7 +147,9 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
 
   if (res.loading) return <div className="empty">Cargando…</div>;
   if (res.error) return <div><button className="btn-secondary" onClick={onBack}>← Volver</button><div className="err" style={{ marginTop: 12 }}>{res.error}</div></div>;
-  const { user, bundle: b } = res.data, co = b.company, paused = co.status === "paused";
+  const { user, bundle: b } = res.data;
+  if (!b) return <NoCompanyView user={user} actor={actor} onBack={onBack} refresh={refresh} dialog={dialog} setDialog={setDialog} />;
+  const co = b.company, paused = co.status === "paused";
 
   const tabs = [
     { key: "resumen", label: "Resumen" }, { key: "contactos", label: "Contactos", count: b.contacts.length }, { key: "campanas", label: "Campañas", count: b.campaigns.length },

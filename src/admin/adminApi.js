@@ -167,14 +167,16 @@ export async function assignPlan(userId, { plan, stripePriceId, idempotencyKey }
   const price = db.stripe_prices.find((p) => p.id === stripePriceId);
   if (!price || !price.active || price.interval !== "month") failed(400, "PRECIO_INVALIDO", "The price does not exist, is archived or is not recurring");
   if (u.stripe?.deleted) failed(409, "CLIENTE_STRIPE_BORRADO", "The customer was deleted in Stripe");
-  if (u.subscription?.priceId === stripePriceId && isPaidPlan(u.subscription.plan)) failed(409, "YA_SUSCRIPTO", "The customer already has an active subscription to that price");
+  if (u.stripe?.priceId === stripePriceId && isPaidPlan(planOf(u))) failed(409, "YA_SUSCRIPTO", "The customer already has an active subscription to that price");
   const pm = u.stripe?.paymentMethod;
   if (pm === "none") failed(402, "SIN_MEDIO_DE_PAGO", "The customer has no card in Stripe", { paymentMethodUpdateUrl: cardUrl() });
   if (pm === "declined") failed(402, "PAGO_RECHAZADO", "Your card was declined.", { decline_code: "insufficient_funds", paymentMethodUpdateUrl: cardUrl() });
   // Cobro aprobado: recién ahora cambia el plan
   const previousPlan = planOf(u);
-  u.subscription = { plan, stripeSubscriptionId: `sub_1MockNew${++subSeq}`, priceId: stripePriceId };
-  const result = { message: "Subscription assigned and charged", userEmail: u.email, plan, previousPlan, stripePriceId, stripeSubscriptionId: u.subscription.stripeSubscriptionId, oldSubscriptionCancelled: true, billingFailures: [] };
+  const newSubId = `sub_1MockNew${++subSeq}`;
+  u.subscription = { ...u.subscription, subscriptionType: plan, subscriptionId: newSubId };
+  u.stripe = { ...u.stripe, subscriptionId: newSubId, priceId: stripePriceId };
+  const result = { message: "Subscription assigned and charged", userEmail: u.email, plan, previousPlan, stripePriceId, stripeSubscriptionId: newSubId, oldSubscriptionCancelled: true, billingFailures: [] };
   if (idempotencyKey) idempotent.set(idempotencyKey, result);
   log(actor, "plan_assign", { ...target, detail: { plan, previousPlan, stripePriceId, stripeSubscriptionId: result.stripeSubscriptionId, idempotencyKey: idempotencyKey || null } });
   return copy(result);
@@ -228,6 +230,7 @@ export async function createSupportLink(userId, reason, actor, now = new Date())
     sup(403, "SIN_PERMISO_SOPORTE", "Support access is not enabled for this admin");
   }
   if (!u) sup(404, "USUARIO_NO_ENCONTRADO", "User not found");
+  if (!co) sup(422, "SIN_COMPANY", "The user has no company");
   const v = validateSupportReason(reason);
   if (!v.ok) sup(422, "MOTIVO_INVALIDO", v.error);
   const req = buildSupportRequest(u, v.value);

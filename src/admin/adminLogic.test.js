@@ -14,12 +14,14 @@ describe("planes y suscripciones", () => {
     expect(isPaidPlan(undefined)).toBe(false);
   });
   it("el plan del usuario sale de la suscripción; los tiers ya no cuentan", () => {
-    expect(planOf({ subscription: { plan: "SpicyStart" } })).toBe("SpicyStart");
+    expect(planOf({ subscription: { subscriptionType: "SpicyStart" } })).toBe("SpicyStart"); // campo real de Mongo
+    expect(planOf({ subscription: { plan: "SpicyStart" } })).toBeNull();
     expect(planOf({ subscription: { tier: "tier4" } })).toBeNull();
     expect(planOf({})).toBeNull();
     expect(planOf(null)).toBeNull();
     expect(planLabel(null)).toBe("Sin plan");
     expect(planLabel("SpicyPro")).toBe("SpicyPro");
+    expect(planLabel("FreeTrial")).toBe("Free trial");
   });
   const ok = { email: "a@b.test", plan: "SpicyStart", stripePriceId: "price_1UVakiJdCZldzCmGb1bTskUp" };
   it("asignación válida: acepta price_ y prod_, y recorta espacios", () => {
@@ -138,6 +140,12 @@ describe("datos del usuario", () => {
     expect(whatsappProvider({ kapso: { kapsoAppId: "k1" }, gupshup: { whatsAppAppId: "g1" } }).provider).toBe("Kapso");
     expect(whatsappProvider({})).toBeNull();
     expect(whatsappProvider(null)).toBeNull();
+  });
+  it("proveedor de WhatsApp: manda activeWhatsAppProvider; sin él se usa el id cargado", () => {
+    expect(whatsappProvider({ activeWhatsAppProvider: "gupshup", kapso: { kapsoAppId: "k1" }, gupshup: { whatsAppAppId: "g1" } })).toEqual({ provider: "Gupshup", appId: "g1" });
+    expect(whatsappProvider({ activeWhatsAppProvider: "kapso" })).toEqual({ provider: "Kapso", appId: null });
+    expect(whatsappProvider({ activeWhatsAppProvider: "", kapso: { kapsoAppId: "k1" } })).toEqual({ provider: "Kapso", appId: "k1" });
+    expect(whatsappProvider({ activeWhatsAppProvider: null })).toBeNull();
   });
   it("la company del usuario es companies[0]", () => {
     expect(companyIdOf({ companies: ["c1", "c2"] })).toBe("c1");

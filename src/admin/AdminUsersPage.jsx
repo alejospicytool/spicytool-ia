@@ -38,7 +38,7 @@ export default function AdminUsersPage({ actor }) {
               { key: "name", label: "Usuario", render: (u) => <><b>{userFullName(u)}</b>{u.isOwner && <span className="badge badge-blue" style={{ marginLeft: 6 }}>Owner</span>}<div style={{ color: "var(--muted)", fontSize: 11 }}>{u.email}</div></> },
               { key: "phoneNumber", label: "Teléfono", muted: true },
               { key: "companyName", label: "Company" },
-              { key: "companyStatus", label: "Estado", render: (u) => <StatusBadge status={u.companyStatus} /> },
+              { key: "companyStatus", label: "Estado", render: (u) => (u.companyStatus ? <StatusBadge status={u.companyStatus} /> : <span style={{ color: "var(--muted)" }}>Sin company</span>) },
               { key: "plan", label: "Plan", render: (u) => planLabel(planOf(u)) },
               { key: "wa", label: "WhatsApp", muted: true, render: (u) => whatsappProvider(u)?.provider || "—" },
             ]} />

@@ -8,7 +8,9 @@ beforeEach(() => resetMock());
 describe("datos de ejemplo", () => {
   it("cada usuario apunta a una company que existe y cada company tiene saldo de créditos", () => {
     const ids = new Set(MOCK.companies.map((c) => c._id));
-    expect(MOCK.users.every((u) => ids.has(u.companies[0]))).toBe(true);
+    // quien tiene company apunta a una que existe; también hay usuarios sin company (en la base real son la mayoría)
+    expect(MOCK.users.filter((u) => u.companies.length).every((u) => ids.has(u.companies[0]))).toBe(true);
+    expect(MOCK.users.some((u) => u.companies.length === 0)).toBe(true);
     expect(MOCK.companies.every((c) => MOCK.credit_balances.some((b) => b.company_id === c._id))).toBe(true);
   });
   it("hay companies activas y pausadas, y los dos proveedores de WhatsApp", () => {
@@ -62,8 +64,16 @@ describe("listUsers: filtros", () => {
   it("company activa: excluye usuarios de companies pausadas", async () => {
     const paused = new Set(MOCK.companies.filter((c) => c.status === "paused").map((c) => c._id));
     const r = await all({ activeOnly: true });
-    expect(r.length).toBe(MOCK.users.filter((u) => !paused.has(u.companies[0])).length);
+    // los usuarios sin company no cuentan como "company activa"
+    expect(r.length).toBe(MOCK.users.filter((u) => u.companies[0] && !paused.has(u.companies[0])).length);
     expect(r.every((u) => u.companyStatus === "active")).toBe(true);
+  });
+  it("los usuarios sin company aparecen en la lista, sin nombre de company ni owner, y no entran en el filtro de company activa", async () => {
+    const sin = (await all({})).filter((u) => u.companies.length === 0);
+    expect(sin.length).toBeGreaterThan(0);
+    expect(sin.every((u) => u.companyName === "—" && u.companyStatus === null && u.isOwner === false)).toBe(true);
+    expect((await all({ activeOnly: true })).some((u) => u.companies.length === 0)).toBe(false);
+    expect((await all({ owners: true })).some((u) => u.companies.length === 0)).toBe(false);
   });
   it("owners + activa + búsqueda se combinan, y el total sale del filtro", async () => {
     const r = await listUsers({ owners: true, activeOnly: true, pageSize: 2 });
@@ -145,7 +155,8 @@ describe("webhooks de back office (simulados)", () => {
     const r = await assignPlan(lucia._id, { plan: "SpicyStart", stripePriceId: PROMO, idempotencyKey: "k1" }, ACTOR);
     expect(r).toMatchObject({ userEmail: lucia.email, plan: "SpicyStart", previousPlan: "SpicyPro", stripePriceId: PROMO, oldSubscriptionCancelled: true, billingFailures: [] });
     expect(r.stripeSubscriptionId).toMatch(/^sub_/);
-    expect(await subOf("Lucía")).toEqual({ plan: "SpicyStart", stripeSubscriptionId: r.stripeSubscriptionId, priceId: PROMO });
+    expect(await subOf("Lucía")).toEqual({ subscriptionType: "SpicyStart", subscriptionId: r.stripeSubscriptionId });
+    expect((await getUser(lucia._id)).stripe).toMatchObject({ subscriptionId: r.stripeSubscriptionId, priceId: PROMO });
     const [a] = await listAudit();
     expect(a).toMatchObject({ actor: ACTOR, action: "plan_assign", targetId: lucia._id });
     expect(a.detail).toMatchObject({ plan: "SpicyStart", previousPlan: "SpicyPro", stripePriceId: PROMO });
@@ -154,7 +165,7 @@ describe("webhooks de back office (simulados)", () => {
     const id = user("Lucía")._id;
     await assignPlan(id, { plan: "SpicyStart", stripePriceId: PROMO }, ACTOR);
     await assignPlan(id, { plan: "SpicyStart", stripePriceId: START }, ACTOR);
-    expect((await subOf("Lucía")).priceId).toBe(START);
+    expect((await getUser(user("Lucía")._id)).stripe.priceId).toBe(START);
     const e = await err(assignPlan(id, { plan: "SpicyStart", stripePriceId: START }, ACTOR));
     expect(e).toBeInstanceOf(WebhookError);
     expect([e.status, e.code]).toEqual([409, "YA_SUSCRIPTO"]);
@@ -226,7 +237,7 @@ describe("webhooks de back office (simulados)", () => {
   });
   it("hay usuarios para probar cada caso: con tarjeta, rechazada, sin tarjeta, freemium y free trial", () => {
     expect(new Set(MOCK.users.map((u) => u.stripe.paymentMethod))).toEqual(new Set(["ok", "declined", "none"]));
-    expect(new Set(MOCK.users.map((u) => u.subscription.plan))).toEqual(new Set(["SpicyPro", "SpicyStart", "Freemium", "SpicyProMax", "Free trial"]));
+    expect(new Set(MOCK.users.map((u) => u.subscription.subscriptionType))).toEqual(new Set(["SpicyPro", "SpicyStart", "Freemium", "SpicyProMax", "FreeTrial"]));
     expect(MOCK.users.some((u) => "tier" in u.subscription)).toBe(false);
   });
 });
@@ -242,6 +253,13 @@ describe("soporte: entrar como usuario (simulado)", () => {
     expect(await getMyPermissions(DENIED)).toEqual({ support: false });
     expect(await getMyPermissions("  SIN.PERMISO@Ejemplo.test ")).toEqual({ support: false });
     await expect(getMyPermissions("")).rejects.toThrow(/quién/);
+  });
+  it("un usuario sin company no puede entrar como usuario: SIN_COMPANY, sin link y sin auditar un link generado", async () => {
+    const sinCompany = MOCK.users.find((x) => x.companies.length === 0);
+    const e = await err(createSupportLink(sinCompany._id, REASON, ACTOR));
+    expect(e).toBeInstanceOf(SupportError);
+    expect(e).toMatchObject({ status: 422, code: "SIN_COMPANY" });
+    expect((await listAudit()).filter((a) => a.action === "support_link_created")).toHaveLength(0);
   });
   it("genera el link, que vence a los 15 min, y audita quién, a quién, a qué company y por qué", async () => {
     const now = new Date("2026-11-11T10:00:00Z");
