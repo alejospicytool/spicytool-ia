@@ -19,13 +19,6 @@ const COMPANIES = [
   { n: 6, name: "Terrenos Muestra", vertical: "real_estate", teamSize: "1", status: "paused", credits: 15, phone: "+54 11 5555-0106", created: "2026-03-02", tier: null, type: "freemium" },
 ];
 
-export const companies = COMPANIES.map((c) => ({
-  _id: oid(c.n), name: c.name, isConfigured: c.status === "active", credits: c.credits, currency: "USD",
-  userEmail: `admin${c.n}@ejemplo.test`, phoneNumber: c.phone, creationDate: iso(c.created), accountId: `${5000000000 + c.n * 1117}`,
-  activeWhatsAppConversations: c.status === "active" ? c.n * 7 : 0, status: c.status, lastUnpaidBill: c.n === 3 ? iso("2026-08-01") : null,
-  onboardingEnded: c.status === "active", trackId: `trk_${c.n}a9f`, vertical: c.vertical, teamSize: c.teamSize,
-}));
-
 // Un usuario por company (el dueño) y algunos más; companies[0] es la company del usuario.
 const U = [
   // n, company, nombre, apellido, extra
@@ -47,6 +40,16 @@ export const users = U.map(([n, c, name, surname, extra], i) => {
   };
 });
 
+// El owner de cada company es el primer usuario cargado de esa company; su email es el "userEmail" de la company.
+const ownerEmail = (n) => users.find((u) => u.companies[0] === oid(n)).email;
+
+export const companies = COMPANIES.map((c) => ({
+  _id: oid(c.n), name: c.name, isConfigured: c.status === "active", credits: c.credits, currency: "USD",
+  userEmail: ownerEmail(c.n), phoneNumber: c.phone, creationDate: iso(c.created), accountId: `${5000000000 + c.n * 1117}`,
+  activeWhatsAppConversations: c.status === "active" ? c.n * 7 : 0, status: c.status, lastUnpaidBill: c.n === 3 ? iso("2026-08-01") : null,
+  onboardingEnded: c.status === "active", trackId: `trk_${c.n}a9f`, vertical: c.vertical, teamSize: c.teamSize,
+}));
+
 // ── Datos hijos de cada company (generados de forma determinística) ────────────────────────────────
 const contacts = [], campaigns = [], landings = [], companyconversions = [], whatsappconversions = [], workflows = [];
 const pipelines = [], pipelinestages = [], whatsapptemplates = [], webforms = [], contactlists = [];
@@ -60,7 +63,7 @@ let seq = 1;
 const nid = () => oid(10000 + seq++);
 
 COMPANIES.forEach((co, ci) => {
-  const companyId = oid(co.n), userEmail = `admin${co.n}@ejemplo.test`;
+  const companyId = oid(co.n), userEmail = ownerEmail(co.n);
 
   const nContacts = 3 + (ci % 4);
   for (let i = 0; i < nContacts; i++) {

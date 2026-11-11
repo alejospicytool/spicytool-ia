@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   PLAN_OPTIONS, planPatch, currentPlanKey, setPath, matchesSearch, escapeRegExp, sortUsersRecent, paginate, whatsappProvider, companyIdOf,
-  validateCompanyEdit, validateContactEdit, diffFields, buildAuditEntry, userFullName, sortByPosition,
+  validateCompanyEdit, validateContactEdit, diffFields, buildAuditEntry, userFullName, sortByPosition, isOwner, matchesFilters,
 } from "./adminLogic.js";
 
 describe("planes", () => {
@@ -156,5 +156,41 @@ describe("auditoría", () => {
   it("diffFields devuelve solo lo que cambió", () => {
     expect(diffFields({ a: 1, b: "x", c: null }, { a: 1, b: "y", c: 5 }, ["a", "b", "c"])).toEqual([{ key: "b", from: "x", to: "y" }, { key: "c", from: null, to: 5 }]);
     expect(diffFields({ a: 1 }, { a: "1" }, ["a"])).toEqual([]);
+  });
+});
+
+describe("filtros de la lista", () => {
+  const co = { userEmail: "Dueno@Ejemplo.test", status: "active" };
+  const owner = { email: "dueno@ejemplo.test" }, other = { email: "otro@ejemplo.test" };
+  it("owner: el email del usuario es el userEmail de la company, sin distinguir mayúsculas ni espacios", () => {
+    expect(isOwner(owner, co)).toBe(true);
+    expect(isOwner({ email: " DUENO@ejemplo.test " }, co)).toBe(true);
+    expect(isOwner(other, co)).toBe(false);
+  });
+  it("sin email o sin company nunca es owner", () => {
+    expect(isOwner({}, {})).toBe(false);
+    expect(isOwner({ email: "" }, { userEmail: "" })).toBe(false);
+    expect(isOwner(owner, null)).toBe(false);
+    expect(isOwner(null, co)).toBe(false);
+  });
+  it("sin filtros pasa todo, incluso sin company", () => {
+    expect(matchesFilters(other, co)).toBe(true);
+    expect(matchesFilters(other, null)).toBe(true);
+    expect(matchesFilters(other, co, {})).toBe(true);
+  });
+  it("solo owners", () => {
+    expect(matchesFilters(owner, co, { owners: true })).toBe(true);
+    expect(matchesFilters(other, co, { owners: true })).toBe(false);
+  });
+  it("company activa: lo que no está pausada cuenta como activa", () => {
+    expect(matchesFilters(other, { status: "active" }, { activeOnly: true })).toBe(true);
+    expect(matchesFilters(other, { status: undefined }, { activeOnly: true })).toBe(true);
+    expect(matchesFilters(other, { status: "paused" }, { activeOnly: true })).toBe(false);
+    expect(matchesFilters(other, null, { activeOnly: true })).toBe(false);
+  });
+  it("los dos filtros se combinan (hay que cumplir ambos)", () => {
+    expect(matchesFilters(owner, co, { owners: true, activeOnly: true })).toBe(true);
+    expect(matchesFilters(owner, { ...co, status: "paused" }, { owners: true, activeOnly: true })).toBe(false);
+    expect(matchesFilters(other, co, { owners: true, activeOnly: true })).toBe(false);
   });
 });

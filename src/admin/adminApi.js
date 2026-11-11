@@ -2,7 +2,7 @@
 // la página vuelve todo al estado inicial. Las funciones tienen la forma de los endpoints que va a tener el backend
 // (ver PLAN.md), así que al conectar Mongo / Postgres solo se reemplaza este archivo; las pantallas no cambian.
 import { MOCK } from "./adminMock.js";
-import { matchesSearch, sortUsersRecent, paginate, companyIdOf, userFullName, planPatch, setPath, validateCompanyEdit, validateContactEdit, diffFields, buildAuditEntry, sortByPosition, PLAN_OPTIONS } from "./adminLogic.js";
+import { matchesSearch, matchesFilters, isOwner, sortUsersRecent, paginate, companyIdOf, userFullName, planPatch, setPath, validateCompanyEdit, validateContactEdit, diffFields, buildAuditEntry, sortByPosition, PLAN_OPTIONS } from "./adminLogic.js";
 
 let db = structuredClone(MOCK);
 let audit = [];
@@ -24,15 +24,16 @@ function log(actor, action, { targetType, targetId, targetLabel, companyId, deta
 }
 
 // ── Lectura ─────────────────────────────────────────────────────────────────────────────────────
-// GET /admin/users?search=&page=&pageSize=   (paginado del lado del servidor)
-export async function listUsers({ search = "", page = 1, pageSize = 8 } = {}) {
-  const filtered = sortUsersRecent(db.users.filter((u) => matchesSearch(u, search)));
-  const p = paginate(filtered, page, pageSize);
+// GET /admin/users?search=&owners=&activeOnly=&page=&pageSize=   (filtrado y paginado del lado del servidor)
+export async function listUsers({ search = "", page = 1, pageSize = 8, owners = false, activeOnly = false } = {}) {
+  const rows = db.users.map((u) => ({ u, co: byId("companies", companyIdOf(u)) }))
+    .filter(({ u, co }) => matchesSearch(u, search) && matchesFilters(u, co, { owners, activeOnly }));
+  const p = paginate(sortUsersRecent(rows.map((r) => r.u)), page, pageSize);
   return {
     ...p,
     items: p.items.map((u) => {
       const co = byId("companies", companyIdOf(u));
-      return { ...copy(u), companyName: co ? co.name : "—", companyStatus: co ? co.status : null };
+      return { ...copy(u), companyName: co ? co.name : "—", companyStatus: co ? co.status : null, isOwner: isOwner(u, co) };
     }),
   };
 }

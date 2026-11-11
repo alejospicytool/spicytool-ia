@@ -44,6 +44,43 @@ describe("listUsers", () => {
   });
 });
 
+describe("listUsers: filtros", () => {
+  const all = async (opts) => (await listUsers({ pageSize: 100, ...opts })).items;
+  it("cada company tiene un owner, y es un usuario de esa misma company", () => {
+    for (const c of MOCK.companies) {
+      const owners = MOCK.users.filter((u) => u.email === c.userEmail);
+      expect(owners).toHaveLength(1);
+      expect(owners[0].companies[0]).toBe(c._id);
+    }
+  });
+  it("solo owners: uno por company", async () => {
+    const r = await all({ owners: true });
+    expect(r).toHaveLength(MOCK.companies.length);
+    expect(r.every((u) => u.isOwner)).toBe(true);
+    expect((await all({})).filter((u) => u.isOwner)).toHaveLength(MOCK.companies.length);
+  });
+  it("company activa: excluye usuarios de companies pausadas", async () => {
+    const paused = new Set(MOCK.companies.filter((c) => c.status === "paused").map((c) => c._id));
+    const r = await all({ activeOnly: true });
+    expect(r.length).toBe(MOCK.users.filter((u) => !paused.has(u.companies[0])).length);
+    expect(r.every((u) => u.companyStatus === "active")).toBe(true);
+  });
+  it("owners + activa + búsqueda se combinan, y el total sale del filtro", async () => {
+    const r = await listUsers({ owners: true, activeOnly: true, pageSize: 2 });
+    expect(r.total).toBe(MOCK.companies.filter((c) => c.status === "active").length);
+    expect(r.items).toHaveLength(2);
+    const s = await all({ owners: true, search: "rossi" });
+    expect(s.map((u) => u.surname)).toEqual(["Rossi"]);
+    expect(await all({ owners: true, search: "Gómez" })).toHaveLength(0); // Martín Gómez no es owner
+  });
+  it("pausar una company la saca del filtro de activas", async () => {
+    const co = MOCK.companies[0];
+    const antes = (await all({ activeOnly: true })).length;
+    await setCompanyStatus(co._id, "paused", ACTOR);
+    expect((await all({ activeOnly: true })).length).toBe(antes - MOCK.users.filter((u) => u.companies[0] === co._id).length);
+  });
+});
+
 describe("detalle de la company", () => {
   it("trae los usuarios de la company (users.companies = companyId)", async () => {
     const co = MOCK.companies[3];

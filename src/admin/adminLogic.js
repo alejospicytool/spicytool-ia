@@ -48,6 +48,20 @@ export function matchesSearch(user, q) {
   return [user.email, user.phoneNumber, user.name, user.surname].some((v) => v != null && re.test(String(v)));
 }
 
+// Owner de la company: el usuario cuyo email es el "userEmail" de la company.
+export function isOwner(user, company) {
+  const a = String((user && user.email) || "").trim().toLowerCase();
+  const b = String((company && company.userEmail) || "").trim().toLowerCase();
+  return a !== "" && a === b;
+}
+
+// Filtros de la lista: solo owners y/o solo usuarios de una company activa ("activa" = cualquiera que no esté pausada).
+export function matchesFilters(user, company, { owners = false, activeOnly = false } = {}) {
+  if (owners && !isOwner(user, company)) return false;
+  if (activeOnly && (!company || company.status === "paused")) return false;
+  return true;
+}
+
 // Más recientes primero. Los _id de Mongo (ObjectId en hexa) crecen con el tiempo.
 export const sortUsersRecent = (users) => [...users].sort((a, b) => (String(a._id) < String(b._id) ? 1 : String(a._id) > String(b._id) ? -1 : 0));
 
