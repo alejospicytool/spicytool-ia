@@ -4,7 +4,8 @@
   "type": "module",
   "description": "Backend del backoffice (corre en el droplet). Guarda las claves; el front nunca las ve.",
   "scripts": {
-    "mongo:check": "node --env-file=/etc/spicytool-backoffice.env mongo-check.mjs"
+    "mongo:check": "node --env-file=/etc/spicytool-backoffice.env mongo-check.mjs",
+    "mongo:schema": "node --env-file=/etc/spicytool-backoffice.env mongo-schema.mjs"
   },
   "dependencies": {
     "mongodb": "^6.10.0"
