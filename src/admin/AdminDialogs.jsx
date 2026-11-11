@@ -2,7 +2,7 @@
 // Validan con adminLogic.js antes de enviar; el error del "servidor" se muestra dentro del diálogo.
 import { useRef, useState } from "react";
 import { Modal } from "../revenue/revenueUi.jsx";
-import { validateCompanyEdit, validateContactEdit, validatePlanAssignment, PAID_PLANS, planOf, planLabel, newIdempotencyKey, formatPrice, explainWebhookError } from "./adminLogic.js";
+import { validateCompanyEdit, validateContactEdit, validatePlanAssignment, PAID_PLANS, planOf, planLabel, newIdempotencyKey, formatPrice, explainWebhookError, validateSupportReason, explainSupportError, expiryText, REASON_MIN, REASON_MAX, userFullName } from "./adminLogic.js";
 import { useAsync } from "./adminHooks.js";
 import { listPrices } from "./adminApi.js";
 
@@ -166,6 +166,49 @@ export function CardLinkDialog({ user, onSubmit, onClose }) {
       <div style={{ fontSize: 12, color: "var(--muted)", margin: "8px 0" }}>No cobra nada ni cambia la suscripción. El link es de un solo uso y vence a los pocos minutos: generá uno nuevo cada vez, no lo guardes.</div>
       {state.data && <LinkBox url={state.data.paymentMethodUpdateUrl} />}
       {state.error && <div className="err" role="alert">{state.error}</div>}
+    </Modal>
+  );
+}
+
+// Entrar como usuario (sesión de soporte). Pide un motivo obligatorio y avisa que queda registrado. El link se ve una sola vez.
+export function SupportSessionDialog({ user, onSubmit, onClose, onDone }) {
+  const [reason, setReason] = useState(""), [ack, setAck] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(""), [touched, setTouched] = useState(false), [result, setResult] = useState(null);
+  const v = validateSupportReason(reason);
+  const finish = () => { if (result || error) onDone(); onClose(); };
+  async function generate() {
+    setTouched(true);
+    if (!v.ok) return;
+    setBusy(true); setError("");
+    try { setResult(await onSubmit(v.value)); }
+    catch (e) { const ex = explainSupportError(e.code); setError(`${ex.title}. ${ex.action}`); }
+    setBusy(false);
+  }
+  const footer = result
+    ? <><button className="btn-secondary" onClick={finish}>Cerrar</button><a className="btn-primary" style={{ textDecoration: "none", display: "inline-block" }} href={result.url} target="_blank" rel="noopener noreferrer">Abrir sesión</a></>
+    : <><button className="btn-secondary" disabled={busy} onClick={finish}>Cancelar</button><button className="btn-primary" disabled={busy || !ack} onClick={generate}>{busy ? "Generando…" : "Generar link de soporte"}</button></>;
+  return (
+    <Modal title="Entrar como usuario (soporte)" onClose={busy ? () => {} : finish} footer={footer}>
+      <dl className="kv" style={{ marginBottom: 14 }}>
+        <div><dt>Usuario</dt><dd>{userFullName(user)}<div style={{ fontSize: 11, color: "var(--muted)" }}>{user.email}</div></dd></div>
+      </dl>
+      {result ? (<>
+        <div className="alert" style={{ background: "#EDFAF3", color: "#15803D", border: "1px solid #BFE8D0" }}>Link generado: {expiryText(result.expiresAt)}.</div>
+        <LinkBox url={result.url} />
+        <ul style={{ fontSize: 12, color: "var(--muted)", margin: "12px 0 0", paddingLeft: 18, lineHeight: 1.6 }}>
+          <li>Abrilo en una <b>ventana privada</b>, para que la sesión del cliente no pise la tuya.</li>
+          <li>Es una llave a esa cuenta: no lo pegues en chats ni tickets.</li>
+          <li>Quedó registrado quién entró, a qué cuenta y por qué. El link no se guarda.</li>
+        </ul>
+      </>) : (<>
+        <div className="alert" style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #FCE4A0", alignItems: "flex-start" }}>Vas a poder ver y actuar en la cuenta de un cliente. Entrá solo para resolver un caso concreto: queda registrado con tu nombre y el motivo.</div>
+        <div className="field" style={{ marginTop: 14 }}>
+          <label className="field-label" htmlFor="support-reason">Motivo (obligatorio)</label>
+          <textarea id="support-reason" className="inp" rows={3} maxLength={REASON_MAX + 50} placeholder="Ej: ticket 4821: el cliente no ve sus contactos" value={reason} onChange={(e) => setReason(e.target.value)} onBlur={() => setTouched(true)} />
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--muted)", marginTop: 4 }}><span>{touched && !v.ok ? <span className="err" role="alert">{v.error}</span> : `Mínimo ${REASON_MIN} caracteres`}</span><span>{v.value.length}/{REASON_MAX}</span></div>
+        </div>
+        <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13 }}><input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />Entiendo que esta sesión queda registrada a mi nombre.</label>
+        {error && <div className="err" role="alert" style={{ marginTop: 10 }}>{error}</div>}
+      </>)}
     </Modal>
   );
 }

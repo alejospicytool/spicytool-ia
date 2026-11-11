@@ -151,6 +151,8 @@ export const AUDIT_ACTIONS = {
   plan_assign: "Asignó un plan (cobró)",
   plan_assign_failed: "Intentó asignar un plan (no se cobró)",
   card_link_created: "Generó un link para cambiar la tarjeta",
+  support_link_created: "Generó un link de soporte (entrar como usuario)",
+  support_link_denied: "Intentó entrar como usuario sin permiso",
   workflow_delete: "Eliminó un workflow",
 };
 export const auditLabel = (action) => AUDIT_ACTIONS[action] || action;
@@ -165,4 +167,48 @@ export function buildAuditEntry({ id, actor, action, targetType, targetId, targe
   if (!actor) throw new Error("La auditoría necesita saber quién hizo la acción.");
   if (!AUDIT_ACTIONS[action]) throw new Error("Acción de auditoría desconocida: " + action);
   return { id, at: new Date(now).toISOString(), actor, action, targetType, targetId, targetLabel: targetLabel || targetId, companyId, detail };
+}
+
+// ── Soporte (entrar como usuario) ────────────────────────────────────────────────────────────────
+// Genera un link de una sesión de soporte en la cuenta de un cliente. El motivo es obligatorio y queda en la auditoría;
+// el link nunca se guarda ni se muestra en ningún log.
+export const SUPPORT_ACTIONS = ["support_link_created", "support_link_denied"];
+export const REASON_MIN = 10, REASON_MAX = 500;
+
+// Motivo: texto real (no "aaaaaaaaaa"), sin saltos raros, entre 10 y 500 caracteres.
+export function validateSupportReason(reason) {
+  const value = String(reason ?? "").replace(/\s+/g, " ").trim();
+  let error = null;
+  if (value.length < REASON_MIN) error = `Escribí el motivo (mínimo ${REASON_MIN} caracteres). Por ejemplo: “ticket 4821: el cliente no ve sus contactos”.`;
+  else if (value.length > REASON_MAX) error = `El motivo es demasiado largo (máximo ${REASON_MAX} caracteres).`;
+  else if (new Set(value.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "")).size < 4) error = "Escribí un motivo real: qué vas a revisar y por qué.";
+  return { ok: !error, error, value };
+}
+
+// Cuerpo del pedido a admin/support-sessions/link
+export function buildSupportRequest(user, reason) {
+  const companyId = companyIdOf(user);
+  if (!user || !user._id || !user.email) throw new Error("Falta el usuario al que se va a entrar.");
+  if (!companyId) throw new Error("El usuario no tiene company: no se puede abrir una sesión de soporte.");
+  const v = validateSupportReason(reason);
+  if (!v.ok) throw new Error(v.error);
+  return { targetUserId: user._id, targetEmail: user.email, companyId, reason: v.value };
+}
+
+export const SUPPORT_ERRORS = {
+  SIN_PERMISO_SOPORTE: { title: "No tenés permiso de soporte", action: "Pedile a un admin que te habilite. El intento quedó registrado." },
+  USUARIO_NO_ENCONTRADO: { title: "No se encontró el usuario", action: "Recargá la lista y volvé a intentar." },
+  MOTIVO_INVALIDO: { title: "El motivo no es válido", action: "Escribí qué vas a revisar y por qué." },
+  SESION_NO_DISPONIBLE: { title: "Spicytool no pudo generar la sesión", action: "Probá de nuevo en un minuto; si sigue, avisá a un desarrollador." },
+  ERROR: { title: "Error inesperado", action: "Avisá a un desarrollador." },
+};
+export const explainSupportError = (code) => SUPPORT_ERRORS[code] || SUPPORT_ERRORS.ERROR;
+
+// "vence en 14 min" / "venció"
+export function expiryText(expiresAt, now = Date.now()) {
+  const ms = new Date(expiresAt).getTime() - new Date(now).getTime();
+  if (!Number.isFinite(ms)) return "";
+  if (ms <= 0) return "venció";
+  const min = Math.ceil(ms / 60000);
+  return min === 1 ? "vence en menos de 1 min" : `vence en ${min} min`;
 }

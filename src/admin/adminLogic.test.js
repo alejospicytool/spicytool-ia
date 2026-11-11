@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  PAID_PLANS, planOf, planLabel, isPaidPlan, validatePlanAssignment, newIdempotencyKey, formatPrice, explainWebhookError, WEBHOOK_ERRORS, matchesSearch, escapeRegExp, sortUsersRecent, paginate, whatsappProvider, companyIdOf,
+  PAID_PLANS, planOf, planLabel, isPaidPlan, validatePlanAssignment, newIdempotencyKey, formatPrice, explainWebhookError, WEBHOOK_ERRORS, validateSupportReason, buildSupportRequest, explainSupportError, SUPPORT_ERRORS, SUPPORT_ACTIONS, AUDIT_ACTIONS, expiryText, REASON_MIN, REASON_MAX, matchesSearch, escapeRegExp, sortUsersRecent, paginate, whatsappProvider, companyIdOf,
   validateCompanyEdit, validateContactEdit, diffFields, buildAuditEntry, userFullName, sortByPosition, isOwner, matchesFilters, isPaused, matchesCompanySearch, sortCompaniesByName,
 } from "./adminLogic.js";
 
@@ -261,4 +261,57 @@ describe("companies activas y pausadas", () => {
     expect(sortCompaniesByName(a).map((c) => c.name)).toEqual(["Álamo", "Alfa", "beta", "zeta"]);
     expect(a[0].name).toBe("zeta");
   });
+});
+
+describe("soporte: motivo", () => {
+  it("acepta un motivo real y lo normaliza", () => {
+    const r = validateSupportReason("  ticket 4821:\n el cliente   no ve sus contactos ");
+    expect(r).toEqual({ ok: true, error: null, value: "ticket 4821: el cliente no ve sus contactos" });
+  });
+  it("rechaza vacío, corto o solo espacios", () => {
+    for (const x of ["", "   ", "corto", "123456789", null, undefined]) expect(validateSupportReason(x).ok).toBe(false);
+    expect(validateSupportReason("a".repeat(REASON_MIN - 1)).error).toMatch(/mínimo 10/);
+  });
+  it("rechaza texto de relleno", () => {
+    for (const x of ["aaaaaaaaaaaa", "............", "1111111111", "ab ab ab ab ab", "!!!!!!!!!!!!"]) expect(validateSupportReason(x).ok).toBe(false);
+  });
+  it("acepta acentos y números", () => {
+    expect(validateSupportReason("revisión de facturación del cliente").ok).toBe(true);
+    expect(validateSupportReason("caso 4821 y 4822").ok).toBe(true);
+  });
+  it("el máximo es 500", () => {
+    expect(validateSupportReason("motivo válido ".repeat(40).slice(0, REASON_MAX)).ok).toBe(true);
+    expect(validateSupportReason("motivo válido ".repeat(40).slice(0, REASON_MAX + 1)).error).toMatch(/largo/);
+  });
+});
+
+describe("soporte: pedido, errores y vencimiento", () => {
+  const user = { _id: "u1", email: "a@b.test", companies: ["c1"], name: "Ana" };
+  it("el pedido lleva exactamente los cuatro campos de la API", () => {
+    expect(buildSupportRequest(user, "ticket 4821: revisar contactos")).toEqual({ targetUserId: "u1", targetEmail: "a@b.test", companyId: "c1", reason: "ticket 4821: revisar contactos" });
+  });
+  it("no arma el pedido sin usuario, sin company o con motivo malo", () => {
+    expect(() => buildSupportRequest(null, "ticket 4821: revisar")).toThrow(/usuario/);
+    expect(() => buildSupportRequest({ ...user, companies: [] }, "ticket 4821: revisar")).toThrow(/company/);
+    expect(() => buildSupportRequest({ _id: "u1", companies: ["c1"] }, "ticket 4821: revisar")).toThrow(/usuario/);
+    expect(() => buildSupportRequest(user, "corto")).toThrow(/motivo/i);
+  });
+  it("cada error tiene título y acción; uno desconocido cae en ERROR", () => {
+    for (const c of ["SIN_PERMISO_SOPORTE", "USUARIO_NO_ENCONTRADO", "MOTIVO_INVALIDO", "SESION_NO_DISPONIBLE", "ERROR"]) { expect(SUPPORT_ERRORS[c].title).toBeTruthy(); expect(SUPPORT_ERRORS[c].action).toBeTruthy(); }
+    expect(explainSupportError("XYZ")).toBe(SUPPORT_ERRORS.ERROR);
+    expect(explainSupportError(undefined)).toBe(SUPPORT_ERRORS.ERROR);
+  });
+  it("las acciones de soporte están en la auditoría", () => {
+    for (const a of SUPPORT_ACTIONS) expect(AUDIT_ACTIONS[a]).toBeTruthy();
+  });
+  it("texto de vencimiento", () => {
+    const now = new Date("2026-11-11T10:00:00Z");
+    expect(expiryText("2026-11-11T10:15:00Z", now)).toBe("vence en 15 min");
+    expect(expiryText("2026-11-11T10:00:30Z", now)).toBe("vence en menos de 1 min");
+    expect(expiryText("2026-11-11T10:00:00Z", now)).toBe("venció");
+    expect(expiryText("2026-11-11T09:00:00Z", now)).toBe("venció");
+    expect(expiryText("no-es-fecha", now)).toBe("");
+    expect(expiryText(undefined, now)).toBe("");
+  });
+  it("constantes", () => { expect([REASON_MIN, REASON_MAX]).toEqual([10, 500]); });
 });

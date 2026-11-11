@@ -3,11 +3,11 @@
 // (editar, pausar/activar, cambiar plan, eliminar workflow), todas con confirmación o formulario y con auditoría.
 import { useState } from "react";
 import { Kpi, fmtDate, fmtDateTime } from "../revenue/revenueUi.jsx";
-import { getUser, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, getPaymentMethodUrl, deleteWorkflow } from "./adminApi.js";
+import { getUser, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, getPaymentMethodUrl, createSupportLink, getMyPermissions, deleteWorkflow } from "./adminApi.js";
 import { companyIdOf, userFullName, whatsappProvider, planOf, planLabel, sortByPosition } from "./adminLogic.js";
 import { Tabs, DataTable, StatusBadge, ConfirmDialog, AuditList } from "./adminUi.jsx";
 import { useAsync } from "./adminHooks.js";
-import { EditCompanyDialog, EditContactDialog, AssignPlanDialog, CardLinkDialog } from "./AdminDialogs.jsx";
+import { EditCompanyDialog, EditContactDialog, AssignPlanDialog, CardLinkDialog, SupportSessionDialog } from "./AdminDialogs.jsx";
 
 const yesNo = (v) => (v ? "Sí" : "No");
 const num = (v) => (v == null ? "—" : Number(v).toLocaleString("es-AR"));
@@ -96,6 +96,7 @@ function AuditTab({ companyId, version }) {
 export default function AdminCompanyDetail({ userId, actor, onBack, onChanged }) {
   const [version, setVersion] = useState(0), [tab, setTab] = useState("resumen"), [dialog, setDialog] = useState(null), [confirm, setConfirm] = useState(null);
   const [confirmBusy, setConfirmBusy] = useState(false), [confirmError, setConfirmError] = useState("");
+  const perms = useAsync(() => getMyPermissions(actor), "perms:" + actor);
   const res = useAsync(async () => { const user = await getUser(userId); if (!user) throw new Error("No se encontró el usuario."); return { user, bundle: await getCompanyBundle(companyIdOf(user)) }; }, `detail:${userId}:${version}`);
 
   const refresh = () => { setVersion((v) => v + 1); onChanged(); };
@@ -131,6 +132,7 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
           <button className="btn-secondary" onClick={() => setDialog("contact")}>Editar contacto</button>
           <button className="btn-secondary" onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
           <button className="btn-secondary" onClick={() => setDialog("card")}>Link de tarjeta</button>
+          <button className="btn-warn" disabled={!perms.data || !perms.data.support} title={perms.data && !perms.data.support ? "Tu usuario no tiene permiso de soporte. Pedile a un admin que te habilite." : "Generar un link para entrar a la cuenta de este usuario"} onClick={() => setDialog("support")}>Entrar como usuario</button>
           {paused
             ? <button className="btn-primary" onClick={() => ask({ title: "Activar company", label: "Activar", text: <>Vas a <b>activar</b> la company <b>{co.name}</b>. Sus usuarios vuelven a poder usar la cuenta.</>, action: () => setCompanyStatus(co._id, "active", actor) })}>Activar company</button>
             : <button className="btn-warn" onClick={() => ask({ title: "Pausar company", label: "Pausar", danger: true, text: <>Vas a <b>pausar</b> la company <b>{co.name}</b>. Sus usuarios dejan de poder usar la cuenta hasta que la actives de nuevo.</>, action: () => setCompanyStatus(co._id, "paused", actor) })}>Pausar company</button>}
@@ -178,6 +180,7 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
       {dialog === "company" && <EditCompanyDialog company={co} onClose={() => setDialog(null)} onSubmit={submitted((v) => updateCompany(co._id, v, actor))} />}
       {dialog === "contact" && <EditContactDialog user={user} onClose={() => setDialog(null)} onSubmit={submitted((v) => updateUserContact(user._id, v, actor))} />}
       {dialog === "plan" && <AssignPlanDialog user={user} onClose={() => setDialog(null)} onDone={refresh} onSubmit={(v) => assignPlan(user._id, v, actor)} />}
+      {dialog === "support" && <SupportSessionDialog user={user} onClose={() => setDialog(null)} onDone={refresh} onSubmit={(reason) => createSupportLink(user._id, reason, actor)} />}
       {dialog === "card" && <CardLinkDialog user={user} onClose={() => { setDialog(null); refresh(); }} onSubmit={() => getPaymentMethodUrl(user._id, actor)} />}
       {confirm && <ConfirmDialog title={confirm.title} confirmLabel={confirm.label} danger={confirm.danger} busy={confirmBusy} error={confirmError} onConfirm={runConfirmed} onCancel={() => setConfirm(null)}>{confirm.text}</ConfirmDialog>}
     </div>

@@ -96,6 +96,8 @@ const detailText = (a) => {
   if (a.action === "plan_assign") return `${d.previousPlan || "Sin plan"} → ${d.plan} · ${d.stripePriceId}`;
   if (a.action === "plan_assign_failed") return `${d.plan || "—"} · no se cobró (${d.code})`;
   if (a.action === "card_link_created") return "Link de un solo uso";
+  if (a.action === "support_link_created") return `Motivo: ${d.reason}`;
+  if (a.action === "support_link_denied") return `Sin permiso · motivo: ${d.reason || "—"}`;
   if (d.from != null) return `${d.from} → ${d.to}`;
   if (d.name) return d.name;
   return "";

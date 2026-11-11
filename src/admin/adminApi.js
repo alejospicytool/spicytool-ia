@@ -2,14 +2,14 @@
 // la página vuelve todo al estado inicial. Las funciones tienen la forma de los endpoints que va a tener el backend
 // (ver PLAN.md), así que al conectar Mongo / Postgres solo se reemplaza este archivo; las pantallas no cambian.
 import { MOCK } from "./adminMock.js";
-import { matchesSearch, matchesFilters, isOwner, isPaused, matchesCompanySearch, sortCompaniesByName, sortUsersRecent, paginate, companyIdOf, userFullName, planOf, isPaidPlan, PAID_PLANS, validateCompanyEdit, validateContactEdit, diffFields, buildAuditEntry, sortByPosition } from "./adminLogic.js";
+import { matchesSearch, matchesFilters, isOwner, isPaused, matchesCompanySearch, sortCompaniesByName, sortUsersRecent, paginate, companyIdOf, userFullName, planOf, isPaidPlan, PAID_PLANS, validateCompanyEdit, validateContactEdit, validateSupportReason, buildSupportRequest, SUPPORT_ACTIONS, diffFields, buildAuditEntry, sortByPosition } from "./adminLogic.js";
 
 let db = structuredClone(MOCK);
 let audit = [];
 let auditSeq = 0;
 
 // Solo para tests: vuelve al estado inicial.
-export function resetMock() { db = structuredClone(MOCK); audit = []; auditSeq = 0; sessionSeq = 0; subSeq = 0; idempotent.clear(); }
+export function resetMock() { db = structuredClone(MOCK); audit = []; auditSeq = 0; sessionSeq = 0; subSeq = 0; linkSeq = 0; idempotent.clear(); }
 
 const copy = (x) => structuredClone(x);
 const byId = (coll, id) => db[coll].find((x) => x._id === id);
@@ -95,8 +95,8 @@ export async function getCredits(companyId) {
 }
 
 // GET /admin/audit
-export async function listAudit({ companyId = null, limit = 50 } = {}) {
-  return copy(audit.filter((a) => !companyId || a.companyId === companyId).slice(0, limit));
+export async function listAudit({ companyId = null, limit = 50, actions = null } = {}) {
+  return copy(audit.filter((a) => (!companyId || a.companyId === companyId) && (!actions || actions.includes(a.action))).slice(0, limit));
 }
 
 // ── Escritura (cada una deja una entrada en la auditoría) ─────────────────────────────────────────
@@ -197,4 +197,49 @@ export async function deleteWorkflow(workflowId, actor) {
   const [w] = db.workflows.splice(i, 1);
   log(actor, "workflow_delete", { targetType: "workflow", targetId: workflowId, targetLabel: w.name, companyId: w.companyId, detail: { name: w.name } });
   return { ok: true };
+}
+
+// ── Soporte: entrar como usuario ────────────────────────────────────────────────────────────────────
+// Hoy se SIMULA. En producción: una función de backend (1) comprueba que quien llama sea admin CON permiso de soporte
+// (tabla support_access), (2) hace el login contra la API de Spicytool con una cuenta de servicio guardada como secret
+// (el front no maneja contraseñas), (3) pide POST admin/support-sessions/link y (4) guarda la auditoría, sin el link.
+// La respuesta real de la API no está documentada: acá se supone { url, expiresAt }.
+export class SupportError extends WebhookError {}
+const sup = (status, code, message) => { throw new SupportError(status, code, message); };
+// En el mock tienen permiso todos menos estos. En producción es al revés: solo los habilitados explícitamente.
+const SUPPORT_DENIED = ["sin.permiso@ejemplo.test"];
+let linkSeq = 0;
+const SUPPORT_LINK_MINUTES = 15; // supuesto
+
+// GET /admin/me/permissions
+export async function getMyPermissions(actor) {
+  needActor(actor);
+  return { support: !SUPPORT_DENIED.includes(String(actor).trim().toLowerCase()) };
+}
+
+// POST /admin/support-sessions/link
+export async function createSupportLink(userId, reason, actor, now = new Date()) {
+  needActor(actor);
+  const u = byId("users", userId);
+  const co = u && byId("companies", companyIdOf(u));
+  const target = u ? { targetType: "user", targetId: userId, targetLabel: userFullName(u), companyId: companyIdOf(u) } : { targetType: "user", targetId: userId, targetLabel: userId, companyId: null };
+  if (!(await getMyPermissions(actor)).support) {
+    log(actor, "support_link_denied", { ...target, detail: { targetEmail: u ? u.email : null, reason: validateSupportReason(reason).value } });
+    sup(403, "SIN_PERMISO_SOPORTE", "Support access is not enabled for this admin");
+  }
+  if (!u) sup(404, "USUARIO_NO_ENCONTRADO", "User not found");
+  const v = validateSupportReason(reason);
+  if (!v.ok) sup(422, "MOTIVO_INVALIDO", v.error);
+  const req = buildSupportRequest(u, v.value);
+  const result = { url: `https://app.example.test/support-session?token=mock_${++linkSeq}`, expiresAt: new Date(new Date(now).getTime() + SUPPORT_LINK_MINUTES * 60000).toISOString() };
+  // La auditoría guarda quién, a quién, a qué company y el motivo. NUNCA el link.
+  log(actor, "support_link_created", { ...target, detail: { targetEmail: req.targetEmail, companyName: co ? co.name : null, reason: req.reason, expiresAt: result.expiresAt } });
+  return result;
+}
+
+// GET /admin/support-sessions   (el registro; sin links)
+export async function listSupportLog({ search = "", page = 1, pageSize = 10 } = {}) {
+  const q = String(search || "").trim().toLowerCase();
+  const rows = (await listAudit({ actions: SUPPORT_ACTIONS, limit: 1000 })).filter((a) => !q || [a.actor, a.targetLabel, a.detail?.targetEmail, a.detail?.companyName, a.detail?.reason].some((v) => v && String(v).toLowerCase().includes(q)));
+  return paginate(rows, page, pageSize);
 }

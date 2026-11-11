@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { resetMock, listUsers, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, getPaymentMethodUrl, listPrices, WebhookError, deleteWorkflow, getUser, listCompanies, listCompanyUsers } from "./adminApi.js";
+import { resetMock, listUsers, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, getPaymentMethodUrl, listPrices, WebhookError, deleteWorkflow, getUser, listCompanies, listCompanyUsers, getMyPermissions, createSupportLink, listSupportLog, SupportError } from "./adminApi.js";
 import { MOCK } from "./adminMock.js";
 
 const ACTOR = "admin@ejemplo.test";
@@ -228,6 +228,96 @@ describe("webhooks de back office (simulados)", () => {
     expect(new Set(MOCK.users.map((u) => u.stripe.paymentMethod))).toEqual(new Set(["ok", "declined", "none"]));
     expect(new Set(MOCK.users.map((u) => u.subscription.plan))).toEqual(new Set(["SpicyPro", "SpicyStart", "Freemium", "SpicyProMax", "Free trial"]));
     expect(MOCK.users.some((u) => "tier" in u.subscription)).toBe(false);
+  });
+});
+
+describe("soporte: entrar como usuario (simulado)", () => {
+  const DENIED = "sin.permiso@ejemplo.test";
+  const REASON = "ticket 4821: el cliente no ve sus contactos";
+  const lucia = () => MOCK.users.find((x) => x.name === "Lucía");
+  const err = async (p) => { try { await p; } catch (e) { return e; } throw new Error("tenía que fallar"); };
+
+  it("permisos: tienen todos menos el actor sin permiso, sin distinguir mayúsculas", async () => {
+    expect(await getMyPermissions(ACTOR)).toEqual({ support: true });
+    expect(await getMyPermissions(DENIED)).toEqual({ support: false });
+    expect(await getMyPermissions("  SIN.PERMISO@Ejemplo.test ")).toEqual({ support: false });
+    await expect(getMyPermissions("")).rejects.toThrow(/quién/);
+  });
+  it("genera el link, que vence a los 15 min, y audita quién, a quién, a qué company y por qué", async () => {
+    const now = new Date("2026-11-11T10:00:00Z");
+    const r = await createSupportLink(lucia()._id, "  ticket 4821:  el cliente no ve sus contactos ", ACTOR, now);
+    expect(r.url).toMatch(/^https:\/\/app\.example\.test\/support-session\?token=/);
+    expect(r.expiresAt).toBe("2026-11-11T10:15:00.000Z");
+    const [a] = await listAudit();
+    expect(a).toMatchObject({ actor: ACTOR, action: "support_link_created", targetType: "user", targetId: lucia()._id, companyId: lucia().companies[0] });
+    expect(a.detail).toMatchObject({ targetEmail: lucia().email, companyName: "Inmobiliaria Ejemplo Norte", reason: REASON });
+  });
+  it("el link NUNCA queda en la auditoría ni en el registro de soporte", async () => {
+    const r = await createSupportLink(lucia()._id, REASON, ACTOR);
+    const token = r.url.split("token=")[1];
+    expect(JSON.stringify(await listAudit())).not.toContain(token);
+    expect(JSON.stringify(await listSupportLog())).not.toContain(token);
+    expect(JSON.stringify(await listAudit())).not.toContain("support-session");
+  });
+  it("cada pedido da un link distinto", async () => {
+    const a = await createSupportLink(lucia()._id, REASON, ACTOR), b = await createSupportLink(lucia()._id, REASON, ACTOR);
+    expect(a.url).not.toBe(b.url);
+  });
+  it("sin permiso: 403, no hay link y el intento queda registrado", async () => {
+    const e = await err(createSupportLink(lucia()._id, REASON, DENIED));
+    expect(e).toBeInstanceOf(SupportError);
+    expect([e.status, e.code]).toEqual([403, "SIN_PERMISO_SOPORTE"]);
+    const [a] = await listAudit();
+    expect(a).toMatchObject({ actor: DENIED, action: "support_link_denied", targetId: lucia()._id });
+    expect(a.detail.reason).toBe(REASON);
+  });
+  it("sin permiso responde 403 aunque el usuario no exista (no revela qué usuarios hay)", async () => {
+    expect((await err(createSupportLink("nope", REASON, DENIED))).code).toBe("SIN_PERMISO_SOPORTE");
+  });
+  it("usuario inexistente: 404", async () => {
+    const e = await err(createSupportLink("nope", REASON, ACTOR));
+    expect([e.status, e.code]).toEqual([404, "USUARIO_NO_ENCONTRADO"]);
+  });
+  it("motivo inválido: 422, sin link y sin registrar una sesión", async () => {
+    for (const bad of ["", "corto", "aaaaaaaaaaaa", undefined]) {
+      const e = await err(createSupportLink(lucia()._id, bad, ACTOR));
+      expect([e.status, e.code]).toEqual([422, "MOTIVO_INVALIDO"]);
+    }
+    expect(await listAudit()).toHaveLength(0);
+  });
+  it("sin actor no se genera nada", async () => {
+    await expect(createSupportLink(lucia()._id, REASON, "")).rejects.toThrow(/quién/);
+    expect(await listAudit()).toHaveLength(0);
+  });
+  it("también se puede entrar a un usuario de una company pausada", async () => {
+    const paused = MOCK.users.find((u) => MOCK.companies.find((c) => c._id === u.companies[0]).status === "paused");
+    expect((await createSupportLink(paused._id, REASON, ACTOR)).url).toBeTruthy();
+  });
+  it("el registro de soporte tiene solo sesiones e intentos, más nuevo primero", async () => {
+    await setCompanyStatus(MOCK.companies[0]._id, "paused", ACTOR); // otra acción: no debe aparecer
+    await createSupportLink(lucia()._id, "ticket 1: primer caso de prueba", ACTOR);
+    await err(createSupportLink(lucia()._id, "ticket 2: segundo caso de prueba", DENIED));
+    await createSupportLink(MOCK.users[3]._id, "ticket 3: tercer caso de prueba", ACTOR);
+    const r = await listSupportLog();
+    expect(r.total).toBe(3);
+    expect(r.items.map((a) => a.action)).toEqual(["support_link_created", "support_link_denied", "support_link_created"]);
+    expect(r.items[0].detail.reason).toMatch(/tercer/);
+  });
+  it("el registro se busca por admin, usuario, email, company o motivo, y pagina", async () => {
+    for (let i = 0; i < 12; i++) await createSupportLink(lucia()._id, `ticket ${100 + i}: caso de prueba número ${i}`, ACTOR);
+    await err(createSupportLink(MOCK.users[3]._id, "ticket 999: revisar facturación", DENIED));
+    expect((await listSupportLog({ pageSize: 10 })).pages).toBe(2);
+    expect((await listSupportLog({ search: "facturación" })).total).toBe(1);
+    expect((await listSupportLog({ search: DENIED })).total).toBe(1);
+    expect((await listSupportLog({ search: lucia().email })).total).toBe(12);
+    expect((await listSupportLog({ search: "Inmobiliaria Ejemplo Norte" })).total).toBe(12);
+    expect((await listSupportLog({ search: "zzzz" })).total).toBe(0);
+  });
+  it("listAudit puede filtrar por acciones", async () => {
+    await setCompanyStatus(MOCK.companies[0]._id, "paused", ACTOR);
+    await createSupportLink(lucia()._id, REASON, ACTOR);
+    expect((await listAudit({ actions: ["company_pause"] })).map((a) => a.action)).toEqual(["company_pause"]);
+    expect(await listAudit()).toHaveLength(2);
   });
 });
 
