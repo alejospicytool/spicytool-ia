@@ -382,6 +382,15 @@ describe("acciones: cambian los datos y dejan auditoría", () => {
     expect(a).toMatchObject({ actor: ACTOR, action: "company_edit", targetType: "company", targetId: co._id, companyId: co._id });
     expect(a.detail.changes.map((c) => c.key).sort()).toEqual(["credits", "name"]);
   });
+  it("editar company con créditos vacío NO toca los créditos (no escribe un 0)", async () => {
+    const co = MOCK.companies[0];
+    const antes = co.credits;
+    await updateCompany(co._id, { name: "Otro nombre", phoneNumber: co.phoneNumber, credits: null }, ACTOR);
+    const b = await getCompanyBundle(co._id);
+    expect(b.company.credits).toBe(antes);
+    const [a] = await listAudit();
+    expect(a.detail.changes.map((c) => c.key)).toEqual(["name"]);
+  });
   it("editar company con datos inválidos no cambia nada ni audita", async () => {
     const co = MOCK.companies[0];
     await expect(updateCompany(co._id, { name: "", phoneNumber: "", credits: 1 }, ACTOR)).rejects.toThrow(/nombre/);

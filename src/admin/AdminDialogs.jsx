@@ -20,16 +20,18 @@ function useSubmit(validate, onSubmit, onClose) {
 const Field = ({ label, error, children }) => <div className="field"><label className="field-label">{label}</label>{children}{error && <div className="err" role="alert">{error}</div>}</div>;
 
 export function EditCompanyDialog({ company, onSubmit, onClose }) {
-  const [f, setF] = useState({ name: company.name || "", phoneNumber: company.phoneNumber || "", credits: String(company.credits ?? 0) });
-  const { errors, busy, error, submit } = useSubmit(validateCompanyEdit, onSubmit, onClose);
+  // Si la company no tiene créditos cargados queda vacío (no se le escribe un 0 sin querer).
+  const [f, setF] = useState({ name: company.name || "", phoneNumber: company.phoneNumber || "", credits: company.credits == null ? "" : String(company.credits) });
+  const { errors, busy, error, submit } = useSubmit((v) => validateCompanyEdit(v, { currentPhone: company.phoneNumber }), onSubmit, onClose);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   return (
     <Modal title="Editar company" onClose={onClose} footer={<><button className="btn-secondary" disabled={busy} onClick={onClose}>Cancelar</button><button className="btn-primary" disabled={busy} onClick={() => submit(f)}>{busy ? "Guardando…" : "Guardar"}</button></>}>
       <Field label="Nombre de la company" error={errors.name}><input className="inp" value={f.name} onChange={set("name")} /></Field>
       <div className="grid2">
         <Field label="Teléfono" error={errors.phoneNumber}><input className="inp" value={f.phoneNumber} onChange={set("phoneNumber")} /></Field>
-        <Field label="Créditos" error={errors.credits}><input className="inp" inputMode="decimal" value={f.credits} onChange={set("credits")} /></Field>
+        <Field label="Créditos" error={errors.credits}><input className="inp" inputMode="decimal" placeholder="Sin dato" value={f.credits} onChange={set("credits")} /></Field>
       </div>
+      <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>Solo se guardan los campos que cambies. “Créditos” es el dato de la company en la base; el saldo de créditos de WhatsApp está en billing y no se toca desde acá. Dejá créditos vacío para no cambiarlo.</div>
       {error && <div className="err" role="alert">{error}</div>}
     </Modal>
   );

@@ -20,7 +20,7 @@ export default function AdminApp({ view, actor }) {
       {probe.loading ? <div className="empty">Conectando…</div> : (
         <>
           <div className="demo-banner" role="status">
-            {real ? "Datos reales. Editar y entrar como usuario todavía no están conectados. “Pausar / activar company” cambia la base real y “Asignar plan” COBRA de verdad a la tarjeta del cliente."
+            {real ? "Datos reales. Editar contacto y entrar como usuario todavía no están conectados. Editar y pausar/activar una company cambian la base real, y “Asignar plan” COBRA de verdad a la tarjeta del cliente."
               : "Datos de ejemplo: esta sección todavía no está conectada a la base real. Los cambios que hagas se pierden al recargar."}
           </div>
           {view === "adm_users" && <AdminUsersPage actor={actor} />}

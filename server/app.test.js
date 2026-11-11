@@ -17,7 +17,10 @@ const billing = {
   assignPlan: vi.fn(async () => ({ status: 201, body: { message: "ok" } })),
   paymentMethodUrl: vi.fn(async () => ({ status: 200, body: { paymentMethodUpdateUrl: "https://billing.stripe.com/p/session/a" } })),
 };
-const companies = { setStatus: vi.fn(async () => ({ status: 200, body: { _id: "x", status: "paused" } })) };
+const companies = {
+  setStatus: vi.fn(async () => ({ status: 200, body: { _id: "x", status: "paused" } })),
+  edit: vi.fn(async () => ({ status: 200, body: { _id: "x", changed: true } })),
+};
 const audit = { list: vi.fn(async (token, a) => [{ id: "1", echo: { token, ...a } }]) };
 const prices = [{ id: "price_1", plan: "SpicyPro", amount: 40000 }];
 
@@ -127,6 +130,15 @@ describe("API del backoffice (solo lectura)", () => {
     const r = await call(`/api/admin/companies/${ID}/status`, { method: "POST", body: { status: "paused" } });
     expect(r.status).toBe(409);
     expect(await r.json()).toMatchObject({ code: "YA_ESTA" });
+  });
+  it("editar company: solo POST con admin; pasa admin, token, id y el cuerpo tal cual (el servicio valida)", async () => {
+    const body = { name: "Nuevo", phoneNumber: "+54 11 5555-0101", credits: null };
+    expect((await call(`/api/admin/companies/${ID}`, { method: "POST", body })).status).toBe(200);
+    expect(companies.edit).toHaveBeenCalledWith({ id: "u1", email: "nico@spicytool.test" }, "admin", ID, body);
+    expect((await call(`/api/admin/companies/${ID}`, { method: "POST", token: null, body })).status).toBe(401);
+    expect((await call(`/api/admin/companies/${ID}`, { method: "PATCH", body })).status).toBe(404);
+    expect((await call(`/api/admin/companies/${ID}`, { method: "DELETE" })).status).toBe(404);
+    expect((await call("/api/admin/companies/xyz", { method: "POST", body })).status).toBe(400);
   });
   it("las respuestas no se guardan en caché", async () => {
     expect((await call("/api/admin/health")).headers.get("cache-control")).toBe("no-store");

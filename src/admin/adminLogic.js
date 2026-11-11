@@ -128,15 +128,18 @@ export const sortByPosition = (rows) => [...rows].sort((a, b) => (Number(a.posit
 const PHONE_RE = /^\+?[\d\s()-]{6,20}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export function validateCompanyEdit(f) {
+// Créditos vacío = "no cambiarlos" (value.credits = null): la mayoría de las companies ni tiene ese campo y no hay que escribirles un 0.
+// El teléfono solo se valida si lo cambiaste: uno ya guardado con formato raro no tiene que impedir editar el nombre.
+export function validateCompanyEdit(f, { currentPhone } = {}) {
   const errors = {};
   const name = String(f.name ?? "").trim();
   const phoneNumber = String(f.phoneNumber ?? "").trim();
   const rawCredits = typeof f.credits === "string" ? f.credits.trim() : f.credits;
-  const credits = Number(rawCredits);
+  const blankCredits = rawCredits === "" || rawCredits == null;
+  const credits = blankCredits ? null : Number(rawCredits);
   if (!name) errors.name = "El nombre es obligatorio.";
-  if (phoneNumber && !PHONE_RE.test(phoneNumber)) errors.phoneNumber = "El teléfono no es válido.";
-  if (rawCredits === "" || rawCredits == null || !Number.isFinite(credits) || credits < 0) errors.credits = "Los créditos deben ser un número igual o mayor a 0.";
+  if (phoneNumber && phoneNumber !== String(currentPhone ?? "").trim() && !PHONE_RE.test(phoneNumber)) errors.phoneNumber = "El teléfono no es válido.";
+  if (!blankCredits && (typeof rawCredits === "boolean" || !Number.isFinite(credits) || credits < 0)) errors.credits = "Los créditos deben ser un número igual o mayor a 0 (o dejalo vacío para no cambiarlos).";
   return { ok: Object.keys(errors).length === 0, errors, value: { name, phoneNumber, credits } };
 }
 
@@ -159,6 +162,7 @@ export const AUDIT_ACTIONS = {
   company_pause: "Pausó la company",
   company_activate: "Activó la company",
   company_status_failed: "Intentó cambiar el estado de la company (no se guardó)",
+  company_edit_failed: "Intentó editar la company (no se guardó)",
   plan_assign_started: "Inició un cambio de plan (cobra)",
   plan_assign_unknown: "Cambio de plan sin confirmar (revisar Stripe)",
   plan_assign: "Asignó un plan (cobró)",

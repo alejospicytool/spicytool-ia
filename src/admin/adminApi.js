@@ -145,13 +145,15 @@ export async function listAudit({ companyId = null, limit = 50, actions = null }
 // ── Escritura (cada una deja una entrada en la auditoría) ─────────────────────────────────────────
 // PATCH /admin/companies/:id
 export async function updateCompany(companyId, fields, actor) {
-  readOnly();
+  if (real()) return http(`/companies/${companyId}`, {}, { method: "POST", body: fields }); // escribe solo lo que cambió; el actor sale de la sesión
   needActor(actor);
   const co = byId("companies", companyId) || fail("No se encontró la company.");
-  const v = validateCompanyEdit(fields);
+  const v = validateCompanyEdit(fields, { currentPhone: co.phoneNumber });
   if (!v.ok) fail(Object.values(v.errors)[0]);
-  const changes = diffFields(co, v.value, ["name", "phoneNumber", "credits"]);
-  Object.assign(co, v.value);
+  // créditos vacío = sin cambio
+  const keys = ["name", "phoneNumber", ...(v.value.credits !== null ? ["credits"] : [])];
+  const changes = diffFields(co, v.value, keys);
+  Object.assign(co, Object.fromEntries(keys.map((k) => [k, v.value[k]])));
   log(actor, "company_edit", { targetType: "company", targetId: companyId, targetLabel: co.name, companyId, detail: { changes } });
   return copy(co);
 }

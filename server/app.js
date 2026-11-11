@@ -1,5 +1,5 @@
 // API del backoffice. Casi todo es LECTURA. Escribe solo: el cambio de suscripción y el link de tarjeta (billing.js, vía los webhooks
-// de Spicytool) y pausar/activar una company (companies.js, un $set de status en Mongo). Cada pedido exige un admin autenticado; los errores nunca devuelven detalles internos.
+// de Spicytool) y pausar/activar/editar una company (companies.js, un $set en Mongo). Cada pedido exige un admin autenticado; los errores nunca devuelven detalles internos.
 // "queries" y "authenticate" se inyectan: así se prueba sin Mongo ni Supabase (app.test.js).
 import express from "express";
 
@@ -66,6 +66,13 @@ export function createApp({ queries, authenticate, billing, companies, audit, pr
   app.post("/api/admin/companies/:id/status", route(async (req, res) => {
     if (!needId(req, res)) return;
     const r = await companies.setStatus(req.admin, req.token, req.params.id, req.body && req.body.status);
+    res.status(r.status).json(r.body);
+  }));
+
+  // Editar nombre, teléfono y créditos de una company (solo los campos que cambiaron, con auditoría previa).
+  app.post("/api/admin/companies/:id", route(async (req, res) => {
+    if (!needId(req, res)) return;
+    const r = await companies.edit(req.admin, req.token, req.params.id, req.body);
     res.status(r.status).json(r.body);
   }));
 

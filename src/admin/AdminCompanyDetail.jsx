@@ -169,7 +169,7 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
           <div className="page-sub">{user.email} · {co.name} · Plan: {planLabel(planOf(user))}</div>
         </div>
         <div className="detail-actions">
-          <button className="btn-secondary" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => setDialog("company")}>Editar company</button>
+          <button className="btn-secondary" onClick={() => setDialog("company")}>Editar company</button>
           <button className="btn-secondary" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={() => setDialog("contact")}>Editar contacto</button>
           <button className="btn-secondary" onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
           <button className="btn-secondary" onClick={() => setDialog("card")}>Link de tarjeta</button>

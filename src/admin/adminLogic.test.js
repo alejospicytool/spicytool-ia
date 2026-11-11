@@ -182,9 +182,21 @@ describe("validaciones", () => {
     expect(validateCompanyEdit({ name: "", phoneNumber: "", credits: 1 }).errors.name).toBeTruthy();
     expect(validateCompanyEdit({ name: "x", phoneNumber: "", credits: -1 }).errors.credits).toBeTruthy();
     expect(validateCompanyEdit({ name: "x", phoneNumber: "", credits: "abc" }).errors.credits).toBeTruthy();
-    expect(validateCompanyEdit({ name: "x", phoneNumber: "", credits: "" }).errors.credits).toBeTruthy();
-    expect(validateCompanyEdit({ name: "x", phoneNumber: "", credits: null }).errors.credits).toBeTruthy();
+    expect(validateCompanyEdit({ name: "x", phoneNumber: "", credits: true }).errors.credits).toBeTruthy();
     expect(validateCompanyEdit({ name: "x", phoneNumber: "hola", credits: 1 }).errors.phoneNumber).toBeTruthy();
+  });
+  it("company: créditos vacío significa 'no cambiarlos' (null), no un error ni un 0", () => {
+    for (const credits of ["", "  ", null, undefined]) {
+      const r = validateCompanyEdit({ name: "x", phoneNumber: "", credits });
+      expect(r.ok).toBe(true);
+      expect(r.value.credits).toBeNull();
+    }
+    expect(validateCompanyEdit({ name: "x", phoneNumber: "", credits: "0" }).value.credits).toBe(0); // 0 sí es un valor
+  });
+  it("company: un teléfono ya guardado con formato raro no impide editar el nombre; uno nuevo se valida", () => {
+    expect(validateCompanyEdit({ name: "x", phoneNumber: "tel: 4444 ext.7", credits: "" }).errors.phoneNumber).toBeTruthy();
+    expect(validateCompanyEdit({ name: "x", phoneNumber: "tel: 4444 ext.7", credits: "" }, { currentPhone: "tel: 4444 ext.7" }).ok).toBe(true);
+    expect(validateCompanyEdit({ name: "x", phoneNumber: "otro raro", credits: "" }, { currentPhone: "tel: 4444 ext.7" }).errors.phoneNumber).toBeTruthy();
   });
   it("company: créditos 0 es válido, teléfono vacío también", () => {
     expect(validateCompanyEdit({ name: "x", phoneNumber: "", credits: 0 }).ok).toBe(true);
