@@ -64,7 +64,11 @@ export const CRM_CSS = `
 .crm-chips{list-style:none;padding:0;margin:6px 0 0;display:flex;gap:4px;flex-wrap:wrap}
 .crm-chip{font-size:10.5px;color:#555;background:#F4F4F6;border-radius:10px;padding:1px 8px;display:flex;align-items:center;gap:4px}.crm-chip i{width:6px;height:6px;border-radius:50%;display:inline-block}
 .crm-c-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px;font-size:11.5px;color:#666}
-.crm-next time{margin-left:6px;color:var(--ink);font-weight:600}.crm-next em{color:#bbb}
+.crm-next{display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-width:0}.crm-next time{margin-left:6px;color:var(--ink);font-weight:600}.crm-next em{color:#bbb;font-style:normal}
+.crm-whenb{display:inline-block;padding:1px 7px;border-radius:999px;background:#EFEFF2;color:var(--ink);font-weight:600;font-size:11.5px}.crm-whenb.today{background:#E8F0FE}.crm-whenb.late{background:#FDECEC;color:var(--red)}
+.crm-nt{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}.crm-nx{font-size:11px;color:var(--muted)}.crm-nx .crm-cal-ok{margin-left:6px;color:var(--green)}
+.crm-c-note{margin:8px 0 0;padding:6px 8px;border-radius:6px;background:var(--soft);font-size:12px;line-height:1.4;color:var(--ink)}.crm-c-note span{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.crm-arr-move{margin-top:6px;width:100%;font-size:12.5px;padding:4px 8px;color:var(--muted)}
 .crm-right{display:flex;align-items:center;gap:6px}
 .crm-who{width:22px;height:22px;border-radius:50%;background:#FEF0F0;color:var(--red);font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center}
 .crm-wa{color:#16A34A;display:flex}.crm-wa svg{width:16px;height:16px}

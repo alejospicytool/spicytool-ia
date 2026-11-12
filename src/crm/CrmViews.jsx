@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { addMonths, fmtDate, initials, money, monthLabel, daysBetween, sum, ESTADOS, EST_NEXT, EST_LATE, KINDS_STAGE, TKINDS, TTIPO } from "./crmLogic.js";
+import { addMonths, fmtDate, initials, money, monthLabel, daysBetween, sum, ESTADOS, EST_NEXT, EST_TO, EST_LATE, KINDS_STAGE, TKINDS, TTIPO } from "./crmLogic.js";
 import * as A from "./crmActions.js";
 import { callAi } from "./crmAi.js";
 import { WA_ICON, md } from "./crmUi.jsx";
@@ -78,7 +78,7 @@ export function HoyView({ crm, commit, open }) {
         <Card title="Para hacer hoy" n={h.todo.length} rows={h.todo.map(taskR)} empty="Nada pendiente para hoy." late={h.todo.some((x) => x.fecha < crm.today)} />
         <Card title="Deals frenados" n={h.frenados.length} rows={h.frenados.map((d) => dealR(d, crm.daysIn(d) + " días en " + crm.stageById(d.stage).name + (d.proxima ? ". Próximo: " + d.proxima : ". Sin próximo paso"), { wa: crm.waLink(d), late: true }))} empty="Ningún deal pasó su límite de días." late />
         <Card title="Firmados sin pagar" n={h.unpaid.length} late={h.unpaid.some((d) => daysBetween(d.estadoDesde || d.cerradoEn || crm.today, crm.today) >= EST_LATE.pago)}
-          rows={h.unpaid.map((d) => { const n = daysBetween(d.estadoDesde || d.cerradoEn || crm.today, crm.today); return dealR(d, (crm.hasPromo(d) ? crm.promoTxt(d) + " → " + money(d.mrr) : money(d.mrr)) + "/mes", { when: n === 0 ? "Desde hoy" : "Hace " + n + (n === 1 ? " día" : " días"), late: n >= EST_LATE.pago, wa: crm.waCustom(d, crm.fillTpl(d, (S.config.waTemplates || {})["Recordatorio de pago"])) }); })} empty="Todos los firmados ya pagaron." />
+          rows={h.unpaid.map((d) => { const n = daysBetween(d.estadoDesde || d.cerradoEn || crm.today, crm.today); return dealR(d, (crm.hasPromo(d) ? crm.promoTxt(d) + " → " + money(d.mrr) : money(d.mrr)) + "/mes" + (d.estado === "nopago" ? ", ya en onboarding" : d.estado === "agendado" ? ", onboarding agendado" : ""), { when: n === 0 ? "Desde hoy" : "Hace " + n + (n === 1 ? " día" : " días"), late: n >= EST_LATE.pago, wa: crm.waCustom(d, crm.fillTpl(d, (S.config.waTemplates || {})["Recordatorio de pago"])) }); })} empty="Todos los firmados ya pagaron." />
         <Card title="Clientes: arranque y hitos" n={h.hitos.length} rows={h.hitos.map((x) => dealR(x.d, x.t, { wa: crm.waLink(x.d) }))} empty="Sin onboardings ni hitos este mes." />
       </div>
     </>
@@ -105,9 +105,16 @@ function DealCard({ crm, d, onOpen, commit, onDragStart }) {
       {st.kind === "won" && <span className={"crm-pill" + ((d.estado || "activo") === "pago" ? " warn" : (d.estado || "activo") === "activo" ? " ok" : "")}>{crm.estLabel(d.estado)}</span>}
       {st.kind === "lost" && d.motivo && <p className="crm-c-lost">{d.motivo}</p>}
       {shown.length > 0 && <ul className="crm-chips">{shown.map((t) => <li key={t.id} className="crm-chip"><i style={{ background: t.color }} />{t.name}</li>)}{tags.length > 3 && <li className="crm-chip">+{tags.length - 3}</li>}</ul>}
+      {d.notas && d.notas.trim() && <p className="crm-c-note" title={d.notas.trim()}><span>{d.notas.trim()}</span></p>}
       {st.kind === "open" && <p className="crm-c-days">{dn === 0 ? "Entró hoy a " + st.name : dn + (dn === 1 ? " día" : " días") + " en " + st.name}{rl === "red" ? ", frenado" : ""}</p>}
       <footer className="crm-c-foot">
-        <span className="crm-next">{d.proxima ? <>{d.proximaTipo === "reunion" ? "Reunión: " : ""}{d.proxima}{d.proximaFecha && <time>{fmtDate(d.proximaFecha)}{d.proximaHora ? " " + d.proximaHora : ""}</time>}</> : <em>Sin próxima acción</em>}</span>
+        <span className="crm-next">{(() => {
+          const ni = crm.nextItem(d), n = ni.first;
+          if (!n) return <em>Sin próxima acción</em>;
+          return (<><b className={"crm-whenb" + (n.fecha && n.fecha < crm.today ? " late" : n.fecha === crm.today ? " today" : "")}>{crm.fmtWhen(n.fecha, n.hora)}</b>
+            <span className="crm-nt">{n.tipo === "reunion" ? "Reunión: " : ""}{n.titulo}</span>
+            {(ni.count > 1 || n.cal) && <span className="crm-nx">{ni.count > 1 ? "+" + (ni.count - 1) + (ni.count === 2 ? " tarea" : " tareas") : ""}{n.cal && <span className="crm-cal-ok" title="Agendado en Google Calendar">✓ Calendar</span>}</span>}</>);
+        })()}</span>
         <span className="crm-right">
           {wa && <a className="crm-wa" href={wa} target="_blank" rel="noopener" title="WhatsApp" aria-label={"Abrir WhatsApp con " + d.empresa} onClick={(e) => { e.stopPropagation(); logWa(commit, d.id, d.proxima || "mensaje general"); }}>{WA_ICON}</a>}
           <span className="crm-who" title={d.vendedor}>{initials(d.vendedor)}</span>
@@ -136,7 +143,7 @@ export function PipelineView({ crm, view, setView, commit, open, toast, setTab }
   const flag = (k, l, n, cls) => <button className={"crm-flag " + (cls || "")} aria-pressed={view.flag === k} onClick={() => setView({ flag: view.flag === k ? "" : k })}>{l}<b>{n}</b></button>;
   const groups = []; c.tags.forEach((t) => { if (groups.indexOf(t.group) < 0) groups.push(t.group); });
   const dc = crm.dueCounts();
-  const sort = (a, b) => { const x = a.proximaFecha || "9999", y = b.proximaFecha || "9999"; return x < y ? -1 : x > y ? 1 : (b.mrr || 0) - (a.mrr || 0); };
+  const sort = (a, b) => { const x = crm.dealKey(a), y = crm.dealKey(b); return x < y ? -1 : x > y ? 1 : (b.mrr || 0) - (a.mrr || 0); };
 
   function drop(stageId) {
     const id = dragId.current; dragId.current = null; setOverCol(null);
@@ -232,7 +239,7 @@ export function ClientsView({ crm, commit, open }) {
     });
     if (res && res.estado && res.estado.askOnboarding) open.task(null, id, { titulo: "Onboarding", tipo: "reunion", fecha: crm.isoPlus(1), hora: "10:00" });
   };
-  const nextEstado = (id) => { const d = crm.dealById(id); const ix = ESTADOS.findIndex((x) => x[0] === (d.estado || "pago")); setField(id, "estado", ESTADOS[Math.min(ESTADOS.length - 1, ix + 1)][0]); };
+  const nextEstado = (id) => { const d = crm.dealById(id); setField(id, "estado", EST_TO[d.estado || "pago"] || "activo"); };
   const cm = cd.cm;
   const gr = {}; gone.forEach((d) => { const k = d.bajaMotivo || "Sin motivo"; gr[k] = (gr[k] || 0) + 1; });
   const rows = act.map((d) => { const p = crm.priceAt(d, cm); return [
@@ -254,15 +261,17 @@ export function ClientsView({ crm, commit, open }) {
         <Kpi label="Bajas últimos 3 meses" value={b90.length} sub={(b90.length ? "−" + money(sum(b90, (d) => +d.mrr || 0)) + " de MRR" : "Sin bajas") + (renov.length ? ". " + renov.length + " renuevan en 60 días" : "")} />
       </div>
       <section className="crm-panel"><h2>Arranque de clientes</h2>
-        <p className="crm-note">Clientes que dijeron que sí y todavía no están activos. Se marcan en rojo si llevan demasiado en el paso: más de {EST_LATE.pago} días esperando pago, {EST_LATE.agendado} con el onboarding agendado o {EST_LATE.onboarding} en onboarding. Cuando pasan a Agendado, te propone agendar la reunión de onboarding.</p>
-        <div className="crm-arr">{ESTADOS.slice(0, 3).map((e) => { const ds = arr.filter((d) => (d.estado || "pago") === e[0]); return (
+        <p className="crm-note">Clientes que dijeron que sí y todavía no están activos. Onboarding agendado es el paso previo: tiene fecha de onboarding, pero no empezó ni se da por pagado. Solo En onboarding cuenta como cobrado. Se marcan en rojo si llevan demasiado en el paso: más de {EST_LATE.pago} días sin pagar, {EST_LATE.agendado} con el onboarding agendado o {EST_LATE.onboarding} en onboarding. Cuando pasan a Onboarding agendado, te propone agendar la reunión.</p>
+        <div className="crm-arr">{ESTADOS.slice(0, 4).map((e) => { const ds = arr.filter((d) => (d.estado || "pago") === e[0]); return (
           <div key={e[0]} className="crm-arr-col"><h3><span>{e[1]}</span><span>{ds.length}</span></h3>
             {ds.length ? ds.map((d) => { const n = daysBetween(d.estadoDesde || d.cerradoEn || crm.today, crm.today), late = n >= EST_LATE[e[0]];
               const ob = crm.tasks().filter((t) => t.dealId === d.id && !t.hecha).sort((a, b) => ((a.fecha + a.hora) < (b.fecha + b.hora) ? -1 : 1))[0];
               return (<div key={d.id} className={"crm-arr-card" + (late ? " late" : "")}><button className="crm-lnk" style={{ fontSize: 13, fontWeight: 600 }} onClick={() => open.deal(d.id)}>{d.empresa}</button>
                 <p>{crm.hasPromo(d) ? crm.promoTxt(d) + " → " + money(d.mrr) : money(d.mrr)}/mes</p><p>{n === 0 ? "Desde hoy" : "Hace " + n + (n === 1 ? " día" : " días")}{late ? ", demorado" : ""}</p>
                 {ob ? <p>{ob.titulo}: {crm.fmtDay(ob.fecha)} {ob.hora || ""}</p> : d.proxima ? <p>{d.proxima}{d.proximaFecha ? ": " + crm.fmtDay(d.proximaFecha) : ""}</p> : null}
-                <button className="crm-btn sm" onClick={() => nextEstado(d.id)}>{EST_NEXT[e[0]]}</button></div>); }) : <p className="crm-arr-empty">Nadie acá</p>}
+                <button className="crm-btn sm" onClick={() => nextEstado(d.id)}>{EST_NEXT[e[0]]}</button>
+                <select className="crm-arr-move" aria-label="Mover a otro estado" value={e[0]} onChange={(ev) => setField(d.id, "estado", ev.target.value)}>
+                  <option value={e[0]}>Mover a…</option>{ESTADOS.filter((x) => x[0] !== e[0]).map((x) => <option key={x[0]} value={x[0]}>{x[1]}</option>)}</select></div>); }) : <p className="crm-arr-empty">Nadie acá</p>}
           </div>); })}</div>
       </section>
       <section className="crm-panel"><h2>Cartera activa</h2><p className="crm-note">Ordenada por MRR. Próximo hito muestra lo que viene primero: fin de promo, renovación anual o inicio de cobro.</p>

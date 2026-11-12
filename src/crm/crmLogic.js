@@ -5,9 +5,12 @@
 import { baDateISO } from "../timeTracking.js";
 
 export const MES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
-export const ESTADOS = [["pago", "Esperando pago"], ["agendado", "Onboarding agendado"], ["onboarding", "En onboarding"], ["activo", "Activo"]];
-export const EST_NEXT = { pago: "Pagó, agendar onboarding", agendado: "Empezó el onboarding", onboarding: "Terminó, pasa a activo" };
-export const EST_LATE = { pago: 7, agendado: 10, onboarding: 21 };
+// Arranque de un cliente ganado. "Solo En onboarding cuenta como cobrado": mientras esté en pago / agendado / nopago, su MRR no se suma a la cartera.
+export const ESTADOS = [["pago", "Esperando pago"], ["agendado", "Onboarding agendado"], ["nopago", "En onboarding sin pagar"], ["onboarding", "En onboarding"], ["activo", "Activo"]];
+export const EST_NEXT = { pago: "Agendar onboarding", agendado: "Empezó el onboarding", nopago: "Ya pagó", onboarding: "Terminó, pasa a activo" };
+export const EST_TO = { pago: "agendado", agendado: "nopago", nopago: "onboarding", onboarding: "activo" };
+export const EST_LATE = { pago: 7, nopago: 7, agendado: 10, onboarding: 21 };
+export const isUnpaid = (d) => d.estado === "pago" || d.estado === "agendado" || d.estado === "nopago";
 export const Q_DEC = [["si", "Sí, habló con quien decide"], ["influye", "Influye, decide otro"], ["nose", "No sabemos"]];
 export const Q_TIM = [["ya", "Ya, este mes"], ["1-3", "En 1 a 3 meses"], ["mas", "En más de 3 meses"], ["nose", "No sabe"]];
 export const TTIPO = { tarea: ["Tarea", 15], followup: ["Follow-up", 15], reunion: ["Reunión", 30] };
@@ -49,7 +52,22 @@ export function createCrm(S, opts = {}) {
   const prob = (d) => { const s = stageById(d.stage); return s ? s.prob : 0; };
   const weighted = (d) => (+d.mrr || 0) * prob(d) / 100;
   const isOpen = (d) => { const s = stageById(d.stage); return !!s && s.kind === "open"; };
-  const overdue = (d) => !!d.proximaFecha && d.proximaFecha < today && isOpen(d);
+  // Lo próximo que hay que hacer en un deal: su "próxima acción" o la más cercana de sus tareas pendientes.
+  const nextItem = (d) => {
+    const c = [];
+    if (d.proxima) c.push({ titulo: d.proxima, fecha: d.proximaFecha || "", hora: d.proximaFecha ? (d.proximaHora || "") : "", tipo: d.proximaTipo === "reunion" ? "reunion" : "followup", cal: !!d.calEventId });
+    tasks().forEach((t) => { if (t.dealId === d.id && !t.hecha) c.push({ titulo: t.titulo, fecha: t.fecha || "", hora: t.hora || "", tipo: t.tipo || "tarea", cal: !!t.calEventId }); });
+    c.sort((a, b) => { const x = (a.fecha || "9999") + (a.hora || ""), y = (b.fecha || "9999") + (b.hora || ""); return x < y ? -1 : x > y ? 1 : 0; });
+    return { first: c[0] || null, count: c.length };
+  };
+  const DIA = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
+  const fmtWhen = (f, hr) => {
+    if (!f) return "Sin fecha";
+    const l = f === today ? "Hoy" : f === isoPlus(1) ? "Mañana" : DIA[new Date(f + "T12:00:00").getDay()] + " " + fmtDate(f);
+    return l + (hr ? " " + hr : "");
+  };
+  const overdue = (d) => { if (!isOpen(d)) return false; const n = nextItem(d).first; return !!(n && n.fecha && n.fecha < today); };
+  const dealKey = (d) => { const n = nextItem(d).first; return n ? (n.fecha || "9998") + (n.hora || "") : "9999"; };
   const hasPromo = (d) => { const pm = +d.promoMeses || 0, pp = +d.promoMrr || 0; return pm > 0 && pp >= 0 && pp < (+d.mrr || 0); };
   const promoTxt = (d) => (+d.promoMrr > 0 ? money(d.promoMrr) : "Gratis");
   const daysIn = (d) => Math.max(0, daysBetween(d.stageSince || today, today));
@@ -140,7 +158,7 @@ export function createCrm(S, opts = {}) {
         const r = row(cm);
         if (r) {
           const v = (ramp ? +d.promoMrr : full) * w;
-          if (s.kind === "won" && d.estado !== "pago") r.won += v;
+          if (s.kind === "won" && !isUnpaid(d)) r.won += v;
           else if (s.kind === "won" || s.prob >= 80) r.commit += v;
           else if (s.prob >= 40) r.best += v;
           else r.pipe += v;
@@ -281,7 +299,7 @@ export function createCrm(S, opts = {}) {
     const demos = items.filter((x) => kindOf(x) === "demo" && !ag(x) && (x.fecha === today || x.fecha === tm));
     const todo = items.filter((x) => x.fecha <= today && demos.indexOf(x) < 0);
     const frenados = S.deals.filter((d) => rotLevel(d) === "red").sort((a, b) => daysIn(b) - daysIn(a));
-    const unpaid = S.deals.filter((d) => isActiveClient(d) && d.estado === "pago");
+    const unpaid = S.deals.filter((d) => isActiveClient(d) && isUnpaid(d));
     const hitos = [];
     S.deals.filter(isActiveClient).forEach((d) => {
       if (d.estado === "agendado" || d.estado === "onboarding") hitos.push({ d, t: estLabel(d.estado) });
@@ -299,7 +317,7 @@ export function createCrm(S, opts = {}) {
     const cm = curMonth(), cl = S.deals.filter(isClient), all = cl.filter(isActiveClient);
     const act = all.filter((d) => (d.estado || "activo") === "activo").sort((a, b) => priceAt(b, cm) - priceAt(a, cm));
     const arr = all.filter((d) => (d.estado || "activo") !== "activo"), gone = cl.filter((d) => !isActiveClient(d));
-    const paying = all.filter((d) => d.estado !== "pago"), unpaid = all.filter((d) => d.estado === "pago");
+    const paying = all.filter((d) => !isUnpaid(d)), unpaid = all.filter(isUnpaid);
     const mrrHoy = sum(paying, (d) => priceAt(d, cm)), real = +cfg().mrrActual || 0;
     const ups = all.filter((d) => { if (!hasPromo(d)) return false; const st = addMonths(d.cierre, +d.promoMeses); return st > cm && st <= addMonths(cm, 3); });
     const renov = all.filter((d) => { const r = renewal(d); return r && r <= addMonths(cm, 2); });
@@ -366,7 +384,7 @@ export function createCrm(S, opts = {}) {
         if (tg.length) o.etiquetas = tg;
         if (d.motivo) o.motivoPerdida = d.motivo + (d.motivoDetalle ? " (" + d.motivoDetalle + ")" : "");
         if (s.kind === "won") {
-          o.cliente = { estado: estLabel(d.estado), mrrHoy: d.estado === "pago" ? 0 : priceAt(d, cm), cobro: d.cobro, salud: d.salud, proximoHito: nextMilestone(d), ultimoContacto: lastContact(d) };
+          o.cliente = { estado: estLabel(d.estado), mrrHoy: isUnpaid(d) ? 0 : priceAt(d, cm), cobro: d.cobro, salud: d.salud, proximoHito: nextMilestone(d), ultimoContacto: lastContact(d) };
           if (d.bajaMes) o.cliente.baja = { desde: d.bajaMes, motivo: d.bajaMotivo };
         }
         if (califFilled(d)) o.calificacionDemo = califTxt(d);
@@ -397,7 +415,7 @@ export function createCrm(S, opts = {}) {
   const pasteTagIds = (names) => (names || []).map((n) => { const t = cfg().tags.find((x) => x.name.toLowerCase() === String(n).toLowerCase()); return t ? t.id : null; }).filter(Boolean);
 
   return {
-    S, now, today, curMonth, iso, isoPlus, dealById, tasks, stageById, tagById, prob, weighted, isOpen, overdue, hasPromo, promoTxt, daysIn, rotLevel,
+    S, now, today, curMonth, iso, isoPlus, dealById, tasks, stageById, tagById, prob, weighted, isOpen, overdue, nextItem, fmtWhen, dealKey, hasPromo, promoTxt, daysIn, rotLevel,
     priceAt, isClient, isActiveClient, estLabel, renewal, nextMilestone, lastContact, califScore, califFilled, califTxt, califState,
     fmtStampDate, fillTpl, waMsg, waCustom, waLink, forecastRows, chartSvg, groupBy, forecastData, convStats, kindOf, taskItems, dueCounts, fmtDay, nextDays,
     taskGroups, hoyData, clientsData, weeklyText, aiData, dealAiInfo, pasteContext, pasteMatch, pasteTagIds,

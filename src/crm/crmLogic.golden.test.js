@@ -6,7 +6,7 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import { createHash } from "node:crypto";
-import { createCrm, money, ESTADOS } from "./crmLogic.js";
+import { createCrm, money, ESTADOS, isUnpaid } from "./crmLogic.js";
 
 const FILE = "_import/crm-datos.json";
 const has = fs.existsSync(FILE);
@@ -63,7 +63,8 @@ describe.skipIf(!has)("CRM: coincide con el HTML original (datos reales, 10/11/2
   it("Pipeline: deals por columna y atajos", () => {
     const by = (id) => S.deals.filter((d) => d.stage === id).length;
     expect(["lead", "demo_ag", "prop", "nego", "won", "noshow", "lost"].map(by)).toEqual([9, 4, 6, 0, 8, 0, 2]);
-    expect(S.deals.filter(crm.overdue)).toHaveLength(5);
+    // Antes 5. Desde la versión del 10/11 del artefacto, "vencido" mira la próxima acción O la tarea pendiente más cercana del deal.
+    expect(S.deals.filter(crm.overdue)).toHaveLength(12);
     expect(S.deals.filter((d) => crm.isOpen(d) && !d.proxima)).toHaveLength(2);
     expect(S.deals.filter((d) => crm.rotLevel(d) === "red")).toHaveLength(13);
   });
@@ -80,7 +81,7 @@ describe.skipIf(!has)("CRM: coincide con el HTML original (datos reales, 10/11/2
     expect(c.b90).toHaveLength(0);
     expect(crm.nextMilestone(crm.dealById("dmvufl763"))).toBe("Renueva en nov 27");
     expect(crm.lastContact(crm.dealById("dmvufl763"))).toBe("Hace 9 días");
-    const arr = ESTADOS.slice(0, 3).map((e) => c.arr.filter((d) => (d.estado || "pago") === e[0]).map((d) => d.empresa).join(",")).join("\n");
+    const arr = ["pago", "agendado", "onboarding"].map((id) => c.arr.filter((d) => (d.estado || "pago") === id).map((d) => d.empresa).join(",")).join("\n");
     expect(sha(arr)).toBe("099fd859839629b2");
   });
 
@@ -107,5 +108,41 @@ describe.skipIf(!has)("CRM: coincide con el HTML original (datos reales, 10/11/2
 
   it("Texto del lunes para WhatsApp: idéntico al original (huella)", () => {
     expect(sha(crm.weeklyText())).toBe("6a28cd2afe3eb9a4");
+  });
+});
+
+// ── Versión del 10/11 del artefacto (la que está en vivo): nuevo estado "En onboarding sin pagar" ──
+// Los números salen de la captura del artefacto real, jueves 12/11/2026 18:09 hora Argentina.
+const FILE2 = "_import/crm-datos-10nov.json";
+const has2 = fs.existsSync(FILE2);
+describe.skipIf(!has2)("CRM: coincide con el artefacto en vivo (datos del 10/11, leídos el 12/11/2026 18:09)", () => {
+  const S = has2 ? JSON.parse(fs.readFileSync(FILE2, "utf8")) : null;
+  const crm = has2 ? createCrm(S, { now: new Date("2026-11-12T21:09:00Z") }) : null;
+
+  it("tiene 40 deals y 38 tareas", () => {
+    expect(S.deals).toHaveLength(40);
+    expect(S.tasks).toHaveLength(38);
+  });
+
+  it("Clientes: KPIs y columnas de arranque", () => {
+    const c = crm.clientsData();
+    expect(c.act).toHaveLength(1);
+    expect(c.arr).toHaveLength(10);
+    expect(money(c.mrrHoy)).toBe("USD 100");
+    expect(money(c.unpaid.reduce((t, d) => t + (crm.hasPromo(d) ? +d.promoMrr : +d.mrr), 0))).toBe("USD 1.530");
+    expect(money(c.ups.reduce((t, d) => t + (+d.mrr - +d.promoMrr), 0))).toBe("USD 580");
+    expect(c.ups).toHaveLength(5);
+    expect(c.b90).toHaveLength(0);
+    expect(ESTADOS.slice(0, 4).map((e) => c.arr.filter((d) => (d.estado || "pago") === e[0]).length)).toEqual([2, 1, 7, 0]);
+  });
+
+  it("Tareas: el contador del encabezado", () => {
+    const dc = crm.dueCounts();
+    expect(dc.v + dc.h).toBe(9);
+  });
+
+  it("solo En onboarding (y Activo) cuenta como cobrado", () => {
+    expect(["pago", "agendado", "nopago"].every((e) => isUnpaid({ estado: e }))).toBe(true);
+    expect(["onboarding", "activo", undefined].some((e) => isUnpaid({ estado: e }))).toBe(false);
   });
 });
