@@ -9,12 +9,12 @@ const TOKEN = "jwt-del-admin";
 const PRICE = "price_1UTMSrJdCZldzCmGg8bgtWwm";
 const KEY = "ticket-4821-abc";
 
-const setup = ({ user = { _id: UID, email: "Cliente@Ejemplo.test", name: "Ana", surname: "Paz", companies: ["6650000000000000000000c1"] }, assign, cardLink, auditFails = null, allowedEmails = [], maxPerMinute, now } = {}) => {
+const setup = ({ user = { _id: UID, email: "Cliente@Ejemplo.test", name: "Ana", surname: "Paz", companies: ["6650000000000000000000c1"] }, assign, cardLink, auditFails = null, allowedEmails = [], maxPerMinute, now, coupons = [], couponsEnabled = false } = {}) => {
   const records = [];
   const audit = { record: vi.fn(async (token, e) => { if (auditFails && auditFails(e)) throw new Error("audit down"); records.push({ token, ...e }); }) };
-  const webhook = { assign: vi.fn(assign || (async () => ({ ok: true, status: 201, body: { message: "ok", userEmail: "Cliente@Ejemplo.test", plan: "SpicyPro", previousPlan: "Freemium", stripePriceId: PRICE, stripeSubscriptionId: "sub_1", oldSubscriptionCancelled: true, billingFailures: [] } }))), cardLink: vi.fn(cardLink || (async () => ({ ok: true, status: 200, body: { userEmail: "x", stripeCustomerId: "cus_1", paymentMethodUpdateUrl: "https://billing.stripe.com/p/session/a" } }))) };
+  const webhook = { couponsEnabled, assign: vi.fn(assign || (async () => ({ ok: true, status: 201, body: { message: "ok", userEmail: "Cliente@Ejemplo.test", plan: "SpicyPro", previousPlan: "Freemium", stripePriceId: PRICE, stripeSubscriptionId: "sub_1", oldSubscriptionCancelled: true, billingFailures: [] } }))), cardLink: vi.fn(cardLink || (async () => ({ ok: true, status: 200, body: { userEmail: "x", stripeCustomerId: "cus_1", paymentMethodUpdateUrl: "https://billing.stripe.com/p/session/a" } }))) };
   const log = vi.fn();
-  const billing = makeBilling({ getUser: async (id) => (id === UID ? user : null), webhook, audit, allowedEmails, log, ...(maxPerMinute ? { maxPerMinute } : {}), ...(now ? { now } : {}) });
+  const billing = makeBilling({ getUser: async (id) => (id === UID ? user : null), webhook, audit, allowedEmails, coupons, log, ...(maxPerMinute ? { maxPerMinute } : {}), ...(now ? { now } : {}) });
   return { billing, webhook, audit, records, log };
 };
 const input = { plan: "SpicyPro", stripePriceId: PRICE, idempotencyKey: KEY };
@@ -148,5 +148,46 @@ describe("link de tarjeta (no cobra)", () => {
     expect((await b.billing.paymentMethodUrl(ADMIN, TOKEN, UID)).status).toBe(502);
     expect(a.audit.record).not.toHaveBeenCalled();
     expect(b.audit.record).not.toHaveBeenCalled();
+  });
+});
+
+const CUPON = { id: "START-10-3M", label: "10% por 3 meses", percentOff: 10, duration: "repeating", months: 3 };
+
+describe("cupones al asignar plan", () => {
+  it("cupón de la lista con el servidor habilitado: se manda al webhook y queda en la auditoría", async () => {
+    const { billing, webhook, records } = setup({ coupons: [CUPON], couponsEnabled: true });
+    const r = await billing.assignPlan(ADMIN, TOKEN, UID, { ...input, couponId: "START-10-3M" });
+    expect(r.status).toBe(201);
+    expect(webhook.assign).toHaveBeenCalledWith({ email: "Cliente@Ejemplo.test", plan: "SpicyPro", stripePriceId: PRICE, idempotencyKey: KEY, couponId: "START-10-3M" });
+    expect(records.map((x) => x.action)).toEqual(["plan_assign_started", "plan_assign"]);
+    expect(records[0].detail).toMatchObject({ couponId: "START-10-3M", couponLabel: "10% por 3 meses" });
+    expect(records[1].detail).toMatchObject({ couponId: "START-10-3M", couponLabel: "10% por 3 meses" });
+  });
+  it("un cupón que NO está en la lista se rechaza (400) sin auditar ni cobrar, aunque exista en Stripe", async () => {
+    const { billing, webhook, audit } = setup({ coupons: [CUPON], couponsEnabled: true });
+    const r = await billing.assignPlan(ADMIN, TOKEN, UID, { ...input, couponId: "OTRO-90-OFF" });
+    expect(r.status).toBe(400);
+    expect(r.body.code).toBe("CUPON_INVALIDO");
+    expect(webhook.assign).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+  it("si el servidor NO sabe mandar cupones, un pedido con cupón se rechaza (501) sin auditar ni cobrar: nunca se cobra el precio completo por error", async () => {
+    const { billing, webhook, audit } = setup({ coupons: [CUPON], couponsEnabled: false });
+    const r = await billing.assignPlan(ADMIN, TOKEN, UID, { ...input, couponId: "START-10-3M" });
+    expect(r.status).toBe(501);
+    expect(r.body.code).toBe("CUPON_NO_SOPORTADO");
+    expect(webhook.assign).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+  it("sin cupón (o vacío) todo funciona como antes y no se manda ningún campo de cupón", async () => {
+    for (const couponId of [undefined, null, "", "  "]) {
+      const { billing, webhook } = setup({ coupons: [CUPON], couponsEnabled: true });
+      expect((await billing.assignPlan(ADMIN, TOKEN, UID, { ...input, couponId })).status).toBe(201);
+      expect(Object.keys(webhook.assign.mock.calls[0][0])).toEqual(["email", "plan", "stripePriceId", "idempotencyKey"]);
+    }
+  });
+  it("la lista de cupones que se ofrece está vacía mientras no estén habilitados", () => {
+    expect(setup({ coupons: [CUPON], couponsEnabled: false }).billing.couponList()).toEqual([]);
+    expect(setup({ coupons: [CUPON], couponsEnabled: true }).billing.couponList()).toEqual([CUPON]);
   });
 });

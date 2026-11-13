@@ -50,3 +50,35 @@ describe("cliente de los webhooks de back office", () => {
     expect(String(e.message) + JSON.stringify(e)).not.toContain("TOKEN_SECRETO");
   });
 });
+
+describe("cupones en el webhook", () => {
+  const base = { email: "a@b.test", plan: "SpicyStart", stripePriceId: "price_X1", idempotencyKey: "k-12345678" };
+  it("con el campo configurado, el cupón viaja en ese campo", async () => {
+    const f = reply(201, { message: "ok" });
+    const c = client(f, { couponField: "couponId" });
+    expect(c.couponsEnabled).toBe(true);
+    await c.assign({ ...base, couponId: "START-10-3M" });
+    expect(JSON.parse(f.mock.calls[0][1].body)).toEqual({ ...base, couponId: "START-10-3M" });
+  });
+  it("el nombre del campo es el que defina Spicytool", async () => {
+    const f = reply(201, {});
+    await client(f, { couponField: "promotionCodeId" }).assign({ ...base, couponId: "promo_1" });
+    expect(JSON.parse(f.mock.calls[0][1].body).promotionCodeId).toBe("promo_1");
+  });
+  it("SIN campo configurado: un pedido con cupón NO llama al webhook (si el campo se ignorara, se cobraría el precio completo)", async () => {
+    const f = reply(201, {});
+    const c = client(f);
+    expect(c.couponsEnabled).toBe(false);
+    const r = await c.assign({ ...base, couponId: "START-10-3M" });
+    expect(r).toMatchObject({ ok: false, status: 501, code: "CUPON_NO_SOPORTADO" });
+    expect(f).not.toHaveBeenCalled();
+  });
+  it("un nombre de campo inválido cuenta como no configurado", () => {
+    for (const bad of ["", "1abc", "co upon", "a-b", "x".repeat(60), "a;b"]) expect(client(reply(200, {}), { couponField: bad }).couponsEnabled).toBe(false);
+  });
+  it("sin cupón no cambia nada aunque el campo esté configurado", async () => {
+    const f = reply(201, {});
+    await client(f, { couponField: "couponId" }).assign(base);
+    expect(JSON.parse(f.mock.calls[0][1].body)).toEqual(base);
+  });
+});

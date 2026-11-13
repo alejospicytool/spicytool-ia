@@ -35,6 +35,8 @@ export const formatPrice = (amountCents, currency = "usd") => `${String(currency
 
 // Errores del webhook: título para el admin y qué hacer (según la tabla del doc).
 export const WEBHOOK_ERRORS = {
+  CUPON_INVALIDO: { title: "Ese cupón no está habilitado", action: "Elegí un cupón de la lista." },
+  CUPON_NO_SOPORTADO: { title: "Los cupones no están habilitados en el servidor", action: "No se hizo ningún cobro. Avisá a un desarrollador." },
   EMAIL_INVALIDO: { title: "El email no es válido", action: "Corregí el email del cliente." },
   USUARIO_NO_ENCONTRADO: { title: "No hay una cuenta con ese email", action: "Revisá el email con el que el cliente entra a la app." },
   PLAN_INVALIDO: { title: "Ese plan no es uno de los pagos", action: "Usá SpicyOne, SpicyStart, SpicyPro o SpicyProMax." },
@@ -245,4 +247,23 @@ export function waLink(phone) {
   if (digits.length > 15) return "";
   if (explicit ? digits.length < 8 : digits.length < 11) return "";
   return "https://wa.me/" + digits;
+}
+
+// ── Cupones ────────────────────────────────────────────────────────────────────────────────────────────
+// Qué se va a cobrar con un cupón aplicado a un precio de Stripe (amount en centavos). Es solo informativo para la confirmación: el
+// descuento real lo aplica Stripe. Devuelve null si no se puede calcular (por ejemplo, precio negociado que no está en la lista).
+export function couponSummary(price, coupon) {
+  if (!price || !coupon || !Number.isFinite(Number(price.amount))) return null;
+  const full = Number(price.amount);
+  let disc = full;
+  if (Number.isFinite(coupon.percentOff)) disc = full * (1 - coupon.percentOff / 100);
+  else if (Number.isFinite(coupon.amountOff)) disc = full - coupon.amountOff;
+  disc = Math.max(0, Math.round(disc));
+  const cur = price.currency || "usd", money = (c) => (c % 100 === 0 ? formatPrice(c, cur) : `${String(cur).toUpperCase()} ${(c / 100).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`); // con centavos siempre 2 decimales
+  const free = disc === 0;
+  let text;
+  if (coupon.duration === "forever") text = free ? "Gratis para siempre (no se le cobra nunca)" : `${money(disc)}/mes para siempre`;
+  else if (coupon.duration === "once" || (coupon.duration === "repeating" && coupon.months === 1)) text = `${free ? "Gratis" : money(disc)} el primer mes, después ${money(full)}/mes`;
+  else text = `${free ? "Gratis" : money(disc) + "/mes"} los primeros ${coupon.months} meses, después ${money(full)}/mes`;
+  return { discounted: disc, full, free, forever: coupon.duration === "forever", text };
 }

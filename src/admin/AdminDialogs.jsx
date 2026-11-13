@@ -2,9 +2,9 @@
 // Validan con adminLogic.js antes de enviar; el error del "servidor" se muestra dentro del diálogo.
 import { useRef, useState } from "react";
 import { Modal } from "../revenue/revenueUi.jsx";
-import { validateCompanyEdit, validateContactEdit, validatePlanAssignment, PAID_PLANS, planOf, planLabel, newIdempotencyKey, formatPrice, explainWebhookError, validateSupportReason, explainSupportError, expiryText, REASON_MIN, REASON_MAX, userFullName } from "./adminLogic.js";
+import { validateCompanyEdit, validateContactEdit, validatePlanAssignment, PAID_PLANS, planOf, planLabel, newIdempotencyKey, formatPrice, couponSummary, explainWebhookError, validateSupportReason, explainSupportError, expiryText, REASON_MIN, REASON_MAX, userFullName } from "./adminLogic.js";
 import { useAsync } from "./adminHooks.js";
-import { listPrices } from "./adminApi.js";
+import { listPrices, listCoupons } from "./adminApi.js";
 
 function useSubmit(validate, onSubmit, onClose) {
   const [errors, setErrors] = useState({}), [busy, setBusy] = useState(false), [error, setError] = useState("");
@@ -75,15 +75,18 @@ const LinkBox = ({ url }) => (
 // Para cobrar hay que escribir esta palabra: un gesto deliberado (no basta un clic) con el cliente y el monto a la vista.
 const CONFIRM_WORD = "COBRAR";
 export function AssignPlanDialog({ user, onSubmit, onClose, onDone }) {
-  const prices = useAsync(() => listPrices(), "prices");
+  const prices = useAsync(() => listPrices(), "prices"), coupons = useAsync(() => listCoupons(), "coupons");
   const current = planOf(user);
   const [step, setStep] = useState("form"), [plan, setPlan] = useState(PAID_PLANS.includes(current) ? current : "SpicyStart"), [priceId, setPriceId] = useState(""), [custom, setCustom] = useState(false), [manualPrice, setManualPrice] = useState("");
   const [typed, setTyped] = useState(""), [busy, setBusy] = useState(false), [errors, setErrors] = useState({}), [result, setResult] = useState(null);
-  const keys = useRef({}); // una clave por combinación plan+precio: reintentar la MISMA operación no cobra dos veces
+  const [couponId, setCouponId] = useState("");
+  const keys = useRef({}); // una clave por combinación plan+precio+cupón: reintentar la MISMA operación no cobra dos veces
   const list = prices.data || [];
   const forPlan = list.filter((p) => p.plan === plan);
   const effectivePrice = custom ? manualPrice.trim() : (priceId || (forPlan[0] && forPlan[0].id) || "");
   const known = list.find((p) => p.id === effectivePrice);
+  const couponList = coupons.data || [], coupon = couponList.find((c) => c.id === couponId) || null;
+  const summary = coupon && known ? couponSummary(known, coupon) : null; // qué se va a cobrar con el cupón (solo si el precio es uno de la lista)
   const wordTyped = typed.trim().toLowerCase() === CONFIRM_WORD.toLowerCase(); // escribir la palabra es la confirmación (sin distinguir mayúsculas)
 
   const finish = () => { if (result) onDone(); onClose(); }; // tras un intento (cobrado o no) se refresca el detalle y la auditoría
@@ -96,10 +99,10 @@ export function AssignPlanDialog({ user, onSubmit, onClose, onDone }) {
     if (Object.keys(errs).length === 0) { setTyped(""); setStep("confirm"); }
   }
   async function charge() {
-    const sig = plan + "|" + effectivePrice;
+    const sig = plan + "|" + effectivePrice + "|" + couponId;
     if (!keys.current[sig]) keys.current[sig] = newIdempotencyKey();
     setBusy(true);
-    try { setResult({ ok: true, data: await onSubmit({ plan, stripePriceId: effectivePrice, idempotencyKey: keys.current[sig] }) }); }
+    try { setResult({ ok: true, data: await onSubmit({ plan, stripePriceId: effectivePrice, idempotencyKey: keys.current[sig], couponId: couponId || undefined }) }); }
     catch (e) { setResult({ ok: false, code: e.code || "ERROR", message: e.message, extra: e.extra || {} }); }
     setBusy(false); setStep("result");
   }
@@ -121,6 +124,15 @@ export function AssignPlanDialog({ user, onSubmit, onClose, onDone }) {
         {errors.stripePriceId && <div className="err" role="alert">{errors.stripePriceId}</div>}
         <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6 }}>El mismo plan se puede vender a distintos precios (estándar, negociado, promoción).</div>
       </div>
+      {couponList.length > 0 && (
+        <div className="field"><label className="field-label">Cupón (opcional)</label>
+          <select className="inp" aria-label="Cupón" value={couponId} onChange={(e) => setCouponId(e.target.value)}>
+            <option value="">Sin cupón</option>
+            {couponList.map((c) => <option key={c.id} value={c.id}>{c.label} · {c.code}</option>)}
+          </select>
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6 }}>El descuento lo aplica Stripe sobre el precio elegido. Elegí el precio estándar: el cupón ya hace el descuento.</div>
+        </div>
+      )}
     </>);
     footer = <><button className="btn-secondary" onClick={finish}>Cancelar</button><button className="btn-primary" disabled={prices.loading} onClick={toConfirm}>Continuar</button></>;
   } else if (step === "confirm") {
@@ -128,8 +140,10 @@ export function AssignPlanDialog({ user, onSubmit, onClose, onDone }) {
       <dl className="kv" style={{ marginBottom: 14 }}>
         <div><dt>Cliente</dt><dd>{user.email}</dd></div><div><dt>Plan</dt><dd>{planLabel(current)} → <b>{plan}</b></dd></div>
         <div><dt>Precio</dt><dd>{known ? <><b>{formatPrice(known.amount, known.currency)}/mes</b> · {known.nickname}</> : "Monto según Stripe"}<div style={{ fontSize: 11, color: "var(--muted)" }}>{effectivePrice}</div></dd></div>
+        {coupon && <div><dt>Cupón</dt><dd><b>{coupon.label}</b> · {coupon.code}<div style={{ fontSize: 12, marginTop: 2 }}>{summary ? <>Se cobra: <b>{summary.text}</b></> : "El descuento lo aplica Stripe (no se puede calcular con un precio que no está en la lista)."}</div></dd></div>}
       </dl>
-      <div className="alert" style={{ background: "#FEF0F0", color: "#C42F2F", border: "1px solid #F8CACA" }}>Se cobra <b>ahora</b> a la tarjeta que el cliente ya tiene guardada en Stripe. Esto no se puede deshacer desde el backoffice.</div>
+      {summary && summary.free && <div className="alert" style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #FCE4A0", marginBottom: 12 }}><span>Con este cupón el cliente <b>no paga{summary.forever ? " nunca" : " ese período"}</b>. Confirmá que es lo que querés.</span></div>}
+      <div className="alert" style={{ background: "#FEF0F0", color: "#C42F2F", border: "1px solid #F8CACA" }}><span>{summary && summary.free ? "Se asigna el plan" : <>Se cobra <b>ahora</b></>} a la tarjeta que el cliente ya tiene guardada en Stripe. Esto no se puede deshacer desde el backoffice.</span></div>
       <div className="field" style={{ marginTop: 12 }}><label className="field-label">Para confirmar, escribí <b>{CONFIRM_WORD}</b> (se le cobra a {user.email})</label>
         <input className="inp" aria-label="Palabra de confirmación" autoComplete="off" placeholder={CONFIRM_WORD} value={typed} onChange={(e) => setTyped(e.target.value)} /></div>
     </>);
@@ -138,7 +152,7 @@ export function AssignPlanDialog({ user, onSubmit, onClose, onDone }) {
     const d = result.data, warn = !d.oldSubscriptionCancelled || (d.billingFailures || []).length > 0;
     body = (<>
       <div className="alert" style={{ background: "#EDFAF3", color: "#15803D", border: "1px solid #BFE8D0" }}>Listo: se cobró y <b>{d.userEmail}</b> pasó de {planLabel(d.previousPlan)} a <b>{d.plan}</b>.</div>
-      <dl className="kv"><div><dt>Suscripción nueva</dt><dd>{d.stripeSubscriptionId}</dd></div><div><dt>Precio</dt><dd>{d.stripePriceId}</dd></div></dl>
+      <dl className="kv"><div><dt>Suscripción nueva</dt><dd>{d.stripeSubscriptionId}</dd></div><div><dt>Precio</dt><dd>{d.stripePriceId}</dd></div>{coupon && <div><dt>Cupón</dt><dd>{coupon.label}</dd></div>}</dl>
       {!d.oldSubscriptionCancelled && <div className="alert" style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #FCE4A0", marginTop: 12 }}>La suscripción anterior <b>no se pudo cancelar</b>: cancelala a mano en Stripe.</div>}
       {(d.billingFailures || []).length > 0 && <div className="alert" style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #FCE4A0", marginTop: 12 }}>No se pudieron actualizar los créditos de {d.billingFailures.length} company(s).</div>}
       {d.auditWarning && <div className="alert" style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #FCE4A0", marginTop: 12 }}>El cobro salió bien, pero <b>no se pudo guardar el registro de auditoría</b>. Avisá a un desarrollador (queda en el log del servidor).</div>}

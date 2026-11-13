@@ -10,6 +10,7 @@ import { makeCompanyAdmin } from "./companies.js";
 import { makeUserAdmin } from "./users.js";
 import { makeWebhookClient } from "./webhooks.js";
 import { STANDARD_PRICES } from "./prices.js";
+import { COUPONS } from "./coupons.js";
 
 const uri = process.env.MONGODB_URI;
 if (!uri) { console.error("Falta MONGODB_URI en /etc/spicytool-backoffice.env"); process.exit(1); }
@@ -19,11 +20,14 @@ await client.connect();
 const db = client.db(process.env.MONGODB_DB || "spicytool");
 
 // Cobros (webhooks de Spicytool). Sin BACKOFFICE_WEBHOOK_TOKEN esas acciones responden "no configurado" y no hacen nada.
+// WEBHOOK_COUPON_FIELD (opcional): nombre del campo del webhook para el cupón. Por defecto "coupon" (confirmado por Jonathan); el valor es el id promo_… del cupón.
 // WEBHOOK_ALLOWED_EMAILS (opcional, separados por coma): si está, SOLO esos clientes se pueden tocar. Útil para la primera prueba real.
 const queries = makeQueries(db);
 const audit = makeAudit();
 const allowedEmails = String(process.env.WEBHOOK_ALLOWED_EMAILS || "").split(",").map((e) => e.trim()).filter(Boolean);
-const billing = makeBilling({ getUser: queries.getUser, audit, allowedEmails, webhook: makeWebhookClient({ token: process.env.BACKOFFICE_WEBHOOK_TOKEN, baseUrl: process.env.WEBHOOK_BASE_URL || "https://api.spicytool.net" }) });
+const webhookClient = makeWebhookClient({ token: process.env.BACKOFFICE_WEBHOOK_TOKEN, baseUrl: process.env.WEBHOOK_BASE_URL || "https://api.spicytool.net", couponField: process.env.WEBHOOK_COUPON_FIELD || "coupon" });
+const billing = makeBilling({ getUser: queries.getUser, audit, allowedEmails, coupons: COUPONS, webhook: webhookClient });
+console.log(`Cupones: ${webhookClient.couponsEnabled ? `habilitados (campo "${process.env.WEBHOOK_COUPON_FIELD || "coupon"}"), ${COUPONS.length} en la lista` : "NO habilitados"}`);
 console.log(`Cobros: ${process.env.BACKOFFICE_WEBHOOK_TOKEN ? "token cargado" : "SIN token (desactivados)"} · ${allowedEmails.length ? `solo ${allowedEmails.length} email(s) habilitado(s)` : "todos los clientes habilitados"}`);
 
 // Escrituras en Mongo (pausar/activar company). Si existe MONGODB_WRITE_URI se usa un usuario aparte, limitado a escribir;

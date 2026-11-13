@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { resetMock, listUsers, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, getPaymentMethodUrl, listPrices, WebhookError, getUser, listCompanies, listCompanyUsers, getMyPermissions, createSupportLink, listSupportLog, SupportError } from "./adminApi.js";
+import { resetMock, listUsers, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, listCoupons, getPaymentMethodUrl, listPrices, WebhookError, getUser, listCompanies, listCompanyUsers, getMyPermissions, createSupportLink, listSupportLog, SupportError } from "./adminApi.js";
 import { MOCK } from "./adminMock.js";
 
 const ACTOR = "admin@ejemplo.test";
@@ -444,5 +444,32 @@ describe("acciones: cambian los datos y dejan auditoría", () => {
     resetMock();
     expect((await getCompanyBundle(MOCK.companies[0]._id)).company.status).toBe(MOCK.companies[0].status);
     expect(await listAudit()).toHaveLength(0);
+  });
+});
+
+describe("cupones al asignar plan (simulado)", () => {
+  const START = "price_1MockStartStd0001";
+  it("lista de cupones de ejemplo", async () => {
+    const c = await listCoupons();
+    expect(c.length).toBeGreaterThan(0);
+    expect(c.every((x) => x.id && x.label && x.code)).toBe(true);
+  });
+  it("con cupón: se asigna el plan y la auditoría guarda cuál", async () => {
+    const [c] = await listCoupons();
+    const u = MOCK.users.find((x) => x.name === "Lucía");
+    await assignPlan(u._id, { plan: "SpicyStart", stripePriceId: START, couponId: c.id }, ACTOR);
+    const [a] = await listAudit();
+    expect(a).toMatchObject({ action: "plan_assign", detail: { couponId: c.id, couponLabel: c.label } });
+  });
+  it("un cupón que no está en la lista se rechaza y NO cambia el plan", async () => {
+    const u = MOCK.users.find((x) => x.name === "Lucía");
+    const antes = (await getUser(u._id)).subscription;
+    await expect(assignPlan(u._id, { plan: "SpicyStart", stripePriceId: START, couponId: "promo_inventado" }, ACTOR)).rejects.toMatchObject({ code: "CUPON_INVALIDO" });
+    expect((await getUser(u._id)).subscription).toEqual(antes);
+  });
+  it("sin cupón no aparece nada de cupón en la auditoría", async () => {
+    const u = MOCK.users.find((x) => x.name === "Lucía");
+    await assignPlan(u._id, { plan: "SpicyStart", stripePriceId: START }, ACTOR);
+    expect((await listAudit())[0].detail.couponId).toBeUndefined();
   });
 });

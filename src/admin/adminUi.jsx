@@ -165,9 +165,9 @@ export function ConfirmDialog({ title, children, confirmLabel = "Confirmar", dan
 const detailText = (a) => {
   const d = a.detail || {};
   if (Array.isArray(d.changes)) return d.changes.length ? d.changes.map((c) => `${c.key}: ${c.from ?? "—"} → ${c.to ?? "—"}`).join(" · ") : "Sin cambios de valores";
-  if (a.action === "plan_assign_started") return `${d.plan} · ${d.stripePriceId}`;
+  if (a.action === "plan_assign_started") return `${d.plan} · ${d.stripePriceId}${d.couponId ? " · cupón: " + (d.couponLabel || d.couponId) : ""}`;
   if (a.action === "plan_assign_unknown") return `${d.plan} · sin confirmar (${d.reason || "sin respuesta"}): revisar Stripe`;
-  if (a.action === "plan_assign") return `${d.previousPlan || "Sin plan"} → ${d.plan} · ${d.stripePriceId}`;
+  if (a.action === "plan_assign") return `${d.previousPlan || "Sin plan"} → ${d.plan} · ${d.stripePriceId}${d.couponId ? " · cupón: " + (d.couponLabel || d.couponId) : ""}`;
   if (a.action === "plan_assign_failed") return `${d.plan || "—"} · no se cobró (${d.code})`;
   if (a.action === "company_edit_failed" || a.action === "contact_edit_failed") return "No se guardó en la base";
   if (a.action === "company_status_failed") return `${d.from ?? "—"} → ${d.to}: no se guardó en la base`;

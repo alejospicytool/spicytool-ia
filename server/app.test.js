@@ -16,6 +16,7 @@ const ADMIN = { id: "u1", email: "nico@spicytool.test", level: "admin", canAct: 
 const READER = { id: "u2", email: "soporte@spicytool.test", level: "read", canAct: false };
 const authenticate = vi.fn(async (h) => (h === "Bearer admin" ? ADMIN : h === "Bearer reader" ? READER : null));
 const billing = {
+  couponList: vi.fn(() => [{ id: "START-10-3M", label: "10% por 3 meses" }]),
   assignPlan: vi.fn(async () => ({ status: 201, body: { message: "ok" } })),
   paymentMethodUrl: vi.fn(async () => ({ status: 200, body: { paymentMethodUpdateUrl: "https://billing.stripe.com/p/session/a" } })),
 };
@@ -183,5 +184,13 @@ describe("permisos: ver sin poder hacer cambios", () => {
     expect(await (await call("/api/admin/me", { token: "reader" })).json()).toEqual({ email: "soporte@spicytool.test", level: "read", canAct: false });
     expect(await (await call("/api/admin/me")).json()).toEqual({ email: "nico@spicytool.test", level: "admin", canAct: true });
     expect((await call("/api/admin/me", { token: null })).status).toBe(401);
+  });
+});
+
+describe("cupones", () => {
+  it("GET /coupons devuelve la lista que ofrece el servicio y exige sesión", async () => {
+    expect(await (await call("/api/admin/coupons")).json()).toEqual([{ id: "START-10-3M", label: "10% por 3 meses" }]);
+    expect((await call("/api/admin/coupons", { token: null })).status).toBe(401);
+    expect((await call("/api/admin/coupons", { token: "reader" })).status).toBe(200);
   });
 });

@@ -147,7 +147,14 @@ COMPANIES.forEach((co, ci) => {
   tx.forEach(([type, amount, description], i) => credit_transactions.push({ id: 1000 * co.n + i, company_id: companyId, amount, type, description, created_at: iso(`2026-0${3 + i}-1${i}T12:00:00Z`) }));
 });
 
+// Cupones de EJEMPLO (ids inventados; los reales están en server/coupons.js).
+export const coupons = [
+  { id: "promo_MockQuarter1m000000000", code: "MOCK25A", label: "25% por 1 mes", percentOff: 25, duration: "repeating", months: 1 },
+  { id: "promo_MockHalf2m0000000000000", code: "MOCK50B", label: "50% por 2 meses", percentOff: 50, duration: "repeating", months: 2 },
+  { id: "promo_MockFreeForever00000000", code: "MOCK100", label: "100% ilimitado (gratis para siempre)", percentOff: 100, duration: "forever" },
+];
+
 export const MOCK = {
   users, companies, contacts, campaigns, landings, companyconversions, whatsappconversions, workflows,
-  pipelines, pipelinestages, whatsapptemplates, webforms, contactlists, credit_balances, credit_transactions, stripe_prices,
+  pipelines, pipelinestages, whatsapptemplates, webforms, contactlists, credit_balances, credit_transactions, stripe_prices, coupons,
 };

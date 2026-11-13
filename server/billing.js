@@ -13,9 +13,10 @@ import { UncertainOutcome } from "./webhooks.js";
 const KEY_RE = /^[A-Za-z0-9_.:-]{8,100}$/;
 const fail = (status, code, message, extra = {}) => ({ status, body: { code, message, ...extra } });
 
-export function makeBilling({ getUser, webhook, audit, allowedEmails = [], now = () => Date.now(), maxPerMinute = 10, log = console.error, newKey = () => `bo-srv-${now().toString(36)}-${Math.random().toString(36).slice(2, 10)}` }) {
+export function makeBilling({ getUser, webhook, audit, coupons = [], allowedEmails = [], now = () => Date.now(), maxPerMinute = 10, log = console.error, newKey = () => `bo-srv-${now().toString(36)}-${Math.random().toString(36).slice(2, 10)}` }) {
   const allowed = new Set(allowedEmails.map((e) => String(e).trim().toLowerCase()).filter(Boolean));
   const attempts = new Map(); // email del admin → momentos de sus últimos intentos
+  const couponIds = new Set(coupons.map((c) => c.id)), couponLabel = (id) => (coupons.find((c) => c.id === id) || {}).label || null;
 
   const tooMany = (adminEmail) => {
     const t = now(), recent = (attempts.get(adminEmail) || []).filter((x) => t - x < 60_000);
@@ -37,6 +38,9 @@ export function makeBilling({ getUser, webhook, audit, allowedEmails = [], now =
   const targetOf = (user, userId) => ({ targetType: "user", targetId: userId, targetLabel: userFullName(user), companyId: (user.companies && user.companies[0]) || null });
 
   return {
+    // Cupones que el formulario puede ofrecer: ninguno mientras el servidor no sepa mandarlos al webhook.
+    couponList: () => (webhook.couponsEnabled ? coupons : []),
+
     async assignPlan(admin, token, userId, input = {}) {
       const { user, error } = await prepare(admin, userId);
       if (error) return error;
@@ -46,17 +50,21 @@ export function makeBilling({ getUser, webhook, audit, allowedEmails = [], now =
         const code = v.errors.plan ? "PLAN_INVALIDO" : !String(input.stripePriceId ?? "").trim() ? "PRECIO_REQUERIDO" : "PRECIO_INVALIDO";
         return fail(400, code, Object.values(v.errors)[0]);
       }
+      // Cupón (opcional): solo uno de la lista, y solo si el servidor sabe mandárselo al webhook. Si no, se rechaza ANTES de auditar o cobrar.
+      const couponId = input.couponId == null || String(input.couponId).trim() === "" ? null : String(input.couponId).trim();
+      if (couponId && !couponIds.has(couponId)) return fail(400, "CUPON_INVALIDO", "Ese cupón no está en la lista de cupones habilitados.");
+      if (couponId && !webhook.couponsEnabled) return fail(501, "CUPON_NO_SOPORTADO", "Los cupones todavía no están habilitados en el servidor. No se hizo ningún cobro.");
       if (input.idempotencyKey != null && !KEY_RE.test(String(input.idempotencyKey))) return fail(400, "CLAVE_INVALIDA", "La clave de idempotencia no es válida.");
       const idempotencyKey = input.idempotencyKey ? String(input.idempotencyKey) : newKey();
 
       const base = { actor: admin.email, ...targetOf(user, userId) };
-      const detail = { plan: v.value.plan, stripePriceId: v.value.stripePriceId, idempotencyKey };
+      const detail = { plan: v.value.plan, stripePriceId: v.value.stripePriceId, idempotencyKey, ...(couponId ? { couponId, couponLabel: couponLabel(couponId) } : {}) };
       // 4. Sin registro previo no se cobra.
       try { await audit.record(token, { ...base, action: "plan_assign_started", detail }); }
       catch (e) { log("Auditoría no disponible:", e.message); return fail(503, "AUDITORIA_NO_DISPONIBLE", "No se pudo guardar el registro de auditoría, por eso no se intentó el cobro."); }
 
       let r;
-      try { r = await webhook.assign({ email: user.email, plan: v.value.plan, stripePriceId: v.value.stripePriceId, idempotencyKey }); }
+      try { r = await webhook.assign({ email: user.email, plan: v.value.plan, stripePriceId: v.value.stripePriceId, idempotencyKey, ...(couponId ? { couponId } : {}) }); }
       catch (e) {
         if (!(e instanceof UncertainOutcome)) throw e;
         const saved = await saveLater(token, { ...base, action: "plan_assign_unknown", detail: { ...detail, reason: e.reason } });
@@ -65,7 +73,7 @@ export function makeBilling({ getUser, webhook, audit, allowedEmails = [], now =
 
       if (r.ok) {
         const b = r.body;
-        const saved = await saveLater(token, { ...base, action: "plan_assign", detail: { plan: b.plan || v.value.plan, previousPlan: b.previousPlan ?? null, stripePriceId: b.stripePriceId || v.value.stripePriceId, stripeSubscriptionId: b.stripeSubscriptionId ?? null, oldSubscriptionCancelled: b.oldSubscriptionCancelled ?? null, billingFailures: b.billingFailures || [], idempotencyKey } });
+        const saved = await saveLater(token, { ...base, action: "plan_assign", detail: { plan: b.plan || v.value.plan, previousPlan: b.previousPlan ?? null, stripePriceId: b.stripePriceId || v.value.stripePriceId, stripeSubscriptionId: b.stripeSubscriptionId ?? null, oldSubscriptionCancelled: b.oldSubscriptionCancelled ?? null, billingFailures: b.billingFailures || [], idempotencyKey, ...(couponId ? { couponId, couponLabel: couponLabel(couponId) } : {}) } });
         return { status: 201, body: { ...b, auditWarning: !saved } };
       }
       const saved = await saveLater(token, { ...base, action: "plan_assign_failed", detail: { ...detail, code: r.code, decline_code: r.extra.decline_code ?? null } });

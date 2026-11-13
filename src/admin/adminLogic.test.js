@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   PAID_PLANS, planOf, planLabel, isPaidPlan, validatePlanAssignment, newIdempotencyKey, formatPrice, explainWebhookError, WEBHOOK_ERRORS, validateSupportReason, buildSupportRequest, explainSupportError, SUPPORT_ERRORS, SUPPORT_ACTIONS, AUDIT_ACTIONS, expiryText, REASON_MIN, REASON_MAX, matchesSearch, escapeRegExp, sortUsersRecent, paginate, whatsappProvider, companyIdOf,
-  validateCompanyEdit, validateContactEdit, diffFields, waLink, buildAuditEntry, userFullName, sortByPosition, isOwner, matchesFilters, isPaused, matchesCompanySearch, sortCompaniesByName,
+  validateCompanyEdit, validateContactEdit, diffFields, waLink, couponSummary, buildAuditEntry, userFullName, sortByPosition, isOwner, matchesFilters, isPaused, matchesCompanySearch, sortCompaniesByName,
 } from "./adminLogic.js";
 
 describe("planes y suscripciones", () => {
@@ -377,5 +377,41 @@ describe("link de WhatsApp (waLink)", () => {
   it("nunca deja pasar caracteres raros en el link", () => {
     expect(waLink("+54 9 11 5555-0000?text=hola&x=<script>")).toMatch(/^https:\/\/wa\.me\/\d+$/);
     expect(waLink("javascript:alert(1)")).toBe("");
+  });
+});
+
+describe("resumen del cobro con cupón (couponSummary)", () => {
+  const price = { amount: 20000, currency: "usd" };
+  const c = (o) => ({ duration: "repeating", months: 1, ...o });
+  it("porcentaje por 1 mes: el primer mes con descuento y después el precio completo", () => {
+    expect(couponSummary(price, c({ percentOff: 25 }))).toMatchObject({ discounted: 15000, full: 20000, free: false, forever: false });
+    expect(couponSummary(price, c({ percentOff: 25 })).text).toBe("USD 150 el primer mes, después USD 200/mes");
+  });
+  it("por varios meses", () => {
+    expect(couponSummary(price, c({ percentOff: 50, months: 2 })).text).toBe("USD 100/mes los primeros 2 meses, después USD 200/mes");
+    expect(couponSummary({ amount: 20000 }, c({ percentOff: 10, months: 3 })).text).toBe("USD 180/mes los primeros 3 meses, después USD 200/mes");
+  });
+  it("con centavos muestra siempre 2 decimales", () => {
+    expect(couponSummary({ amount: 4900 }, c({ percentOff: 50, months: 2 })).text).toBe("USD 24,50/mes los primeros 2 meses, después USD 49/mes");
+  });
+  it("monto fijo y 'una sola vez'", () => {
+    expect(couponSummary(price, { amountOff: 5000, duration: "once" }).text).toBe("USD 150 el primer mes, después USD 200/mes");
+  });
+  it("100%: gratis, y si es ilimitado se avisa que no se cobra nunca", () => {
+    const m = couponSummary(price, c({ percentOff: 100 }));
+    expect(m).toMatchObject({ free: true, discounted: 0, forever: false });
+    expect(m.text).toBe("Gratis el primer mes, después USD 200/mes");
+    const f = couponSummary(price, { percentOff: 100, duration: "forever" });
+    expect(f).toMatchObject({ free: true, forever: true });
+    expect(f.text).toContain("no se le cobra nunca");
+  });
+  it("descuento permanente que no es total", () => {
+    expect(couponSummary(price, { percentOff: 20, duration: "forever" }).text).toBe("USD 160/mes para siempre");
+  });
+  it("nunca da negativo y sin precio conocido devuelve null", () => {
+    expect(couponSummary({ amount: 3000 }, { amountOff: 5000, duration: "once" }).discounted).toBe(0);
+    expect(couponSummary(null, c({ percentOff: 10 }))).toBeNull();
+    expect(couponSummary(price, null)).toBeNull();
+    expect(couponSummary({}, c({ percentOff: 10 }))).toBeNull();
   });
 });

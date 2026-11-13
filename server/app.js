@@ -55,6 +55,8 @@ export function createApp({ queries, authenticate, billing, companies, users, au
 
   // Precios estándar de los planes (los negociados se pegan a mano en el formulario)
   app.get("/api/admin/prices", route(async (req, res) => res.json(prices)));
+  // Cupones disponibles para "Asignar plan" (vacío hasta que el servidor esté configurado para mandarlos al webhook)
+  app.get("/api/admin/coupons", route(async (req, res) => res.json(billing.couponList())));
 
   // Registro de auditoría (acciones hechas desde el backoffice)
   app.get("/api/admin/audit", route(async (req, res) => {

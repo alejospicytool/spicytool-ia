@@ -7,7 +7,12 @@ export class UncertainOutcome extends Error {
   constructor(reason) { super("No se pudo confirmar el resultado: " + reason); this.name = "UncertainOutcome"; this.reason = reason; }
 }
 
-export function makeWebhookClient({ token, baseUrl = "https://api.spicytool.net", fetchImpl = globalThis.fetch, timeoutMs = 45_000 } = {}) {
+// couponField: nombre del campo del webhook donde va el cupón ("coupon", con el id promo_… del código promocional de Stripe; lo definió Spicytool). Si no está (o no es un nombre válido), los
+// cupones NO están soportados: un pedido con cupón se rechaza sin llamar al webhook, porque si el campo se ignorara se cobraría el precio completo.
+const FIELD_RE = /^[A-Za-z][A-Za-z0-9_]{0,40}$/;
+
+export function makeWebhookClient({ token, baseUrl = "https://api.spicytool.net", fetchImpl = globalThis.fetch, timeoutMs = 45_000, couponField = "" } = {}) {
+  const field = FIELD_RE.test(String(couponField || "")) ? String(couponField) : "";
   const base = String(baseUrl).replace(/\/+$/, "") + "/api/webhooks/backoffice";
 
   async function post(name, body) {
@@ -31,8 +36,16 @@ export function makeWebhookClient({ token, baseUrl = "https://api.spicytool.net"
   }
 
   return {
+    couponsEnabled: !!field,
     // POST …/subscription → 201. COBRA.
-    assign: ({ email, plan, stripePriceId, idempotencyKey }) => post("subscription", { email, plan, stripePriceId, idempotencyKey }),
+    assign: ({ email, plan, stripePriceId, idempotencyKey, couponId }) => {
+      const body = { email, plan, stripePriceId, idempotencyKey };
+      if (couponId) {
+        if (!field) return Promise.resolve({ ok: false, status: 501, code: "CUPON_NO_SOPORTADO", message: "Los cupones todavía no están habilitados. No se hizo ningún cobro.", extra: {} });
+        body[field] = couponId;
+      }
+      return post("subscription", body);
+    },
     // POST …/payment-method-url → 200. No cobra.
     cardLink: ({ email }) => post("payment-method-url", { email }),
   };

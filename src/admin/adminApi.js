@@ -196,14 +196,20 @@ const idempotent = new Map(); // clave → primera respuesta (el webhook real no
 const cardUrl = () => `https://billing.stripe.com/p/session/mock_${++sessionSeq}`;
 
 // Precios que se pueden usar: activos y mensuales (el webhook rechaza el resto con PRECIO_INVALIDO).
+// GET /coupons: los cupones que se pueden elegir al asignar plan (vacío si el servidor no los tiene habilitados).
+export async function listCoupons() {
+  if (real()) return http("/coupons");
+  return copy(db.coupons);
+}
+
 export async function listPrices() {
   if (real()) return http("/prices");
   return copy(db.stripe_prices.filter((p) => p.active && p.interval === "month"));
 }
 
 // POST /webhooks/backoffice/subscription   → 201. COBRA la tarjeta al instante; si el cobro falla no cambia nada.
-export async function assignPlan(userId, { plan, stripePriceId, idempotencyKey } = {}, actor) {
-  if (real()) return http(`/users/${userId}/subscription`, {}, { method: "POST", body: { plan, stripePriceId, idempotencyKey } }); // COBRA de verdad; el actor sale de la sesión
+export async function assignPlan(userId, { plan, stripePriceId, idempotencyKey, couponId } = {}, actor) {
+  if (real()) return http(`/users/${userId}/subscription`, {}, { method: "POST", body: { plan, stripePriceId, idempotencyKey, ...(couponId ? { couponId } : {}) } }); // COBRA de verdad; el actor sale de la sesión
   needActor(actor);
   const u = byId("users", userId) || wh(404, "USUARIO_NO_ENCONTRADO", "No Spicytool account with that email");
   const target = { targetType: "user", targetId: userId, targetLabel: userFullName(u), companyId: companyIdOf(u) };
@@ -214,6 +220,7 @@ export async function assignPlan(userId, { plan, stripePriceId, idempotencyKey }
   if (idempotencyKey && idempotent.has(idempotencyKey)) return copy(idempotent.get(idempotencyKey));
   if (!isPaidPlan(plan)) failed(400, "PLAN_INVALIDO", "Plan must be one of " + PAID_PLANS.join(", "));
   if (!stripePriceId) failed(400, "PRECIO_REQUERIDO", "stripePriceId is required");
+  const coupon = couponId ? db.coupons.find((c) => c.id === couponId) || failed(400, "CUPON_INVALIDO", "Ese cupón no está en la lista de cupones habilitados.") : null;
   const price = db.stripe_prices.find((p) => p.id === stripePriceId);
   if (!price || !price.active || price.interval !== "month") failed(400, "PRECIO_INVALIDO", "The price does not exist, is archived or is not recurring");
   if (u.stripe?.deleted) failed(409, "CLIENTE_STRIPE_BORRADO", "The customer was deleted in Stripe");
@@ -228,7 +235,7 @@ export async function assignPlan(userId, { plan, stripePriceId, idempotencyKey }
   u.stripe = { ...u.stripe, subscriptionId: newSubId, priceId: stripePriceId };
   const result = { message: "Subscription assigned and charged", userEmail: u.email, plan, previousPlan, stripePriceId, stripeSubscriptionId: newSubId, oldSubscriptionCancelled: true, billingFailures: [] };
   if (idempotencyKey) idempotent.set(idempotencyKey, result);
-  log(actor, "plan_assign", { ...target, detail: { plan, previousPlan, stripePriceId, stripeSubscriptionId: result.stripeSubscriptionId, idempotencyKey: idempotencyKey || null } });
+  log(actor, "plan_assign", { ...target, detail: { plan, previousPlan, stripePriceId, stripeSubscriptionId: result.stripeSubscriptionId, idempotencyKey: idempotencyKey || null, ...(coupon ? { couponId: coupon.id, couponLabel: coupon.label } : {}) } });
   return copy(result);
 }
 
