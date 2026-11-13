@@ -12,6 +12,11 @@ import CrmApp from "./crm/CrmApp.jsx";
 import RevenueApp from "./revenue/RevenueApp.jsx";
 import AdminApp from "./admin/AdminApp.jsx";
 import { configureAdminApi } from "./admin/adminApi.js";
+import ErrorBoundary from "./ErrorBoundary.jsx";
+import { readPrefs, orderSections, moveLabel, toggleLabel } from "./menuPrefs.js";
+
+// Preferencias del menú (orden y secciones plegadas): se guardan en Supabase (user_menu_prefs) y también en el navegador, por usuario.
+const MENU_PREFS_KEY = "spicy-menu-prefs-v1";
 
 // ── Supabase ───────────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://khuavhbraikzreyhptog.supabase.co";
@@ -75,6 +80,30 @@ function BrandStyles() {
         font-size: 13px; font-weight: 600; color: white; flex-shrink: 0;
       }
       .spicy-main { margin-left: 220px; padding: 28px 32px; }
+      .spicy-topbar, .spicy-backdrop { display: none; }
+      .spicy-menu-btn { background: none; border: none; color: white; font-size: 22px; min-width: 44px; min-height: 44px; cursor: pointer; padding: 0; }
+      .spicy-menu-tools { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 10px 0; }
+      .spicy-menu-tools button { background: rgba(255,255,255,0.08); border: none; color: rgba(255,255,255,0.75); font-size: 11px; padding: 5px 9px; border-radius: 6px; cursor: pointer; font-family: inherit; }
+      .spicy-menu-tools button:hover { background: rgba(255,255,255,0.16); color: white; }
+      .spicy-menu-tools button.done { background: ${ST_RED}; color: white; }
+      .spicy-sec-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 10px 12px 5px; }
+      .spicy-sec-title, .spicy-sec-btn { font-size: 10px; font-weight: 600; color: rgba(255,255,255,0.45); text-transform: uppercase; letter-spacing: 1px; background: none; border: none; padding: 0; font-family: inherit; }
+      .spicy-sec-btn { display: flex; align-items: center; gap: 6px; cursor: pointer; text-align: left; }
+      .spicy-sec-btn:hover { color: rgba(255,255,255,0.8); }
+      .spicy-sec-move { display: flex; gap: 3px; flex-shrink: 0; }
+      .spicy-sec-move button { background: rgba(255,255,255,0.1); border: none; color: white; width: 26px; height: 22px; border-radius: 5px; font-size: 10px; cursor: pointer; }
+      .spicy-sec-move button:disabled { opacity: 0.25; cursor: default; }
+      @media (max-width: 860px) {
+        .spicy-sidebar { transform: translateX(-100%); transition: transform 0.2s ease; width: 270px; max-width: 86vw; }
+        .spicy-sidebar.open { transform: none; box-shadow: 0 0 40px rgba(0,0,0,0.4); }
+        .spicy-topbar { display: flex; align-items: center; gap: 6px; position: fixed; top: 0; left: 0; right: 0; height: 48px; background: #1A1A2E; color: white; padding: 0 8px; z-index: 90; font-size: 14px; font-weight: 600; }
+        .spicy-topbar small { font-weight: 400; color: rgba(255,255,255,0.55); font-size: 12px; margin-left: 4px; }
+        .spicy-backdrop { display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 95; }
+        .spicy-main { margin-left: 0; padding: 62px 14px 24px; overflow-x: auto; }
+        .spicy-main [style*="grid-template-columns"] { grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)) !important; }
+        .spicy-nav-btn, .spicy-menu-tools button, .spicy-sec-btn { min-height: 44px; }
+        .spicy-sec-move button { width: 40px; height: 36px; }
+      }
       .spicy-page-title { font-size: 22px; font-weight: 600; color: #111; margin-bottom: 24px; }
       .spicy-card {
         background: white; border-radius: 12px; border: 1px solid #EBEBEB;
@@ -5553,6 +5582,9 @@ export default function SpicyFinanzas() {
   const [dataLoaded, setDataLoaded]   = useState(false);
 
   const [view,      setView]      = useState("inicio");
+  const [menuOpen,  setMenuOpen]  = useState(false);          // menú lateral abierto (solo se usa en pantallas chicas)
+  const [menuEdit,  setMenuEdit]  = useState(false);          // modo "Ordenar menú"
+  const [menuPrefs, setMenuPrefs] = useState({ order: [], collapsed: [] });
   const [pendingLink, setPendingLink] = useState(() => parseEntityLink(window.location.search));
   const [filterType,setFilterType]= useState("all");
   const [filterAcc, setFilterAcc] = useState("all");
@@ -5647,6 +5679,32 @@ export default function SpicyFinanzas() {
   },[session, dataLoaded, isAdmin, view, allowedSections]);
 
   // ── Link directo (?ticket=…): abre la vista y el detalle si la persona tiene acceso a esa sección ──
+  // Preferencias del menú: primero lo guardado en este navegador (instantáneo) y después lo de Supabase, si existe.
+  useEffect(()=>{
+    const uid = session?.user?.id;
+    if (!uid) return;
+    let alive = true;
+    let local = null;
+    try { local = JSON.parse(localStorage.getItem(MENU_PREFS_KEY+":"+uid)||"null"); } catch { local = null; }
+    Promise.resolve(local).then(l=>{ if (alive && l) setMenuPrefs(readPrefs(l)); });
+    sb.from("user_menu_prefs").select("section_order,collapsed_sections").eq("user_id",uid).maybeSingle().then(({data,error})=>{
+      if (alive && !error && data) setMenuPrefs(readPrefs(data));
+    });
+    return ()=>{ alive = false; };
+  },[session?.user?.id]);
+
+  // Título de la pestaña del navegador: dónde estás (así se distinguen varias pestañas abiertas) y cierre del menú con Escape.
+  useEffect(()=>{
+    const sec = NAV_SECTIONS.find(x=>x.views.includes(view));
+    document.title = (NAV_LABELS[view] ? NAV_LABELS[view] + (sec && sec.label !== NAV_LABELS[view] ? " · " + sec.label : "") + " · " : "") + "Backoffice Spicy";
+  },[view]);
+  useEffect(()=>{
+    if (!menuOpen) return;
+    const k = (e)=>{ if (e.key==="Escape") setMenuOpen(false); };
+    window.addEventListener("keydown",k);
+    return ()=>window.removeEventListener("keydown",k);
+  },[menuOpen]);
+
   useEffect(()=>{
     if (!dataLoaded || !pendingLink) return;
     const target = LINK_TARGETS[pendingLink.type];
@@ -5795,30 +5853,60 @@ export default function SpicyFinanzas() {
 
   const userInitials = session.user.email.slice(0,2).toUpperCase();
 
+  // Orden y plegado del menú. Esto solo cambia CÓMO se ve el menú: qué secciones puede ver cada uno lo deciden los permisos.
+  function saveMenuPrefs(next) {
+    setMenuPrefs(next);
+    try { localStorage.setItem(MENU_PREFS_KEY+":"+session.user.id, JSON.stringify(next)); } catch { /* sin almacenamiento */ }
+    sb.from("user_menu_prefs").upsert({ user_id:session.user.id, section_order:next.order, collapsed_sections:next.collapsed, updated_at:new Date().toISOString() },{ onConflict:"user_id" }).then(()=>{},()=>{});
+  }
+  const shownSections = orderSections(NAV_SECTIONS, menuPrefs.order)
+    .filter(sec => canSeeSection(sec.label))
+    .map(sec => ({ sec, views: sec.views.filter(v => !ADMIN_ONLY_VIEWS.includes(v) || isAdmin) }))
+    .filter(x => x.views.length > 0);
+  const shownLabels = shownSections.map(x => x.sec.label);
+  const foldable = shownSections.filter(x => x.views.length > 1).map(x => x.sec.label);
+  const allFolded = foldable.length > 0 && foldable.every(l => menuPrefs.collapsed.includes(l));
+
   return (
     <div className="spicy-root">
       <BrandStyles/>
 
       {/* Sidebar */}
-      <div className="spicy-sidebar">
+      <div className={"spicy-sidebar"+(menuOpen?" open":"")}>
         <div className="spicy-logo">
           <div className="spicy-logo-icon">S</div>
           <div className="spicy-logo-text">SpicyTool</div>
         </div>
+        <div className="spicy-menu-tools">
+          {menuEdit ? (<>
+            <button className="done" onClick={()=>setMenuEdit(false)}>Listo</button>
+            <button onClick={()=>saveMenuPrefs({ order:[], collapsed:[] })} title="Volver al orden original y desplegar todo">Restablecer</button>
+          </>) : (<>
+            <button onClick={()=>setMenuEdit(true)} title="Cambiar el orden de las secciones">⇅ Ordenar</button>
+            {foldable.length>0 && <button onClick={()=>saveMenuPrefs({ ...menuPrefs, collapsed: allFolded ? [] : foldable })}>{allFolded ? "Desplegar todo" : "Plegar todo"}</button>}
+          </>)}
+        </div>
 
         <nav className="spicy-nav">
-          {NAV_SECTIONS.filter(section => canSeeSection(section.label)).map(section=>{
-            const visibleViews = section.views.filter(v =>
-              !ADMIN_ONLY_VIEWS.includes(v) || isAdmin
-            );
-            if (visibleViews.length === 0) return null;
+          {shownSections.map(({ sec: section, views: visibleViews }, idx)=>{
+            const label = section.label;
+            const canFold = visibleViews.length > 1, folded = canFold && !menuEdit && menuPrefs.collapsed.includes(label);
+            const listed = folded ? visibleViews.filter(v=>v===view) : visibleViews;   // plegada: solo queda a la vista donde estás parado
             return (
-              <div key={section.label} style={{ marginBottom:4 }}>
-                <div style={{ fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.3)",textTransform:"uppercase",letterSpacing:1,padding:"10px 12px 5px" }}>
-                  {section.label}
+              <div key={label} style={{ marginBottom:4 }}>
+                <div className="spicy-sec-head">
+                  {canFold && !menuEdit
+                    ? <button className="spicy-sec-btn" aria-expanded={!folded} onClick={()=>saveMenuPrefs({ ...menuPrefs, collapsed: toggleLabel(menuPrefs.collapsed, label) })}><span aria-hidden="true">{folded?"▸":"▾"}</span>{label}</button>
+                    : <span className="spicy-sec-title">{label}</span>}
+                  {menuEdit && (
+                    <span className="spicy-sec-move">
+                      <button aria-label={`Subir ${label}`} disabled={idx===0} onClick={()=>saveMenuPrefs({ ...menuPrefs, order: moveLabel(shownLabels, label, -1) })}>▲</button>
+                      <button aria-label={`Bajar ${label}`} disabled={idx===shownSections.length-1} onClick={()=>saveMenuPrefs({ ...menuPrefs, order: moveLabel(shownLabels, label, 1) })}>▼</button>
+                    </span>
+                  )}
                 </div>
-                {visibleViews.map(v=>(
-                  <button key={v} onClick={()=>setView(v)} className={`spicy-nav-btn${view===v?" active":""}`}>
+                {listed.map(v=>(
+                  <button key={v} onClick={()=>{ setView(v); setMenuOpen(false); }} className={`spicy-nav-btn${view===v?" active":""}`}>
                     <span style={{ fontSize:14 }}>{NAV_ICONS[v]}</span>
                     {NAV_LABELS[v]}
                     {v==="referrals"&&referralOwed>0&&<span className="spicy-nav-badge">{fmt(referralOwed)}</span>}
@@ -5842,6 +5930,13 @@ export default function SpicyFinanzas() {
         </div>
       </div>
 
+      {/* Barra superior y fondo: solo se ven en pantallas chicas, donde el menú se abre y se cierra */}
+      <div className="spicy-topbar">
+        <button className="spicy-menu-btn" aria-label="Abrir el menú" aria-expanded={menuOpen} onClick={()=>setMenuOpen(true)}>☰</button>
+        <span>{NAV_LABELS[view]||"SpicyTool"}<small>{(()=>{ const l=(NAV_SECTIONS.find(x=>x.views.includes(view))||{}).label; return l && l!==NAV_LABELS[view] ? l : ""; })()}</small></span>
+      </div>
+      {menuOpen && <div className="spicy-backdrop" onClick={()=>setMenuOpen(false)} />}
+
       {/* Main content */}
       <div className="spicy-main">
         <TimeTrackerBar/>
@@ -5850,7 +5945,7 @@ export default function SpicyFinanzas() {
       {currentViewBlocked ? (
         <div style={{ fontSize:13,color:"#999",textAlign:"center",padding:"4rem 1rem" }}>Todavía no tenés acceso a ninguna sección. Pedile a un admin que te habilite el acceso.</div>
       ) : (
-      <>
+      <ErrorBoundary resetKey={view}>
       {/* DASHBOARD */}
       {view==="dashboard"&&(
         <>
@@ -6066,7 +6161,7 @@ export default function SpicyFinanzas() {
           uploadInvoice={uploadInvoice} viewInvoice={viewInvoice}
         />
       )}
-      </>
+      </ErrorBoundary>
       )}
 
       </div>{/* end spicy-main */}
