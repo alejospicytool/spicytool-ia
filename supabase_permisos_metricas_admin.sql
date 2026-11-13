@@ -1,5 +1,5 @@
 -- Permisos por usuario para Métricas y Admin Spicy (se asignan desde Configuración → Usuarios y permisos).
--- ESTADO: PENDIENTE de aplicar en el proyecto real (khuavhbraikzreyhptog). Cuando se aplique, anotarlo acá.
+-- ESTADO: YA APLICADO en el proyecto real (khuavhbraikzreyhptog) vía Supabase MCP el 2026-11-13. Este archivo queda como referencia.
 --
 -- Modelo (usa la tabla allowed_sections que ya existe; no hay tablas nuevas):
 --   · 'Métricas'                → puede LEER las tablas rev_* (MRR, churn, retención, pagos fallidos, clientes). Solo lectura:
