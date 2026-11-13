@@ -174,16 +174,24 @@ const NAV_ICONS = {
 };
 const NAV_LABELS = {
   inicio:"Inicio", notes:"Notas", mytime:"Mi tiempo", timeadmin:"Control de jornada",
-  dashboard:"Resumen", accounts:"Cuentas", add:"Registrar", history:"Historial", runway:"Runway", pnl:"P&L",
+  dashboard:"Resumen financiero", accounts:"Cuentas", add:"Registrar", history:"Historial", runway:"Runway", pnl:"P&L",
   referrals:"Referidos",
   services:"Servicios", categories:"Categorías",
-  opsdash:"Resumen", tickets:"Tickets", tasks:"Tareas", onboarding:"Onboarding", usuarios:"Usuarios",
-  devdash:"Resumen", devtasks:"Tareas",
+  opsdash:"Resumen operativo", tickets:"Tickets", tasks:"Tareas", onboarding:"Onboarding", usuarios:"Usuarios y permisos",
+  devdash:"Resumen de devs", devtasks:"Tareas de devs",
   crm:"CRM comercial",
   metrics:"Overview", metrics_mrr:"MRR & ARR", metrics_churn:"Churn", metrics_retention:"Retención", metrics_failed:"Pagos fallidos", metrics_customers:"Clientes", metrics_projection:"Proyección", metrics_plans:"Planes",
   adm_users:"Usuarios y companies", adm_companies:"Companies", adm_support:"Soporte",
 };
 const ADMIN_ONLY_VIEWS = ["add","usuarios","timeadmin"];
+// La pantalla actual vive en la dirección (#/tickets): al recargar volvés a donde estabas y se puede compartir un link a una sección.
+// Si esa pantalla no existe o no tenés permiso, se ignora o el redireccionamiento de permisos te manda a una que sí.
+const viewFromHash = () => {
+  try {
+    const h = decodeURIComponent((window.location.hash || "").replace(/^#\/?/, ""));
+    return NAV_SECTIONS.some(s => s.views.includes(h)) ? h : null;
+  } catch { return null; }
+};
 // Secciones que se asignan por usuario en Configuración → Usuarios y permisos. Métricas y Admin Spicy son de SOLO LECTURA para
 // quien no es admin (la base lo exige: supabase_permisos_metricas_admin.sql). Hacer cambios en Admin Spicy es un permiso aparte:
 // ACTIONS_SECTION. El servidor (server/auth.js) lo vuelve a comprobar en cada pedido: lo que se ve acá es solo un reflejo.
@@ -1109,7 +1117,7 @@ function ReferralDashboard({ txns, referrers, referredClients, payments, isAdmin
                   {isAdmin ? (
                     <span style={{ display:"flex", alignItems:"center", gap:4 }}>
                       · comisión:
-                      <input type="number" value={ref.commission_rate} min="1" max="100"
+                      <input type="number" aria-label={`Comisión de ${ref.name} (%)`} value={ref.commission_rate} min="1" max="100"
                         onClick={e=>e.stopPropagation()}
                         onChange={e=>updateRate(ref.id, Number(e.target.value))}
                         style={{ width:44, fontSize:11, padding:"1px 4px", borderRadius:5, border:"1px solid #E0E0E0", textAlign:"center", fontFamily:"DM Sans,sans-serif" }}/>%
@@ -1163,17 +1171,17 @@ function ReferralDashboard({ txns, referrers, referredClients, payments, isAdmin
                     <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
                       <div style={{ flex:1, minWidth:100 }}>
                         <div style={{ fontSize:11, fontWeight:600, color:"#555", marginBottom:5, textTransform:"uppercase", letterSpacing:0.5 }}>Monto (USD)</div>
-                        <input className="spicy-input" type="number" value={txnForm.amount} placeholder="0.00"
+                        <input aria-label="Monto (USD)" className="spicy-input" type="number" value={txnForm.amount} placeholder="0.00"
                           onChange={e=>setTxnForm(f=>({...f,amount:e.target.value}))} style={{ fontSize:13 }}/>
                       </div>
                       <div style={{ flex:2, minWidth:160 }}>
                         <div style={{ fontSize:11, fontWeight:600, color:"#555", marginBottom:5, textTransform:"uppercase", letterSpacing:0.5 }}>Descripción</div>
-                        <input className="spicy-input" value={txnForm.description} placeholder="Broker, empresa, etc."
+                        <input aria-label="Descripción" className="spicy-input" value={txnForm.description} placeholder="Broker, empresa, etc."
                           onChange={e=>setTxnForm(f=>({...f,description:e.target.value}))} style={{ fontSize:13 }}/>
                       </div>
                       <div style={{ flex:1, minWidth:130 }}>
                         <div style={{ fontSize:11, fontWeight:600, color:"#555", marginBottom:5, textTransform:"uppercase", letterSpacing:0.5 }}>Fecha</div>
-                        <input className="spicy-input" type="date" value={txnForm.date}
+                        <input aria-label="Fecha" className="spicy-input" type="date" value={txnForm.date}
                           onChange={e=>setTxnForm(f=>({...f,date:e.target.value}))} style={{ fontSize:13 }}/>
                       </div>
                       <div style={{ display:"flex", alignItems:"flex-end" }}>
@@ -1333,7 +1341,7 @@ function ReferralDashboard({ txns, referrers, referredClients, payments, isAdmin
             ))}
             <div style={{ marginBottom:16 }}>
               <div style={{ fontSize:12, fontWeight:600, color:"#555", marginBottom:6, textTransform:"uppercase", letterSpacing:0.5 }}>Comisión (%)</div>
-              <input className="spicy-input" type="number" value={newRef.commission_rate} min="1" max="100" onChange={e=>setNewRef(f=>({...f,commission_rate:Number(e.target.value)}))}/>
+              <input aria-label="Comisión (%)" className="spicy-input" type="number" value={newRef.commission_rate} min="1" max="100" onChange={e=>setNewRef(f=>({...f,commission_rate:Number(e.target.value)}))}/>
             </div>
             <div style={{ background:"#F0FDF4", borderRadius:8, padding:"10px 12px", fontSize:12, color:"#166534", marginBottom:16, lineHeight:1.7 }}>
               En Stripe, al customer que refirió agregá:<br/>
@@ -1547,15 +1555,15 @@ function HistoryView({ txns, accounts, catsIncome, catsExpense, filterType, setF
         {[["all","Todos"],["income","Ingresos"],["expense","Egresos"]].map(([f,l])=>(
           <button key={f} onClick={()=>setFilterType(f)} style={{ fontSize:12,padding:"6px 14px",borderRadius:8,fontWeight:600,cursor:"pointer",border:"2px solid",borderColor:filterType===f?ST_RED:"#E0E0E0",background:filterType===f?ST_RED_BG:"white",color:filterType===f?ST_RED:"#888" }}>{l}</button>
         ))}
-        <select value={filterAcc} onChange={e=>setFilterAcc(e.target.value)} className="spicy-select">
+        <select aria-label="Filtrar por cuenta" value={filterAcc} onChange={e=>setFilterAcc(e.target.value)} className="spicy-select">
           <option value="all">Todas las cuentas</option>
           {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
-        <select value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} className="spicy-select">
+        <select aria-label="Filtrar por mes" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} className="spicy-select">
           <option value="all">Todos los meses</option>
           {availableMonths.map(mk=><option key={mk} value={mk}>{monthLabel(mk)}</option>)}
         </select>
-        <select value={filterCat} onChange={e=>setFilterCat(e.target.value)} className="spicy-select">
+        <select aria-label="Filtrar por categoría" value={filterCat} onChange={e=>setFilterCat(e.target.value)} className="spicy-select">
           <option value="all">Todas las categorías</option>
           {allCats.map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
         </select>
@@ -1583,7 +1591,7 @@ function HistoryView({ txns, accounts, catsIncome, catsExpense, filterType, setF
       <div className="spicy-card" style={{ padding:0,overflow:"hidden" }}>
         {isAdmin && visibleTxns.length > 0 && (
           <div style={{ display:"flex",alignItems:"center",gap:12,padding:"10px 20px",borderBottom:"1px solid #F3F3F3",background:"#FAFAFA" }}>
-            <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{ cursor:"pointer",width:15,height:15,accentColor:ST_RED }}/>
+            <input type="checkbox" aria-label="Seleccionar todas las transacciones" checked={allSelected} onChange={toggleAll} style={{ cursor:"pointer",width:15,height:15,accentColor:ST_RED }}/>
             <span style={{ fontSize:11,color:"#aaa",fontWeight:500 }}>{allSelected?"Deseleccionar todas":"Seleccionar todas"}</span>
           </div>
         )}
@@ -1595,7 +1603,7 @@ function HistoryView({ txns, accounts, catsIncome, catsExpense, filterType, setF
           return (
             <div key={t.id} style={{ display:"flex",alignItems:"center",gap:12,padding:"12px 20px",borderBottom:i<visibleTxns.length-1?"1px solid #F3F3F3":"none",background:isChecked?"#FFF7ED":"transparent",transition:"background 0.1s" }}>
               {isAdmin && (
-                <input type="checkbox" checked={isChecked}
+                <input type="checkbox" aria-label={`Seleccionar ${t.description || "la transacción"}`} checked={isChecked}
                   onChange={e=>setSelected(s=>({...s,[t.id]:e.target.checked}))}
                   style={{ cursor:"pointer",width:15,height:15,accentColor:ST_RED,flexShrink:0 }}/>
               )}
@@ -1604,7 +1612,7 @@ function HistoryView({ txns, accounts, catsIncome, catsExpense, filterType, setF
                 <div style={{ fontSize:13,fontWeight:600,color:"#111",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{t.description||t.category}{sourceBadge(t)}{invoiceBadge(t)}</div>
                 <div style={{ fontSize:11,color:"#aaa",marginTop:3,display:"flex",alignItems:"center",gap:6 }}>
                   {isAdmin ? (
-                    <select value={t.category} onChange={e=>updateCategory(t.id,e.target.value)}
+                    <select aria-label={`Categoría de ${t.description || "la transacción"}`} value={t.category} onChange={e=>updateCategory(t.id,e.target.value)}
                       style={{ fontSize:11,padding:"1px 6px",borderRadius:5,border:"1px solid #E0E0E0",background:"#F7F7F8",color:"#666",cursor:"pointer",fontFamily:"DM Sans,sans-serif" }}>
                       {cats.map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
                     </select>
@@ -1868,7 +1876,7 @@ function RunwayView({ txns, accounts }) {
                 <span style={{ fontSize:12,fontWeight:600,color:c.color }}>{c.label}</span>
                 <span style={{ fontSize:14,fontWeight:700,color:c.color }}>{c.val}%/mes</span>
               </div>
-              <input type="range" min="-10" max="50" step="1" value={c.val}
+              <input type="range" aria-label={`Crecimiento mensual del MRR, escenario ${c.label}`} min="-10" max="50" step="1" value={c.val}
                 onChange={e=>c.set(Number(e.target.value))}
                 style={{ width:"100%",accentColor:c.color }}/>
               <div style={{ fontSize:11,color:"#aaa",marginTop:4 }}>
@@ -1888,12 +1896,12 @@ function RunwayView({ txns, accounts }) {
           <div style={{ display:"flex",gap:16,alignItems:"flex-end",flexWrap:"wrap" }}>
             <div style={{ flex:2,minWidth:140 }}>
               <div style={{ fontSize:12,color:"#888",marginBottom:6 }}>Monto (USD)</div>
-              <input className="spicy-input" type="number" value={fundraise||""} placeholder="0"
+              <input aria-label="Monto de la inyección de capital" className="spicy-input" type="number" value={fundraise||""} placeholder="0"
                 onChange={e=>setFundraise(Number(e.target.value))} style={{ fontSize:13 }}/>
             </div>
             <div style={{ flex:1,minWidth:100 }}>
               <div style={{ fontSize:12,color:"#888",marginBottom:6 }}>En el mes</div>
-              <select className="spicy-select" value={fundraiseMonth} onChange={e=>setFundraiseMonth(Number(e.target.value))} style={{ width:"100%",fontSize:13 }}>
+              <select aria-label="Mes de la inyección de capital" className="spicy-select" value={fundraiseMonth} onChange={e=>setFundraiseMonth(Number(e.target.value))} style={{ width:"100%",fontSize:13 }}>
                 {Array.from({length:6},(_,i)=>{
                   const d=new Date(now.getFullYear(),now.getMonth()+i,1);
                   return <option key={i+1} value={i+1}>{MONTH_LABELS[d.getMonth()]} {d.getFullYear()}</option>;
@@ -2939,7 +2947,7 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
           <div style={{ fontSize:13,color:"#888",marginTop:4 }}>{visibleTickets.length} tickets · Operaciones</div>
         </div>
         <div style={{ display:"flex",gap:10,alignItems:"center" }}>
-          <select value={filterCategory} onChange={e=>setFilterCategory(e.target.value)} className="spicy-select">
+          <select aria-label="Filtrar por categoría" value={filterCategory} onChange={e=>setFilterCategory(e.target.value)} className="spicy-select">
             <option value="">Todas las categorías</option>
             {TICKET_CATEGORIES.map(c=><option key={c.key} value={c.key}>{c.emoji} {c.key}</option>)}
           </select>
@@ -3281,7 +3289,7 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
           <div style={{ fontSize:13,color:"#888",marginTop:4 }}>{visibleTasks.length} tareas · Devs</div>
         </div>
         <div style={{ display:"flex",gap:10,alignItems:"center",flexWrap:"wrap" }}>
-          <select value={filterAssignee} onChange={e=>setFilterAssignee(e.target.value)} className="spicy-select">
+          <select aria-label="Filtrar por asignado" value={filterAssignee} onChange={e=>setFilterAssignee(e.target.value)} className="spicy-select">
             <option value="">Todos los asignados</option>
             {allUsers.map(u=><option key={u.user_id} value={u.user_id}>{userDisplayName(u)}</option>)}
           </select>
@@ -3571,13 +3579,13 @@ function DevsMetricsView({ tickets, ticketHistory, devTasks, devTaskHistory, ass
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:12 }}>
         <div style={{ fontSize:20,fontWeight:700,color:"#111" }}>Devs — Resumen</div>
         <div style={{ display:"flex",gap:10,alignItems:"center",flexWrap:"wrap" }}>
-          <select value={typeFilter} onChange={e=>setTypeFilter(e.target.value)} className="spicy-select">
+          <select aria-label="Qué incluir en el resumen" value={typeFilter} onChange={e=>setTypeFilter(e.target.value)} className="spicy-select">
             <option value="all">Tickets + Producto</option>
             <option value="tickets">Solo tickets</option>
             <option value="dev">Solo desarrollo de producto</option>
           </select>
-          <input type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} className="spicy-input"/>
-          <input type="date" value={toDate} onChange={e=>setToDate(e.target.value)} className="spicy-input"/>
+          <input type="date" aria-label="Desde" value={fromDate} onChange={e=>setFromDate(e.target.value)} className="spicy-input"/>
+          <input type="date" aria-label="Hasta" value={toDate} onChange={e=>setToDate(e.target.value)} className="spicy-input"/>
         </div>
       </div>
 
@@ -3790,7 +3798,7 @@ function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks
           <div style={{ fontSize:13,color:"#888",marginTop:4 }}>{visible.length} tareas · Operaciones</div>
         </div>
         <div style={{ display:"flex",gap:8,alignItems:"center",flexWrap:"wrap" }}>
-          <select className="spicy-select" value={filterAssigned} onChange={e=>setFilterAssigned(e.target.value)}>
+          <select aria-label="Filtrar por responsable" className="spicy-select" value={filterAssigned} onChange={e=>setFilterAssigned(e.target.value)}>
             <option value="">Todos los responsables</option>
             {allUsers.map(u=><option key={u.user_id} value={u.user_id}>{userDisplayName(u)}</option>)}
           </select>
@@ -4110,7 +4118,7 @@ function NotesView({ notes, currentUserId, currentUserEmail, isAdmin, onRefresh 
           <div style={{ fontSize:13,color:"#888",marginTop:4 }}>{notes.length} notas del equipo</div>
         </div>
         <div style={{ display:"flex",gap:8,alignItems:"center",flexWrap:"wrap" }}>
-          <input className="spicy-input" placeholder="Buscar por título o contenido…" value={search} onChange={e=>setSearch(e.target.value)} style={{ width:260 }}/>
+          <input className="spicy-input" aria-label="Buscar notas" placeholder="Buscar por título o contenido…" value={search} onChange={e=>setSearch(e.target.value)} style={{ width:260 }}/>
           <button className="spicy-btn-primary" onClick={()=>{ setNewForm({title:"",content:""}); setNewWarned(false); setShowNew(true); }}>+ Nueva nota</button>
         </div>
       </div>
@@ -4923,9 +4931,9 @@ function ControlJornadaView({ allUsers }) {
       {tab === "resumen" && (
         <>
           <div className="spicy-card" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <input type="date" className="spicy-input" style={{ width: 150 }} value={range.desde} max={range.hasta} onChange={e => e.target.value && setRange(r => ({ ...r, desde: e.target.value }))}/>
+            <input type="date" aria-label="Desde" className="spicy-input" style={{ width: 150 }} value={range.desde} max={range.hasta} onChange={e => e.target.value && setRange(r => ({ ...r, desde: e.target.value }))}/>
             <span style={{ color: "#aaa" }}>→</span>
-            <input type="date" className="spicy-input" style={{ width: 150 }} value={range.hasta} min={range.desde} onChange={e => e.target.value && setRange(r => ({ ...r, hasta: e.target.value }))}/>
+            <input type="date" aria-label="Hasta" className="spicy-input" style={{ width: 150 }} value={range.hasta} min={range.desde} onChange={e => e.target.value && setRange(r => ({ ...r, hasta: e.target.value }))}/>
             {presets.map(([label, rg]) => <button key={label} className="spicy-btn-secondary" style={{ fontSize: 12, padding: "6px 12px" }} onClick={() => setRange(rg)}>{label}</button>)}
             <span style={{ flex: 1 }}/>
             <button className="spicy-btn-secondary" onClick={exportCSV} disabled={rows.length === 0}>Exportar CSV</button>
@@ -5030,9 +5038,9 @@ function ControlJornadaView({ allUsers }) {
       {tab === "tareas" && (
         <>
           <div className="spicy-card" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <input type="date" className="spicy-input" style={{ width: 150 }} value={range.desde} max={range.hasta} onChange={e => e.target.value && setRange(r => ({ ...r, desde: e.target.value }))}/>
+            <input type="date" aria-label="Desde" className="spicy-input" style={{ width: 150 }} value={range.desde} max={range.hasta} onChange={e => e.target.value && setRange(r => ({ ...r, desde: e.target.value }))}/>
             <span style={{ color: "#aaa" }}>→</span>
-            <input type="date" className="spicy-input" style={{ width: 150 }} value={range.hasta} min={range.desde} onChange={e => e.target.value && setRange(r => ({ ...r, hasta: e.target.value }))}/>
+            <input type="date" aria-label="Hasta" className="spicy-input" style={{ width: 150 }} value={range.hasta} min={range.desde} onChange={e => e.target.value && setRange(r => ({ ...r, hasta: e.target.value }))}/>
             {presets.map(([label, rg]) => <button key={label} className="spicy-btn-secondary" style={{ fontSize: 12, padding: "6px 12px" }} onClick={() => setRange(rg)}>{label}</button>)}
           </div>
           <div className="spicy-card" style={{ padding: 0, overflowX: "auto" }}>
@@ -5060,7 +5068,7 @@ function ControlJornadaView({ allUsers }) {
           <div style={{ fontSize: 12, color: "#888", marginBottom: 12 }}>No cuentan como horas esperadas. Para todos (feriado) o para una persona (licencia / vacaciones).</div>
           <form onSubmit={e => { e.preventDefault(); run(async () => { await timeRpc("admin_set_dia_no_laborable", { p_fecha: diaForm.fecha, p_user: diaForm.user_id || null, p_motivo: diaForm.motivo }); setDiaForm(f => ({ ...f, motivo: "" })); await loadDias(); }); }}
             style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
-            <input type="date" required className="spicy-input" style={{ width: 150 }} value={diaForm.fecha} onChange={e => setDiaForm(f => ({ ...f, fecha: e.target.value }))}/>
+            <input type="date" required aria-label="Fecha del día" className="spicy-input" style={{ width: 150 }} value={diaForm.fecha} onChange={e => setDiaForm(f => ({ ...f, fecha: e.target.value }))}/>
             <select className="spicy-select" value={diaForm.user_id} onChange={e => setDiaForm(f => ({ ...f, user_id: e.target.value }))}>
               <option value="">Todos (feriado)</option>
               {allUsers.map(u => <option key={u.user_id} value={u.user_id}>{userDisplayName(u)}</option>)}
@@ -5178,7 +5186,7 @@ function UserContractsEditor({ user }) {
           <input className="spicy-input" inputMode="decimal" value={horas} onChange={e => setHoras(e.target.value)} style={{ width: "100%", marginTop: 4 }}/>
         </label>
         <label style={{ fontSize: 12, color: "#666", fontWeight: 500, flex: 1 }}>Vigente desde
-          <input type="date" className="spicy-input" value={desde} onChange={e => setDesde(e.target.value)} style={{ width: "100%", marginTop: 4 }}/>
+          <input type="date" aria-label="Desde" className="spicy-input" value={desde} onChange={e => setDesde(e.target.value)} style={{ width: "100%", marginTop: 4 }}/>
         </label>
       </div>
       <div style={{ display: "flex", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
@@ -5301,15 +5309,15 @@ function OnboardingView({ onboarding, history, onRefresh }) {
 
       {/* Filtros */}
       <div style={{ display:"flex",gap:8,flexWrap:"wrap",marginBottom:16,alignItems:"center" }}>
-        <select className="spicy-select" value={filterEtapa} onChange={e=>setFilterEtapa(e.target.value)}>
+        <select aria-label="Filtrar por etapa" className="spicy-select" value={filterEtapa} onChange={e=>setFilterEtapa(e.target.value)}>
           <option value="">Todas las etapas</option>
           {ONBOARDING_STAGES.map(s=><option key={s.key} value={s.key}>{s.key}</option>)}
         </select>
-        <select className="spicy-select" value={filterEstado} onChange={e=>setFilterEstado(e.target.value)}>
+        <select aria-label="Filtrar por estado" className="spicy-select" value={filterEstado} onChange={e=>setFilterEstado(e.target.value)}>
           <option value="">Todos los estados</option>
           {Object.keys(ESTADO_BADGE).map(k=><option key={k} value={k}>{ESTADO_BADGE[k].label}</option>)}
         </select>
-        <select className="spicy-select" value={filterResponsable} onChange={e=>setFilterResponsable(e.target.value)}>
+        <select aria-label="Filtrar por responsable" className="spicy-select" value={filterResponsable} onChange={e=>setFilterResponsable(e.target.value)}>
           <option value="">Todos los responsables</option>
           {responsables.map(r=><option key={r} value={r}>{r}</option>)}
         </select>
@@ -5581,7 +5589,7 @@ export default function SpicyFinanzas() {
   const [notes,           setNotes]           = useState([]);
   const [dataLoaded, setDataLoaded]   = useState(false);
 
-  const [view,      setView]      = useState("inicio");
+  const [view,      setView]      = useState(() => viewFromHash() || "inicio");
   const [menuOpen,  setMenuOpen]  = useState(false);          // menú lateral abierto (solo se usa en pantallas chicas)
   const [menuEdit,  setMenuEdit]  = useState(false);          // modo "Ordenar menú"
   const [menuPrefs, setMenuPrefs] = useState({ order: [], collapsed: [] });
@@ -5692,6 +5700,16 @@ export default function SpicyFinanzas() {
     });
     return ()=>{ alive = false; };
   },[session?.user?.id]);
+
+  useEffect(()=>{
+    const h = "#/" + view;
+    if (window.location.hash !== h) window.history.replaceState(null, "", window.location.pathname + window.location.search + h);
+  },[view]);
+  useEffect(()=>{
+    const onHash = ()=>{ const v = viewFromHash(); if (v) setView(v); };
+    window.addEventListener("hashchange", onHash);
+    return ()=>window.removeEventListener("hashchange", onHash);
+  },[]);
 
   // Título de la pestaña del navegador: dónde estás (así se distinguen varias pestañas abiertas) y cierre del menú con Escape.
   useEffect(()=>{
@@ -6011,7 +6029,7 @@ export default function SpicyFinanzas() {
           <div className="spicy-card">
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
               <div style={{ fontSize:14,fontWeight:600,color:"#111" }}>Egresos por categoría <span style={{ fontSize:11,color:"#aaa",fontWeight:400 }}>— click para ver detalle</span></div>
-              <select value={expCatMonth} onChange={e=>setExpCatMonth(e.target.value)} className="spicy-select" style={{ fontSize:12 }}>
+              <select aria-label="Período" value={expCatMonth} onChange={e=>setExpCatMonth(e.target.value)} className="spicy-select" style={{ fontSize:12 }}>
                 <option value="all">Todo el período</option>
                 {expMonths.map(mk=><option key={mk} value={mk}>{monthLabel(mk)}</option>)}
               </select>
@@ -6138,8 +6156,8 @@ export default function SpicyFinanzas() {
             <div key={row.field} style={{ marginBottom:14 }}>
               <div style={{ fontSize:12,fontWeight:600,color:"#555",marginBottom:7,textTransform:"uppercase",letterSpacing:0.5 }}>{row.label}</div>
               {row.type==="select"
-                ?<select className="spicy-select" value={form[row.field]} onChange={e=>setForm(f=>({...f,[row.field]:e.target.value}))} style={{ width:"100%" }}>{row.options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select>
-                :<input className="spicy-input" type={row.type} value={form[row.field]} placeholder={row.placeholder} onChange={e=>setForm(f=>({...f,[row.field]:e.target.value}))}/>
+                ?<select aria-label={row.label} className="spicy-select" value={form[row.field]} onChange={e=>setForm(f=>({...f,[row.field]:e.target.value}))} style={{ width:"100%" }}>{row.options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select>
+                :<input aria-label={row.label} className="spicy-input" type={row.type} value={form[row.field]} placeholder={row.placeholder} onChange={e=>setForm(f=>({...f,[row.field]:e.target.value}))}/>
               }
             </div>
           ))}
