@@ -154,9 +154,11 @@ const NAV_LABELS = {
   metrics:"Overview", metrics_mrr:"MRR & ARR", metrics_churn:"Churn", metrics_retention:"Retención", metrics_failed:"Pagos fallidos", metrics_customers:"Clientes", metrics_projection:"Proyección", metrics_plans:"Planes",
   adm_users:"Usuarios y companies", adm_companies:"Companies", adm_support:"Soporte",
 };
-const ADMIN_ONLY_VIEWS = ["add","usuarios","timeadmin","metrics","metrics_mrr","metrics_churn","metrics_retention","metrics_failed","metrics_customers","metrics_projection","metrics_plans","adm_users","adm_companies","adm_support"];
-// Secciones solo para admins: no se asignan desde el panel de Usuarios (la base también lo exige, ver supabase_revenue.sql).
-const ADMIN_ONLY_SECTIONS = ["Métricas","Admin Spicy"];
+const ADMIN_ONLY_VIEWS = ["add","usuarios","timeadmin"];
+// Secciones que se asignan por usuario en Configuración → Usuarios y permisos. Métricas y Admin Spicy son de SOLO LECTURA para
+// quien no es admin (la base lo exige: supabase_permisos_metricas_admin.sql). Hacer cambios en Admin Spicy es un permiso aparte:
+// ACTIONS_SECTION. El servidor (server/auth.js) lo vuelve a comprobar en cada pedido: lo que se ve acá es solo un reflejo.
+const ACTIONS_SECTION = "Admin Spicy: acciones";
 // Inicio, Notas y Tiempo son visibles para todos sin pasar por allowed_sections — Inicio
 // es la landing personal, Notas es información de equipo que cualquiera puede
 // ver y crear (según el pedido), y Tiempo es el control de jornada de cada persona
@@ -208,12 +210,12 @@ const NAV_SECTIONS = [
   {
     label: "Métricas",
     views: ["metrics","metrics_mrr","metrics_churn","metrics_retention","metrics_failed","metrics_customers","metrics_projection","metrics_plans"],
-    adminOnly: true,
+    adminOnly: false,
   },
   {
     label: "Admin Spicy",
     views: ["adm_users","adm_companies","adm_support"],
-    adminOnly: true,
+    adminOnly: false,
   },
   {
     label: "Dashboard Producto",
@@ -642,7 +644,9 @@ function CategoriesPanel({ catsIncome, catsExpense, isAdmin, onRefresh }) {
 
 // ── User Permissions Panel ───────────────────────────────────────────────────
 function UserPermissionsPanel({ users, allowedSections, onRefresh }) {
-  const sections = NAV_SECTIONS.map(s=>s.label).filter(l=>!ALWAYS_VISIBLE_SECTIONS.includes(l)&&!ADMIN_ONLY_SECTIONS.includes(l));
+  const baseSections = NAV_SECTIONS.map(s=>s.label).filter(l=>!ALWAYS_VISIBLE_SECTIONS.includes(l));
+  // Columnas: cada sección y, a continuación de Admin Spicy, el permiso de hacer cambios (key = lo que se guarda en la base).
+  const columns = baseSections.flatMap(l => l==="Admin Spicy" ? [{ key:l, label:l, hint:"Solo lectura: ve usuarios, companies y auditoría" }, { key:ACTIONS_SECTION, label:"Admin Spicy · acciones", hint:"Puede pausar, editar y asignar plan (COBRA tarjetas reales)", needs:"Admin Spicy" }] : [{ key:l, label:l, hint: l==="Métricas" ? "Solo lectura: ve MRR, churn, retención y clientes" : "" }]);
   const emptyForm = () => ({ email:"", first_name:"", last_name:"", role:"reader" });
 
   const [showAdd, setShowAdd] = useState(false);
@@ -676,7 +680,11 @@ function UserPermissionsPanel({ users, allowedSections, onRefresh }) {
 
   async function toggle(userId, section, allow) {
     if (allow) await sb.from("allowed_sections").insert({ user_id:userId, section });
-    else await sb.from("allowed_sections").delete().eq("user_id",userId).eq("section",section);
+    else {
+      await sb.from("allowed_sections").delete().eq("user_id",userId).eq("section",section);
+      // Sacar "Admin Spicy" también saca el permiso de hacer cambios: no tiene sentido tener uno sin el otro.
+      if (section==="Admin Spicy") await sb.from("allowed_sections").delete().eq("user_id",userId).eq("section",ACTIONS_SECTION);
+    }
     onRefresh();
   }
 
@@ -708,7 +716,7 @@ function UserPermissionsPanel({ users, allowedSections, onRefresh }) {
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20 }}>
         <div>
           <div style={{ fontSize:16,fontWeight:700,color:"#111",marginBottom:4 }}>Usuarios y permisos</div>
-          <div style={{ fontSize:13,color:"#888" }}>Tildá qué secciones puede ver cada usuario — arrancan sin ver ninguna. Los admins siempre ven todo.</div>
+          <div style={{ fontSize:13,color:"#888" }}>Tildá qué secciones puede ver cada usuario — arrancan sin ver ninguna. Métricas y Admin Spicy son de solo lectura; para que además pueda hacer cambios en Admin Spicy, tildá también “Admin Spicy · acciones”. Los admins siempre ven y hacen todo.</div>
         </div>
         <button className="spicy-btn-primary" onClick={()=>{setError("");setForm(emptyForm());setShowAdd(true);}}>+ Agregar usuario</button>
       </div>
@@ -718,7 +726,7 @@ function UserPermissionsPanel({ users, allowedSections, onRefresh }) {
           <thead>
             <tr>
               <th style={{ textAlign:"left",fontSize:12,color:"#888",fontWeight:600,padding:"8px 12px",borderBottom:"1px solid #EBEBEB" }}>Usuario</th>
-              {sections.map(s=><th key={s} style={{ textAlign:"center",fontSize:11,color:"#888",fontWeight:600,padding:"8px 8px",borderBottom:"1px solid #EBEBEB" }}>{s}</th>)}
+              {columns.map(c=><th key={c.key} title={c.hint||undefined} style={{ textAlign:"center",fontSize:11,color:"#888",fontWeight:600,padding:"8px 8px",borderBottom:"1px solid #EBEBEB" }}>{c.label}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -735,19 +743,19 @@ function UserPermissionsPanel({ users, allowedSections, onRefresh }) {
                     <button onClick={()=>openEdit(u)} title="Editar" style={{ background:"none",border:"none",cursor:"pointer",color:"#bbb",fontSize:13,padding:4 }}>✎</button>
                   </div>
                 </td>
-                {sections.map(s=>(
-                  <td key={s} style={{ textAlign:"center",padding:"10px 8px",borderBottom:"1px solid #F5F5F5" }}>
+                {columns.map(c=>(
+                  <td key={c.key} style={{ textAlign:"center",padding:"10px 8px",borderBottom:"1px solid #F5F5F5" }}>
                     {u.role==="admin" ? (
                       <span style={{ fontSize:11,color:"#ccc" }}>—</span>
                     ) : (
-                      <input type="checkbox" checked={isAllowed(u.user_id,s)} onChange={e=>toggle(u.user_id,s,e.target.checked)}/>
+                      <input type="checkbox" aria-label={`${c.label} para ${displayName(u)}`} checked={isAllowed(u.user_id,c.key)} disabled={!!c.needs && !isAllowed(u.user_id,c.needs)} title={c.needs && !isAllowed(u.user_id,c.needs) ? `Primero tildá ${c.needs}` : c.hint||undefined} onChange={e=>toggle(u.user_id,c.key,e.target.checked)}/>
                     )}
                   </td>
                 ))}
               </tr>
             ))}
             {users.length===0 && (
-              <tr><td colSpan={sections.length+1} style={{ padding:"20px",textAlign:"center",color:"#ccc",fontSize:13 }}>No hay usuarios.</td></tr>
+              <tr><td colSpan={columns.length+1} style={{ padding:"20px",textAlign:"center",color:"#ccc",fontSize:13 }}>No hay usuarios.</td></tr>
             )}
           </tbody>
         </table>
@@ -5625,7 +5633,7 @@ export default function SpicyFinanzas() {
 
   const isAdmin = role==="admin";
   const myAllowedSections = new Set(session ? allowedSections.filter(a=>a.user_id===session.user.id).map(a=>a.section) : []);
-  const canSeeSection = (label) => ALWAYS_VISIBLE_SECTIONS.includes(label) || isAdmin || (!ADMIN_ONLY_SECTIONS.includes(label) && myAllowedSections.has(label));
+  const canSeeSection = (label) => ALWAYS_VISIBLE_SECTIONS.includes(label) || isAdmin || myAllowedSections.has(label);
   const currentSection = NAV_SECTIONS.find(s=>s.views.includes(view));
   const currentViewBlocked = (currentSection && !canSeeSection(currentSection.label)) || (ADMIN_ONLY_VIEWS.includes(view) && !isAdmin);
 
@@ -6007,8 +6015,8 @@ export default function SpicyFinanzas() {
       {view==="mytime"&&<MiTiempoView currentUserId={session.user.id}/>}
       {view==="timeadmin"&&isAdmin&&<ControlJornadaView allUsers={allUsers}/>}
       {view==="crm"&&<CrmApp sb={sb}/>}
-      {isAdmin&&view.startsWith("metrics")&&<RevenueApp sb={sb} view={view} setView={setView}/>}
-      {isAdmin&&view.startsWith("adm_")&&<AdminApp view={view} actor={session.user.email}/>}
+      {canSeeSection("Métricas")&&view.startsWith("metrics")&&<RevenueApp sb={sb} view={view} setView={setView} readOnly={!isAdmin}/>}
+      {canSeeSection("Admin Spicy")&&view.startsWith("adm_")&&<AdminApp view={view} actor={session.user.email}/>}
       {view==="notes"&&<NotesView notes={notes} currentUserId={session.user.id} currentUserEmail={session.user.email} isAdmin={isAdmin} onRefresh={loadAll}/>}
 
       {/* ADD */}

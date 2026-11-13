@@ -44,7 +44,7 @@ function useRevenueData(sb) {
 
 const PAGES_WITH_FILTERS = ["metrics", "metrics_mrr", "metrics_churn", "metrics_retention", "metrics_customers"];
 
-export default function RevenueApp({ sb, view, setView }) {
+export default function RevenueApp({ sb, view, setView, readOnly = false }) {
   const { data, error, reload } = useRevenueData(sb);
   const [period, setPeriod] = useState("year");
   const [seg, setSeg] = useState("todos");
@@ -60,10 +60,11 @@ export default function RevenueApp({ sb, view, setView }) {
   if (!data) return <div style={{ padding: "3rem 1rem", textAlign: "center", color: "#888", fontSize: 14 }}>Cargando métricas...</div>;
 
   const done = data.events.some((e) => e.baseline) || data.runs.some((r) => r.kind === "baseline");
-  const common = { d: data, rows, allRows, seg, now, sb, reload, done, go };
+  const common = { d: data, rows, allRows, seg, now, sb, reload, done, go, ro: readOnly };
   return (
     <div className="rv">
       <RvStyles />
+      {readOnly && <div className="notice" role="status">Modo solo lectura: podés ver todas las métricas, pero clasificar planes, cargar tipos de cambio, asignar segmentos y sincronizar con Stripe lo hacen los admins.</div>}
       {!data.v2 && <div className="notice" style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #FCE4A0" }}>Falta aplicar <b>supabase_revenue_v2.sql</b> en Supabase (segmento de clientes y pagos fallidos). Mientras tanto esas dos cosas no están disponibles.</div>}
       {PAGES_WITH_FILTERS.includes(view) && (
         <div className="filter-bar">

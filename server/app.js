@@ -19,6 +19,10 @@ export function createApp({ queries, authenticate, billing, companies, users, au
       if (!admin) return res.status(401).json({ error: "No autorizado" });
       req.admin = admin;
       req.token = String(req.headers.authorization).trim().replace(/^Bearer\s+/, ""); // el mismo token del admin, para escribir la auditoría a su nombre
+      // Quien solo tiene permiso de ver ("read") puede consultar pero no hacer ningún cambio: todo lo que no sea lectura se frena acá.
+      if (req.method !== "GET" && req.method !== "HEAD" && !admin.canAct) {
+        return res.status(403).json({ code: "SIN_PERMISO_ACCIONES", message: "Tu usuario puede ver Admin Spicy pero no hacer cambios. Pedile a un admin que te habilite las acciones." });
+      }
       next();
     } catch (e) { next(e); }
   });
@@ -29,6 +33,8 @@ export function createApp({ queries, authenticate, billing, companies, users, au
   const orNotFound = (res, v) => (v == null ? res.status(404).json({ error: "No encontrado" }) : res.json(v));
 
   app.get("/api/admin/health", route(async (req, res) => res.json(await queries.health())));
+  // Qué puede hacer quien está conectado (el front deshabilita los botones de cambios si no puede). La que manda es esta API: el front solo lo refleja.
+  app.get("/api/admin/me", route(async (req, res) => res.json({ email: req.admin.email, level: req.admin.level, canAct: !!req.admin.canAct })));
 
   app.get("/api/admin/users", route(async (req, res) => res.json(await queries.listUsers({
     search: text(req.query.search), page: int(req.query.page, 1, 1, 100000), pageSize: int(req.query.pageSize, 8, 1, 50), owners: flag(req.query.owners), activeOnly: flag(req.query.activeOnly),

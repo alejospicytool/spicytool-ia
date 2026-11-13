@@ -11,7 +11,7 @@ const REASONS = { card_declined: "Tarjeta rechazada", insufficient_funds: "Fondo
 const reasonText = (f) => (f.failure_code ? REASONS[f.failure_code] || f.failure_code : f.failure_message || "Motivo no informado");
 
 // ── Overview ─────────────────────────────────────────────────────────────────────────────────────────
-export function Overview({ d, rows, seg, done, alerts, go, sb, reload }) {
+export function Overview({ d, rows, seg, done, alerts, go, sb, reload, ro }) {
   const k = useMemo(() => periodKpis(rows), [rows]);
   const customers = useMemo(() => d.customers.filter((c) => Number(c.mrr) > 0 && matchSegment(c, seg)), [d.customers, seg]);
   const [busy, setBusy] = useState(""), [notice, setNotice] = useState(null);
@@ -41,9 +41,9 @@ export function Overview({ d, rows, seg, done, alerts, go, sb, reload }) {
           <div className="card-title">Puesta en marcha</div>
           <div style={{ fontSize: 13, color: "#555", marginBottom: 14 }}>Tres pasos, en este orden (así la carga inicial no cuenta toda la base como "nuevos").</div>
           <ol style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 12, fontSize: 13 }}>
-            <li>Traer las suscripciones de Stripe. {d.plans.length > 0 && <span style={{ color: "#16A34A" }}>Hecho ({d.plans.length} planes).</span>}<div><button className="btn-secondary" style={{ marginTop: 6 }} disabled={!!busy} onClick={() => run("pull")}>{busy === "pull" ? "Trayendo…" : "Traer de Stripe"}</button></div></li>
+            <li>Traer las suscripciones de Stripe. {d.plans.length > 0 && <span style={{ color: "#16A34A" }}>Hecho ({d.plans.length} planes).</span>}<div><button className="btn-secondary" style={{ marginTop: 6 }} disabled={!!busy || ro} title={ro ? "Solo lectura: esto lo hacen los admins." : undefined} onClick={() => run("pull")}>{busy === "pull" ? "Trayendo…" : "Traer de Stripe"}</button></div></li>
             <li>Clasificar los planes (SaaS, pass-through, servicio, test) y cargar tipos de cambio si hay cobros que no son en USD. {d.plans.length > 0 && (unclassified ? <span style={{ color: "#D97706" }}>Faltan {unclassified}.</span> : <span style={{ color: "#16A34A" }}>Todos clasificados.</span>)}<div><button className="btn-secondary" style={{ marginTop: 6 }} onClick={() => go("planes")}>Ir a Planes</button></div></li>
-            <li>Carga inicial: registra el MRR actual de cada cliente como punto de partida.<div><button className="btn-primary" style={{ marginTop: 6 }} disabled={!!busy || !d.plans.length || unclassified > 0} onClick={() => run("baseline")}>{busy === "baseline" ? "Cargando…" : "Hacer carga inicial"}</button></div></li>
+            <li>Carga inicial: registra el MRR actual de cada cliente como punto de partida.<div><button className="btn-primary" style={{ marginTop: 6 }} disabled={!!busy || ro || !d.plans.length || unclassified > 0} title={ro ? "Solo lectura: esto lo hacen los admins." : undefined} onClick={() => run("baseline")}>{busy === "baseline" ? "Cargando…" : "Hacer carga inicial"}</button></div></li>
           </ol>
         </div>
       )}
@@ -233,7 +233,7 @@ export function FailedPage({ d, now }) {
 
 // ── Clientes ─────────────────────────────────────────────────────────────────────────────────────────
 const EMPTY = { customerKey: "", customerName: "", email: "", planPriceId: "", newPlanName: "", amount: "", currency: "usd", interval: "month", status: "active", subscriptionId: "", segment: "" };
-export function CustomersPage({ d, rows, seg, now, sb, reload }) {
+export function CustomersPage({ d, rows, seg, now, sb, reload, ro }) {
   const [q, setQ] = useState(""), [onlyActive, setOnlyActive] = useState(true), [form, setForm] = useState(null), [busy, setBusy] = useState(false), [notice, setNotice] = useState(null);
   const customers = useMemo(() => d.customers.filter((c) => matchSegment(c, seg) && (!onlyActive || Number(c.mrr) > 0) && (!q || ((c.name || "") + " " + (c.email || "") + " " + c.key).toLowerCase().includes(q.toLowerCase()))).sort((a, b) => Number(b.mrr) - Number(a.mrr) || String(a.name).localeCompare(String(b.name))), [d.customers, seg, onlyActive, q]);
   const summary = useMemo(() => segmentSummary(d.customers), [d.customers]);
@@ -279,7 +279,7 @@ export function CustomersPage({ d, rows, seg, now, sb, reload }) {
     <div>
       <div className="page-header">
         <div><div className="page-title">Clientes</div><div className="page-sub">{customers.length} {customers.length === 1 ? "cliente" : "clientes"} · filtro: {seg === "todos" ? "todos" : seg === "sin" ? "sin segmento" : seg}</div></div>
-        <button className="btn-primary" onClick={() => { setNotice(null); setForm({ ...EMPTY }); }}>+ Agregar cliente</button>
+        <button className="btn-primary" disabled={ro} title={ro ? "Solo lectura: esto lo hacen los admins." : undefined} onClick={() => { setNotice(null); setForm({ ...EMPTY }); }}>+ Agregar cliente</button>
       </div>
       <Notice n={notice} />
       <div className="kpi-grid">
@@ -305,12 +305,12 @@ export function CustomersPage({ d, rows, seg, now, sb, reload }) {
                   <div className="customer-name">{c.name || c.email || c.key} <span className={"badge " + (active ? "badge-green" : "badge-red")} style={{ marginLeft: 6 }}>{active ? "Activo" : "Churneado"}</span></div>
                   <div className="customer-plan">{(it.priceId && planName[it.priceId]) || "—"} · <span style={{ color: c.source === "stripe" ? "var(--blue)" : "var(--yellow)" }}>{c.source === "stripe" ? "Stripe" : "Por fuera"}</span>{c.email && c.name ? " · " + c.email : ""}</div>
                 </div>
-                {d.v2 && <select className="seg-select" aria-label={"Segmento de " + (c.name || c.key)} value={c.segment || ""} onChange={(e) => setSegment(c, e.target.value)}><option value="">Sin segmento</option><option value="inmobiliaria">🏠 Inmobiliaria</option><option value="otro">◎ Otro</option></select>}
+                {d.v2 && <select className="seg-select" disabled={ro} aria-label={"Segmento de " + (c.name || c.key)} value={c.segment || ""} onChange={(e) => setSegment(c, e.target.value)}><option value="">Sin segmento</option><option value="inmobiliaria">🏠 Inmobiliaria</option><option value="otro">◎ Otro</option></select>}
                 <div className="customer-mrr">{money(c.mrr)}<span style={{ fontSize: 10, color: "#888", fontWeight: 400 }}>/mes</span></div>
                 <div style={{ display: "flex", gap: 6 }}>
                   {c.source === "manual" ? (<>
-                    <button className="btn-sm" onClick={() => edit(c)}>Editar</button>
-                    {active ? <button className="btn-sm danger" disabled={busy} onClick={() => toggleStatus(c, "canceled")}>Dar de baja</button> : <button className="btn-sm" disabled={busy} onClick={() => toggleStatus(c, "active")}>Reactivar</button>}
+                    <button className="btn-sm" disabled={ro} onClick={() => edit(c)}>Editar</button>
+                    {active ? <button className="btn-sm danger" disabled={busy || ro} onClick={() => toggleStatus(c, "canceled")}>Dar de baja</button> : <button className="btn-sm" disabled={busy || ro} onClick={() => toggleStatus(c, "active")}>Reactivar</button>}
                   </>) : <span style={{ fontSize: 11, color: "#aaa" }}>se gestiona en Stripe</span>}
                 </div>
               </div>
@@ -418,7 +418,7 @@ export function ProjectionPage({ d, allRows, now }) {
 }
 
 // ── Planes y tipos de cambio ─────────────────────────────────────────────────────────────────────────
-export function PlansPage({ d, done, sb, reload }) {
+export function PlansPage({ d, done, sb, reload, ro }) {
   const [dirty, setDirty] = useState(false), [busy, setBusy] = useState(false), [notice, setNotice] = useState(null);
   const [fxForm, setFxForm] = useState({ currency: "", rate: "" });
   const usage = useMemo(() => planUsage(d.subs), [d.subs]);
@@ -461,7 +461,7 @@ export function PlansPage({ d, done, sb, reload }) {
       {dirty && done && (
         <div className="alert" style={{ background: "#FEF3C7", border: "1px solid #FCE4A0", color: "#92400E" }}>
           <span style={{ flex: 1 }}>Hiciste cambios: hay que recalcular el MRR para que se apliquen.</span>
-          <button className="btn-primary" disabled={busy} onClick={recompute}>{busy ? "Recalculando…" : "Aplicar y recalcular"}</button>
+          <button className="btn-primary" disabled={busy || ro} title={ro ? "Solo lectura: esto lo hacen los admins." : undefined} onClick={recompute}>{busy ? "Recalculando…" : "Aplicar y recalcular"}</button>
         </div>
       )}
       <div className="card" style={{ padding: "8px 22px" }}>
@@ -469,18 +469,18 @@ export function PlansPage({ d, done, sb, reload }) {
         {sorted.map((p) => (
           <div key={p.price_id} className="movement-row" style={{ gap: 12 }}>
             <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{p.name || "(sin nombre)"}</div><div style={{ fontSize: 12, color: "#555" }}>{usageText(p.price_id)}</div><div className="mono" style={{ fontSize: 10, color: "#aaa" }}>{p.price_id}</div></div>
-            <select className="inp" style={{ width: 240 }} aria-label={"Categoría de " + (p.name || p.price_id)} value={p.category} onChange={(e) => update(p, { category: e.target.value, counts_in_mrr: DEFAULT_COUNTS[e.target.value] })}>{CATEGORIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
-            <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", width: 120 }}><input type="checkbox" checked={p.counts_in_mrr} disabled={p.category === "sin_clasificar"} onChange={(e) => update(p, { counts_in_mrr: e.target.checked })} />Suma al MRR</label>
+            <select className="inp" disabled={ro} style={{ width: 240 }} aria-label={"Categoría de " + (p.name || p.price_id)} value={p.category} onChange={(e) => update(p, { category: e.target.value, counts_in_mrr: DEFAULT_COUNTS[e.target.value] })}>{CATEGORIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+            <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", width: 120 }}><input type="checkbox" checked={p.counts_in_mrr} disabled={ro || p.category === "sin_clasificar"} onChange={(e) => update(p, { counts_in_mrr: e.target.checked })} />Suma al MRR</label>
           </div>))}
       </div>
       <div className="card">
         <div className="card-title">Tipos de cambio</div>
         <div style={{ fontSize: 12, color: "#888", marginBottom: 12 }}>Solo hace falta si algún cobro no es en USD. Sin tasa cargada el cálculo da error en vez de inventar un número.</div>
-        {d.fx.map((f) => (<div key={f.currency} className="movement-row"><div style={{ flex: 1, fontSize: 13 }}>1 {String(f.currency).toUpperCase()} = {Number(f.rate)} USD</div><button className="btn-sm" onClick={() => delFx(f.currency)}>Quitar</button></div>))}
+        {d.fx.map((f) => (<div key={f.currency} className="movement-row"><div style={{ flex: 1, fontSize: 13 }}>1 {String(f.currency).toUpperCase()} = {Number(f.rate)} USD</div><button className="btn-sm" disabled={ro} onClick={() => delFx(f.currency)}>Quitar</button></div>))}
         <form onSubmit={saveFx} style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
           <input className="inp" style={{ width: 90 }} placeholder="ARS" aria-label="Moneda" maxLength={3} value={fxForm.currency} onChange={(e) => setFxForm({ ...fxForm, currency: e.target.value })} />
           <input className="inp" style={{ width: 140 }} placeholder="0.0009" aria-label="USD por unidad" inputMode="decimal" value={fxForm.rate} onChange={(e) => setFxForm({ ...fxForm, rate: e.target.value })} />
-          <button className="btn-secondary" type="submit">Guardar tasa</button>
+          <button className="btn-secondary" type="submit" disabled={ro}>Guardar tasa</button>
         </form>
       </div>
     </div>

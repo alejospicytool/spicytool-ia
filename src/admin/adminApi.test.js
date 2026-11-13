@@ -249,9 +249,9 @@ describe("soporte: entrar como usuario (simulado)", () => {
   const err = async (p) => { try { await p; } catch (e) { return e; } throw new Error("tenía que fallar"); };
 
   it("permisos: tienen todos menos el actor sin permiso, sin distinguir mayúsculas", async () => {
-    expect(await getMyPermissions(ACTOR)).toEqual({ support: true });
-    expect(await getMyPermissions(DENIED)).toEqual({ support: false });
-    expect(await getMyPermissions("  SIN.PERMISO@Ejemplo.test ")).toEqual({ support: false });
+    expect(await getMyPermissions(ACTOR)).toEqual({ support: true, canAct: true, level: "admin" });
+    expect(await getMyPermissions(DENIED)).toEqual({ support: false, canAct: true, level: "admin" });
+    expect(await getMyPermissions("  SIN.PERMISO@Ejemplo.test ")).toEqual({ support: false, canAct: true, level: "admin" });
     await expect(getMyPermissions("")).rejects.toThrow(/quién/);
   });
   it("un usuario sin company no puede entrar como usuario: SIN_COMPANY, sin link y sin auditar un link generado", async () => {

@@ -267,9 +267,13 @@ const SUPPORT_LINK_MINUTES = 15; // supuesto
 
 // GET /admin/me/permissions
 export async function getMyPermissions(actor) {
-  if (real()) return { support: false, disabledReason: "Entrar como usuario todavía no está conectado." };
+  if (real()) {
+    // canAct / level vienen del servidor (la que manda es esa API; esto solo deshabilita botones).
+    const me = await http("/me");
+    return { support: false, disabledReason: "Entrar como usuario todavía no está conectado.", canAct: !!(me && me.canAct), level: me && me.level };
+  }
   needActor(actor);
-  return { support: !SUPPORT_DENIED.includes(String(actor).trim().toLowerCase()) };
+  return { support: !SUPPORT_DENIED.includes(String(actor).trim().toLowerCase()), canAct: true, level: "admin" };
 }
 
 // POST /admin/support-sessions/link

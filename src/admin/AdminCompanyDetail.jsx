@@ -13,6 +13,9 @@ const yesNo = (v) => (v ? "Sí" : "No");
 // Columna con el id de Mongo (copiable) para que se pueda buscar el documento en la base.
 const ID_COL = { key: "_id", label: "ID de Mongo", render: (r) => <IdCell id={r._id} /> };
 const RO_TITLE = "Todavía no está conectado: por ahora esta sección es de solo lectura.";
+const NO_ACT_TITLE = "Tu usuario puede ver Admin Spicy pero no hacer cambios. Pedile a un admin que te habilite las acciones.";
+// Mientras no se sabe qué permisos tiene (o si no puede hacer cambios) los botones de acciones quedan deshabilitados. La que manda es la API.
+const cantAct = (perms) => !(perms.data && perms.data.canAct);
 const num = (v) => (v == null ? "—" : Number(v).toLocaleString("es-AR"));
 const Card = ({ title, sub, children }) => <div className="card"><div className="card-title"><span>{title}{sub != null && <span className="card-sub">{sub}</span>}</span></div>{children}</div>;
 
@@ -98,7 +101,7 @@ function AuditTab({ companyId, version }) {
 }
 
 // Usuario que se registró pero no tiene company (en la base real es la mayoría): solo se ven sus datos y la suscripción.
-function NoCompanyView({ user, actor, onBack, refresh, dialog, setDialog }) {
+function NoCompanyView({ user, actor, onBack, refresh, dialog, setDialog, acts }) {
   const wa = whatsappProvider(user), submitted = (fn) => async (v) => { await fn(v); refresh(); };
   return (
     <div>
@@ -109,9 +112,9 @@ function NoCompanyView({ user, actor, onBack, refresh, dialog, setDialog }) {
           <div className="page-sub">{user.email} · Plan: {planLabel(planOf(user))}</div>
         </div>
         <div className="detail-actions">
-          <button className="btn-secondary" onClick={() => setDialog("contact")}>Editar contacto</button>
-          <button className="btn-secondary" onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
-          <button className="btn-secondary" onClick={() => setDialog("card")}>Link de tarjeta</button>
+          <button className="btn-secondary" {...acts} onClick={() => setDialog("contact")}>Editar contacto</button>
+          <button className="btn-secondary" {...acts} onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
+          <button className="btn-secondary" {...acts} onClick={() => setDialog("card")}>Link de tarjeta</button>
           <button className="btn-warn" disabled title="Este usuario no tiene company: no hay cuenta para revisar.">Entrar como usuario</button>
         </div>
       </div>
@@ -137,7 +140,8 @@ function NoCompanyView({ user, actor, onBack, refresh, dialog, setDialog }) {
 export default function AdminCompanyDetail({ userId, actor, onBack, onChanged }) {
   const [version, setVersion] = useState(0), [tab, setTab] = useState("resumen"), [dialog, setDialog] = useState(null), [confirm, setConfirm] = useState(null);
   const [confirmBusy, setConfirmBusy] = useState(false), [confirmError, setConfirmError] = useState("");
-  const perms = useAsync(() => getMyPermissions(actor), "perms:" + actor), ro = adminMode() === "real";
+  const perms = useAsync(() => getMyPermissions(actor), "perms:" + actor), ro = adminMode() === "real", cant = cantAct(perms);
+  const acts = { disabled: cant, title: cant ? NO_ACT_TITLE : undefined };
   const res = useAsync(async () => { const user = await getUser(userId); if (!user) throw new Error("No se encontró el usuario."); const cid = companyIdOf(user); return { user, bundle: cid ? await getCompanyBundle(cid) : null }; }, `detail:${userId}:${version}`);
 
   const refresh = () => { setVersion((v) => v + 1); onChanged(); };
@@ -152,7 +156,7 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
   if (res.loading) return <div className="empty">Cargando…</div>;
   if (res.error) return <div><button className="btn-secondary" onClick={onBack}>← Volver</button><div className="err" style={{ marginTop: 12 }}>{res.error}</div></div>;
   const { user, bundle: b } = res.data;
-  if (!b) return <NoCompanyView user={user} actor={actor} onBack={onBack} refresh={refresh} dialog={dialog} setDialog={setDialog} />;
+  if (!b) return <NoCompanyView user={user} actor={actor} onBack={onBack} refresh={refresh} dialog={dialog} setDialog={setDialog} acts={acts} />;
   const co = b.company, paused = co.status === "paused";
 
   const tabs = [
@@ -171,14 +175,14 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
           <div className="page-sub">{user.email} · {co.name} · Plan: {planLabel(planOf(user))}</div>
         </div>
         <div className="detail-actions">
-          <button className="btn-secondary" onClick={() => setDialog("company")}>Editar company</button>
-          <button className="btn-secondary" onClick={() => setDialog("contact")}>Editar contacto</button>
-          <button className="btn-secondary" onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
-          <button className="btn-secondary" onClick={() => setDialog("card")}>Link de tarjeta</button>
+          <button className="btn-secondary" {...acts} onClick={() => setDialog("company")}>Editar company</button>
+          <button className="btn-secondary" {...acts} onClick={() => setDialog("contact")}>Editar contacto</button>
+          <button className="btn-secondary" {...acts} onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
+          <button className="btn-secondary" {...acts} onClick={() => setDialog("card")}>Link de tarjeta</button>
           <button className="btn-warn" disabled={!perms.data || !perms.data.support} title={perms.data && !perms.data.support ? (perms.data.disabledReason || "Tu usuario no tiene permiso de soporte. Pedile a un admin que te habilite.") : "Generar un link para entrar a la cuenta de este usuario"} onClick={() => setDialog("support")}>Entrar como usuario</button>
           {paused
-            ? <button className="btn-primary" onClick={() => ask({ title: "Activar company", label: "Activar", text: <>Vas a <b>activar</b> la company <b>{co.name}</b>. Sus usuarios vuelven a poder usar la cuenta.</>, action: () => setCompanyStatus(co._id, "active", actor) })}>Activar company</button>
-            : <button className="btn-warn" onClick={() => ask({ title: "Pausar company", label: "Pausar", danger: true, text: <>Vas a <b>pausar</b> la company <b>{co.name}</b>. Sus usuarios dejan de poder usar la cuenta hasta que la actives de nuevo. No cancela la suscripción ni los cobros.</>, action: () => setCompanyStatus(co._id, "paused", actor) })}>Pausar company</button>}
+            ? <button className="btn-primary" {...acts} onClick={() => ask({ title: "Activar company", label: "Activar", text: <>Vas a <b>activar</b> la company <b>{co.name}</b>. Sus usuarios vuelven a poder usar la cuenta.</>, action: () => setCompanyStatus(co._id, "active", actor) })}>Activar company</button>
+            : <button className="btn-warn" {...acts} onClick={() => ask({ title: "Pausar company", label: "Pausar", danger: true, text: <>Vas a <b>pausar</b> la company <b>{co.name}</b>. Sus usuarios dejan de poder usar la cuenta hasta que la actives de nuevo. No cancela la suscripción ni los cobros.</>, action: () => setCompanyStatus(co._id, "paused", actor) })}>Pausar company</button>}
         </div>
       </div>
 
@@ -212,7 +216,7 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
       </>)}
       {tab === "workflows" && <Card title="Workflows" sub={b.workflows.length}><DataTable rows={b.workflows} empty="Sin workflows." columns={[
         { key: "name", label: "Nombre" }, { key: "description", label: "Descripción", muted: true }, { key: "triggerProperty", label: "Disparador", render: (w) => `${w.triggerProperty} = ${w.triggerValue}` },
-        ID_COL, { key: "act", label: "", render: (w) => <button className="btn-sm danger" disabled={ro} title={ro ? RO_TITLE : undefined} onClick={(e) => { e.stopPropagation(); ask({ title: "Eliminar workflow", label: "Eliminar", danger: true, text: <>Vas a <b>eliminar</b> el workflow <b>{w.name}</b>. Esta acción no se puede deshacer.</>, action: () => deleteWorkflow(w._id, actor) }); }}>Eliminar</button> },
+        ID_COL, { key: "act", label: "", render: (w) => <button className="btn-sm danger" disabled={ro || cant} title={ro ? RO_TITLE : cant ? NO_ACT_TITLE : undefined} onClick={(e) => { e.stopPropagation(); ask({ title: "Eliminar workflow", label: "Eliminar", danger: true, text: <>Vas a <b>eliminar</b> el workflow <b>{w.name}</b>. Esta acción no se puede deshacer.</>, action: () => deleteWorkflow(w._id, actor) }); }}>Eliminar</button> },
       ]} /></Card>}
       {tab === "creditos" && <CreditsTab companyId={co._id} version={version} />}
       {tab === "auditoria" && <AuditTab companyId={co._id} version={version} />}
