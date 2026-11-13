@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   PAID_PLANS, planOf, planLabel, isPaidPlan, validatePlanAssignment, newIdempotencyKey, formatPrice, explainWebhookError, WEBHOOK_ERRORS, validateSupportReason, buildSupportRequest, explainSupportError, SUPPORT_ERRORS, SUPPORT_ACTIONS, AUDIT_ACTIONS, expiryText, REASON_MIN, REASON_MAX, matchesSearch, escapeRegExp, sortUsersRecent, paginate, whatsappProvider, companyIdOf,
-  validateCompanyEdit, validateContactEdit, diffFields, buildAuditEntry, userFullName, sortByPosition, isOwner, matchesFilters, isPaused, matchesCompanySearch, sortCompaniesByName,
+  validateCompanyEdit, validateContactEdit, diffFields, waLink, buildAuditEntry, userFullName, sortByPosition, isOwner, matchesFilters, isPaused, matchesCompanySearch, sortCompaniesByName,
 } from "./adminLogic.js";
 
 describe("planes y suscripciones", () => {
@@ -354,4 +354,28 @@ describe("soporte: pedido, errores y vencimiento", () => {
     expect(expiryText(undefined, now)).toBe("");
   });
   it("constantes", () => { expect([REASON_MIN, REASON_MAX]).toEqual([10, 500]); });
+});
+
+describe("link de WhatsApp (waLink)", () => {
+  it("con + o 00 adelante: arma https://wa.me/ con solo dígitos", () => {
+    expect(waLink("+54 9 11 5555-0000")).toBe("https://wa.me/5491155550000");
+    expect(waLink("+5491144445394")).toBe("https://wa.me/5491144445394");
+    expect(waLink("  +598 94 622 258 ")).toBe("https://wa.me/59894622258");
+    expect(waLink("0054 9 11 5555 0000")).toBe("https://wa.me/5491155550000");
+    expect(waLink("+52 55 3233 69 88")).toBe("https://wa.me/525532336988");
+  });
+  it("sin + ni 00: solo si ya trae código de país (11 dígitos o más)", () => {
+    expect(waLink("5491155550000")).toBe("https://wa.me/5491155550000");
+    expect(waLink("549 3416898359")).toBe("https://wa.me/5493416898359");
+    expect(waLink("1155550000")).toBe("");       // 10 dígitos: número local, no se sabe el país
+    expect(waLink("11 5555-0000")).toBe("");
+    expect(waLink("5555-0000")).toBe("");
+  });
+  it("vacío, texto o demasiado largo: no arma link", () => {
+    for (const v of [undefined, null, "", "   ", "sin teléfono", "+", "+12", "+1234567890123456"]) expect(waLink(v)).toBe("");
+  });
+  it("nunca deja pasar caracteres raros en el link", () => {
+    expect(waLink("+54 9 11 5555-0000?text=hola&x=<script>")).toMatch(/^https:\/\/wa\.me\/\d+$/);
+    expect(waLink("javascript:alert(1)")).toBe("");
+  });
 });

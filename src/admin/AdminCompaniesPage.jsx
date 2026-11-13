@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { listCompanies, listCompanyUsers } from "./adminApi.js";
 import { userFullName } from "./adminLogic.js";
-import { Tabs, DataTable, StatusBadge, Pager } from "./adminUi.jsx";
+import { Tabs, DataTable, StatusBadge, Pager, PhoneLink } from "./adminUi.jsx";
 import { useAsync } from "./adminHooks.js";
 import { fmtDate } from "../revenue/revenueUi.jsx";
 import AdminCompanyDetail from "./AdminCompanyDetail.jsx";
@@ -47,7 +47,7 @@ export default function AdminCompaniesPage({ actor }) {
           {users.loading ? <div className="empty">Cargando…</div> : users.error ? <div className="err">{users.error}</div> : (
             <DataTable rows={users.data} onRowClick={(u) => setUserId(u._id)} empty="Esta company no tiene usuarios." columns={[
               { key: "name", label: "Nombre", render: (u) => <>{u.name || "—"}{u.isOwner && <span className="badge badge-blue" style={{ marginLeft: 6 }}>Owner</span>}</> },
-              { key: "surname", label: "Apellido" }, { key: "email", label: "Email" }, { key: "phoneNumber", label: "Teléfono" },
+              { key: "surname", label: "Apellido" }, { key: "email", label: "Email" }, { key: "phoneNumber", label: "Teléfono", render: (u) => <PhoneLink phone={u.phoneNumber} /> },
               { key: "open", label: "", muted: true, render: (u) => <span title={userFullName(u)}>Ver detalle →</span> },
             ]} />
           )}

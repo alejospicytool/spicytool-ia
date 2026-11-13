@@ -231,3 +231,19 @@ export function expiryText(expiresAt, now = Date.now()) {
   const min = Math.ceil(ms / 60000);
   return min === 1 ? "vence en menos de 1 min" : `vence en ${min} min`;
 }
+
+// ── WhatsApp ─────────────────────────────────────────────────────────────────────────────────────────────
+// Link a la conversación de WhatsApp de un teléfono (https://wa.me/<solo dígitos con código de país>). Devuelve "" si no se puede armar uno
+// confiable: sin código de país no hay forma de saber a qué país pertenece el número, y un link equivocado abre el chat de OTRA persona.
+//  · Con "+" o "00" adelante, el código de país está explícito: alcanza con 8 a 15 dígitos (máximo del estándar E.164).
+//  · Sin "+" ni "00", hacen falta 11 dígitos o más (así vienen los guardados como 5491155550000); 10 o menos suele ser un número local.
+export function waLink(phone) {
+  const raw = String(phone == null ? "" : phone).trim();
+  if (!raw) return "";
+  const explicit = /^(\+|00)/.test(raw);
+  let digits = raw.replace(/\D/g, "");
+  if (raw.startsWith("00")) digits = digits.slice(2);
+  if (digits.length > 15) return "";
+  if (explicit ? digits.length < 8 : digits.length < 11) return "";
+  return "https://wa.me/" + digits;
+}

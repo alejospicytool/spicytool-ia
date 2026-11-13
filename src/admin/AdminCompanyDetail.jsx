@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Kpi, fmtDate, fmtDateTime } from "../revenue/revenueUi.jsx";
 import { adminMode, getUser, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, getPaymentMethodUrl, createSupportLink, getMyPermissions, deleteWorkflow } from "./adminApi.js";
 import { companyIdOf, userFullName, whatsappProvider, planOf, planLabel, sortByPosition } from "./adminLogic.js";
-import { Tabs, DataTable, StatusBadge, ConfirmDialog, AuditList, IdCell } from "./adminUi.jsx";
+import { Tabs, DataTable, StatusBadge, ConfirmDialog, AuditList, IdCell, ActGroup, PhoneLink } from "./adminUi.jsx";
 import { useAsync } from "./adminHooks.js";
 import { EditCompanyDialog, EditContactDialog, AssignPlanDialog, CardLinkDialog, SupportSessionDialog } from "./AdminDialogs.jsx";
 
@@ -23,7 +23,7 @@ function Summary({ b, user }) {
   const c = b.company, wa = whatsappProvider(user);
   const fields = [
     ["Estado", <StatusBadge key="s" status={c.status} />], ["Vertical", c.vertical], ["Tamaño del equipo", c.teamSize], ["Créditos", `${num(c.credits)} ${c.currency || ""}`],
-    ["Teléfono", c.phoneNumber], ["Email del dueño", c.userEmail], ["Alta", fmtDate(c.creationDate)], ["Account ID", c.accountId], ["Conversaciones de WhatsApp activas", num(c.activeWhatsAppConversations)],
+    ["Teléfono", <PhoneLink key="ph" phone={c.phoneNumber} />], ["Email del dueño", c.userEmail], ["Alta", fmtDate(c.creationDate)], ["Account ID", c.accountId], ["Conversaciones de WhatsApp activas", num(c.activeWhatsAppConversations)],
     ["ID de la company (Mongo)", <IdCell key="cid" id={c._id} />], ["Configurada", yesNo(c.isConfigured)], ["Onboarding terminado", yesNo(c.onboardingEnded)], ["Track ID", c.trackId], ["Última factura impaga", c.lastUnpaidBill ? fmtDate(c.lastUnpaidBill) : "—"],
   ];
   return (
@@ -33,7 +33,7 @@ function Summary({ b, user }) {
       </Card>
       <Card title="Usuario seleccionado">
         <dl className="kv">
-          {[["Nombre", userFullName(user)], ["Email", user.email], ["Teléfono", user.phoneNumber], ["Plan", planLabel(planOf(user))], ["ID del usuario (Mongo)", <IdCell key="uid" id={user._id} />],
+          {[["Nombre", userFullName(user)], ["Email", user.email], ["Teléfono", <PhoneLink key="ph" phone={user.phoneNumber} />], ["Plan", planLabel(planOf(user))], ["ID del usuario (Mongo)", <IdCell key="uid" id={user._id} />],
             ["Proveedor de WhatsApp", wa ? `${wa.provider}${wa.appId ? " · " + wa.appId : ""}` : "Sin configurar"]].map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v || "—"}</dd></div>)}
         </dl>
       </Card>
@@ -45,7 +45,7 @@ function Summary({ b, user }) {
       </Card>
       <Card title="Usuarios de la company" sub={b.users.length}>
         <DataTable rows={b.users} columns={[
-          { key: "name", label: "Nombre", render: (u) => userFullName(u) }, { key: "email", label: "Email" }, { key: "phoneNumber", label: "Teléfono" },
+          { key: "name", label: "Nombre", render: (u) => userFullName(u) }, { key: "email", label: "Email" }, { key: "phoneNumber", label: "Teléfono", render: (u) => <PhoneLink phone={u.phoneNumber} /> },
           { key: "plan", label: "Plan", render: (u) => planLabel(planOf(u)) }, ID_COL,
         ]} />
       </Card>
@@ -112,16 +112,22 @@ function NoCompanyView({ user, actor, onBack, refresh, dialog, setDialog, acts }
           <div className="page-sub">{user.email} · Plan: {planLabel(planOf(user))}</div>
         </div>
         <div className="detail-actions">
-          <button className="btn-secondary" {...acts} onClick={() => setDialog("contact")}>Editar contacto</button>
-          <button className="btn-secondary" {...acts} onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
-          <button className="btn-secondary" {...acts} onClick={() => setDialog("card")}>Link de tarjeta</button>
-          <button className="btn-warn" disabled title="Este usuario no tiene company: no hay cuenta para revisar.">Entrar como usuario</button>
+          <ActGroup label="Editar">
+            <button className="btn-secondary" {...acts} onClick={() => setDialog("contact")}>Editar contacto</button>
+          </ActGroup>
+          <ActGroup label="Plan y cobro">
+            <button className="btn-charge" {...acts} onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
+            <button className="btn-secondary" {...acts} onClick={() => setDialog("card")}>Link de tarjeta</button>
+          </ActGroup>
+          <ActGroup label="Cuenta">
+            <button className="btn-access" disabled title="Este usuario no tiene company: no hay cuenta para revisar.">Entrar como usuario</button>
+          </ActGroup>
         </div>
       </div>
       <div className="notice" style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #FCE4A0" }}>Este usuario todavía no tiene company (no terminó el alta). No hay contactos, campañas ni créditos para mostrar.</div>
       <Card title="Usuario">
         <dl className="kv">
-          {[["Nombre", userFullName(user)], ["Email", user.email], ["Teléfono", user.phoneNumber], ["Plan", planLabel(planOf(user))], ["ID del usuario (Mongo)", <IdCell key="uid" id={user._id} />],
+          {[["Nombre", userFullName(user)], ["Email", user.email], ["Teléfono", <PhoneLink key="ph" phone={user.phoneNumber} />], ["Plan", planLabel(planOf(user))], ["ID del usuario (Mongo)", <IdCell key="uid" id={user._id} />],
             ["Proveedor de WhatsApp", wa ? `${wa.provider}${wa.appId ? " · " + wa.appId : ""}` : "Sin configurar"]].map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v || "—"}</dd></div>)}
         </dl>
       </Card>
@@ -175,14 +181,20 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
           <div className="page-sub">{user.email} · {co.name} · Plan: {planLabel(planOf(user))}</div>
         </div>
         <div className="detail-actions">
-          <button className="btn-secondary" {...acts} onClick={() => setDialog("company")}>Editar company</button>
-          <button className="btn-secondary" {...acts} onClick={() => setDialog("contact")}>Editar contacto</button>
-          <button className="btn-secondary" {...acts} onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
-          <button className="btn-secondary" {...acts} onClick={() => setDialog("card")}>Link de tarjeta</button>
-          <button className="btn-warn" disabled={!perms.data || !perms.data.support} title={perms.data && !perms.data.support ? (perms.data.disabledReason || "Tu usuario no tiene permiso de soporte. Pedile a un admin que te habilite.") : "Generar un link para entrar a la cuenta de este usuario"} onClick={() => setDialog("support")}>Entrar como usuario</button>
-          {paused
-            ? <button className="btn-primary" {...acts} onClick={() => ask({ title: "Activar company", label: "Activar", text: <>Vas a <b>activar</b> la company <b>{co.name}</b>. Sus usuarios vuelven a poder usar la cuenta.</>, action: () => setCompanyStatus(co._id, "active", actor) })}>Activar company</button>
-            : <button className="btn-warn" {...acts} onClick={() => ask({ title: "Pausar company", label: "Pausar", danger: true, text: <>Vas a <b>pausar</b> la company <b>{co.name}</b>. Sus usuarios dejan de poder usar la cuenta hasta que la actives de nuevo. No cancela la suscripción ni los cobros.</>, action: () => setCompanyStatus(co._id, "paused", actor) })}>Pausar company</button>}
+          <ActGroup label="Editar">
+            <button className="btn-secondary" {...acts} onClick={() => setDialog("company")}>Editar company</button>
+            <button className="btn-secondary" {...acts} onClick={() => setDialog("contact")}>Editar contacto</button>
+          </ActGroup>
+          <ActGroup label="Plan y cobro">
+            <button className="btn-charge" {...acts} onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
+            <button className="btn-secondary" {...acts} onClick={() => setDialog("card")}>Link de tarjeta</button>
+          </ActGroup>
+          <ActGroup label="Cuenta">
+            <button className="btn-access" disabled={!perms.data || !perms.data.support} title={perms.data && !perms.data.support ? (perms.data.disabledReason || "Tu usuario no tiene permiso de soporte. Pedile a un admin que te habilite.") : "Generar un link para entrar a la cuenta de este usuario"} onClick={() => setDialog("support")}>Entrar como usuario</button>
+            {paused
+              ? <button className="btn-primary" {...acts} onClick={() => ask({ title: "Activar company", label: "Activar", text: <>Vas a <b>activar</b> la company <b>{co.name}</b>. Sus usuarios vuelven a poder usar la cuenta.</>, action: () => setCompanyStatus(co._id, "active", actor) })}>Activar company</button>
+              : <button className="btn-warn" {...acts} onClick={() => ask({ title: "Pausar company", label: "Pausar", danger: true, text: <>Vas a <b>pausar</b> la company <b>{co.name}</b>. Sus usuarios dejan de poder usar la cuenta hasta que la actives de nuevo. No cancela la suscripción ni los cobros.</>, action: () => setCompanyStatus(co._id, "paused", actor) })}>Pausar company</button>}
+          </ActGroup>
         </div>
       </div>
 

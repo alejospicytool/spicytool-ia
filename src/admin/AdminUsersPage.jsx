@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { listUsers, listAudit } from "./adminApi.js";
 import { userFullName, planOf, planLabel, whatsappProvider } from "./adminLogic.js";
-import { DataTable, StatusBadge, Pager, AuditList } from "./adminUi.jsx";
+import { DataTable, StatusBadge, Pager, AuditList, PhoneLink } from "./adminUi.jsx";
 import { useAsync } from "./adminHooks.js";
 import AdminCompanyDetail from "./AdminCompanyDetail.jsx";
 
@@ -36,7 +36,7 @@ export default function AdminUsersPage({ actor }) {
           <>
             <DataTable rows={r?.items || []} empty={search || owners || activeOnly ? "Ningún usuario coincide con la búsqueda y los filtros." : "Todavía no hay usuarios."} onRowClick={(u) => setSelected(u._id)} columns={[
               { key: "name", label: "Usuario", render: (u) => <><b>{userFullName(u)}</b>{u.isOwner && <span className="badge badge-blue" style={{ marginLeft: 6 }}>Owner</span>}<div style={{ color: "var(--muted)", fontSize: 11 }}>{u.email}</div></> },
-              { key: "phoneNumber", label: "Teléfono", muted: true },
+              { key: "phoneNumber", label: "Teléfono", render: (u) => <PhoneLink phone={u.phoneNumber} /> },
               { key: "companyName", label: "Company" },
               { key: "companyStatus", label: "Estado", render: (u) => (u.companyStatus ? <StatusBadge status={u.companyStatus} /> : <span style={{ color: "var(--muted)" }}>Sin company</span>) },
               { key: "plan", label: "Plan", render: (u) => planLabel(planOf(u)) },
