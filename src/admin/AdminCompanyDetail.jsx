@@ -1,9 +1,9 @@
 // Detalle de un usuario y su company: datos, usuarios de la company, campañas, landings, conversiones,
 // WhatsApp, pipelines, formularios, workflows, créditos y registro de auditoría. Desde acá se ejecutan las acciones
-// (editar, pausar/activar, cambiar plan, eliminar workflow), todas con confirmación o formulario y con auditoría.
+// (editar, pausar/activar, cambiar plan, link de tarjeta), todas con confirmación o formulario y con auditoría.
 import { useState } from "react";
 import { Kpi, fmtDate, fmtDateTime } from "../revenue/revenueUi.jsx";
-import { adminMode, getUser, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, getPaymentMethodUrl, createSupportLink, getMyPermissions, deleteWorkflow } from "./adminApi.js";
+import { getUser, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, getPaymentMethodUrl, createSupportLink, getMyPermissions } from "./adminApi.js";
 import { companyIdOf, userFullName, whatsappProvider, planOf, planLabel, sortByPosition } from "./adminLogic.js";
 import { Tabs, DataTable, StatusBadge, ConfirmDialog, AuditList, IdCell, ActGroup, PhoneLink } from "./adminUi.jsx";
 import { useAsync } from "./adminHooks.js";
@@ -12,7 +12,6 @@ import { EditCompanyDialog, EditContactDialog, AssignPlanDialog, CardLinkDialog,
 const yesNo = (v) => (v ? "Sí" : "No");
 // Columna con el id de Mongo (copiable) para que se pueda buscar el documento en la base.
 const ID_COL = { key: "_id", label: "ID de Mongo", render: (r) => <IdCell id={r._id} /> };
-const RO_TITLE = "Todavía no está conectado: por ahora esta sección es de solo lectura.";
 const NO_ACT_TITLE = "Tu usuario puede ver Admin Spicy pero no hacer cambios. Pedile a un admin que te habilite las acciones.";
 // Mientras no se sabe qué permisos tiene (o si no puede hacer cambios) los botones de acciones quedan deshabilitados. La que manda es la API.
 const cantAct = (perms) => !(perms.data && perms.data.canAct);
@@ -146,7 +145,7 @@ function NoCompanyView({ user, actor, onBack, refresh, dialog, setDialog, acts }
 export default function AdminCompanyDetail({ userId, actor, onBack, onChanged }) {
   const [version, setVersion] = useState(0), [tab, setTab] = useState("resumen"), [dialog, setDialog] = useState(null), [confirm, setConfirm] = useState(null);
   const [confirmBusy, setConfirmBusy] = useState(false), [confirmError, setConfirmError] = useState("");
-  const perms = useAsync(() => getMyPermissions(actor), "perms:" + actor), ro = adminMode() === "real", cant = cantAct(perms);
+  const perms = useAsync(() => getMyPermissions(actor), "perms:" + actor), cant = cantAct(perms);
   const acts = { disabled: cant, title: cant ? NO_ACT_TITLE : undefined };
   const res = useAsync(async () => { const user = await getUser(userId); if (!user) throw new Error("No se encontró el usuario."); const cid = companyIdOf(user); return { user, bundle: cid ? await getCompanyBundle(cid) : null }; }, `detail:${userId}:${version}`);
 
@@ -228,7 +227,7 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
       </>)}
       {tab === "workflows" && <Card title="Workflows" sub={b.workflows.length}><DataTable rows={b.workflows} empty="Sin workflows." columns={[
         { key: "name", label: "Nombre" }, { key: "description", label: "Descripción", muted: true }, { key: "triggerProperty", label: "Disparador", render: (w) => `${w.triggerProperty} = ${w.triggerValue}` },
-        ID_COL, { key: "act", label: "", render: (w) => <button className="btn-sm danger" disabled={ro || cant} title={ro ? RO_TITLE : cant ? NO_ACT_TITLE : undefined} onClick={(e) => { e.stopPropagation(); ask({ title: "Eliminar workflow", label: "Eliminar", danger: true, text: <>Vas a <b>eliminar</b> el workflow <b>{w.name}</b>. Esta acción no se puede deshacer.</>, action: () => deleteWorkflow(w._id, actor) }); }}>Eliminar</button> },
+        ID_COL,
       ]} /></Card>}
       {tab === "creditos" && <CreditsTab companyId={co._id} version={version} />}
       {tab === "auditoria" && <AuditTab companyId={co._id} version={version} />}

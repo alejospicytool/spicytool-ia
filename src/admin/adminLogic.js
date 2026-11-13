@@ -171,7 +171,6 @@ export const AUDIT_ACTIONS = {
   card_link_created: "Generó un link para cambiar la tarjeta",
   support_link_created: "Generó un link de soporte (entrar como usuario)",
   support_link_denied: "Intentó entrar como usuario sin permiso",
-  workflow_delete: "Eliminó un workflow",
 };
 export const auditLabel = (action) => AUDIT_ACTIONS[action] || action;
 

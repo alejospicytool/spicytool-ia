@@ -242,17 +242,6 @@ export async function getPaymentMethodUrl(userId, actor) {
   return { userEmail: u.email, stripeCustomerId: u.stripe?.customerId || null, paymentMethodUpdateUrl: url };
 }
 
-// DELETE /admin/workflows/:id
-export async function deleteWorkflow(workflowId, actor) {
-  readOnly();
-  needActor(actor);
-  const i = db.workflows.findIndex((w) => w._id === workflowId);
-  if (i < 0) fail("No se encontró el workflow.");
-  const [w] = db.workflows.splice(i, 1);
-  log(actor, "workflow_delete", { targetType: "workflow", targetId: workflowId, targetLabel: w.name, companyId: w.companyId, detail: { name: w.name } });
-  return { ok: true };
-}
-
 // ── Soporte: entrar como usuario ────────────────────────────────────────────────────────────────────
 // Hoy se SIMULA. En producción: una función de backend (1) comprueba que quien llama sea admin CON permiso de soporte
 // (tabla support_access), (2) hace el login contra la API de Spicytool con una cuenta de servicio guardada como secret

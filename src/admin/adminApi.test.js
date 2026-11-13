@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { resetMock, listUsers, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, getPaymentMethodUrl, listPrices, WebhookError, deleteWorkflow, getUser, listCompanies, listCompanyUsers, getMyPermissions, createSupportLink, listSupportLog, SupportError } from "./adminApi.js";
+import { resetMock, listUsers, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, getPaymentMethodUrl, listPrices, WebhookError, getUser, listCompanies, listCompanyUsers, getMyPermissions, createSupportLink, listSupportLog, SupportError } from "./adminApi.js";
 import { MOCK } from "./adminMock.js";
 
 const ACTOR = "admin@ejemplo.test";
@@ -425,22 +425,12 @@ describe("acciones: cambian los datos y dejan auditoría", () => {
     expect(acts).toEqual(["company_activate", "company_pause"]);
     await expect(setCompanyStatus(co._id, "borrada", ACTOR)).rejects.toThrow(/inválido/);
   });
-  it("eliminar workflow", async () => {
-    const w = MOCK.workflows[0];
-    await deleteWorkflow(w._id, ACTOR);
-    const b = await getCompanyBundle(w.companyId);
-    expect(b.workflows.some((x) => x._id === w._id)).toBe(false);
-    expect((await listAudit({ companyId: w.companyId }))[0]).toMatchObject({ action: "workflow_delete", targetId: w._id });
-    await expect(deleteWorkflow(w._id, ACTOR)).rejects.toThrow(/No se encontró/);
-  });
   it("sin actor no se puede modificar nada", async () => {
     const co = MOCK.companies[0];
     await expect(setCompanyStatus(co._id, "paused", "")).rejects.toThrow(/quién/);
     await expect(assignPlan(MOCK.users[0]._id, { plan: "SpicyStart", stripePriceId: "price_1MockStartStd0001" }, undefined)).rejects.toThrow(/quién/);
-    await expect(deleteWorkflow(MOCK.workflows[0]._id, "")).rejects.toThrow(/quién/);
     expect((await getCompanyBundle(co._id)).company.status).toBe(co.status);
     expect((await getUser(MOCK.users[0]._id)).subscription).toEqual(MOCK.users[0].subscription);
-    expect((await getCompanyBundle(MOCK.workflows[0].companyId)).workflows.some((w) => w._id === MOCK.workflows[0]._id)).toBe(true);
     expect(await listAudit()).toHaveLength(0);
   });
   it("la auditoría se puede filtrar por company", async () => {
