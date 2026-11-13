@@ -1,9 +1,9 @@
 -- Preferencias del menú lateral de cada usuario: orden de las secciones y cuáles quedaron plegadas.
--- ESTADO: PENDIENTE de aplicar en el proyecto real (khuavhbraikzreyhptog). Cuando se aplique, anotarlo acá.
+-- ESTADO: YA APLICADO en el proyecto real (khuavhbraikzreyhptog) vía Supabase MCP el 2026-11-13. Este archivo queda como referencia.
 --
 -- Una fila por usuario, y cada usuario solo puede leer y tocar la SUYA. Esto solo cambia cómo se ve el menú:
 -- qué secciones puede ver cada uno lo siguen decidiendo los permisos (allowed_sections), no esta tabla.
--- Mientras la tabla no exista, la app guarda lo mismo en el navegador de cada persona (funciona igual, pero no viaja entre dispositivos).
+-- Además de la tabla, la app guarda lo mismo en el navegador de cada persona (primero lee eso, así el menú aparece al instante).
 
 create table if not exists public.user_menu_prefs (
   user_id            uuid primary key references auth.users(id) on delete cascade,
