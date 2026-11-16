@@ -106,6 +106,14 @@ export function healthAlerts({ plans = [], runs = [], events = [], now = new Dat
   const unclassified = plans.filter((p) => p.category === "sin_clasificar").length;
   if (unclassified) alerts.push({ level: "warn", code: "sin_clasificar", text: `Hay ${unclassified} ${unclassified === 1 ? "plan sin clasificar" : "planes sin clasificar"}: no suman al MRR hasta que los clasifiques.`, tab: "planes" });
   const last = [...runs].sort((a, b) => (a.at < b.at ? 1 : -1))[0];
+  // Clasificar un plan NO recalcula el MRR: hay que apretar "Aplicar y recalcular". Si un plan se clasificó DESPUÉS de la última corrida
+  // (su updated_at es posterior a su creación y a esa corrida), el MRR todavía no lo refleja.
+  if (events.some((e) => e.baseline)) {
+    const lastAt = last ? new Date(last.at) : null;
+    const pending = plans.filter((p) => p.category !== "sin_clasificar" && p.updated_at && p.created_at
+      && new Date(p.updated_at) - new Date(p.created_at) > 1000 && (!lastAt || new Date(p.updated_at) > lastAt)).length;
+    if (pending) alerts.push({ level: "warn", code: "plan_sin_recalcular", tab: "planes", text: `Clasificaste ${pending} ${pending === 1 ? "plan" : "planes"} después del último recálculo: el MRR todavía no ${pending === 1 ? "lo refleja" : "los refleja"}. Entrá a Planes y apretá “Aplicar y recalcular”.` });
+  }
   if (events.some((e) => e.baseline)) {
     if (!last) alerts.push({ level: "warn", code: "sin_corridas", text: "El chequeo nocturno todavía no corrió." });
     else if (now - new Date(last.at) > 36 * 3600 * 1000) alerts.push({ level: "error", code: "chequeo_viejo", text: "El chequeo nocturno no corre hace más de un día y medio. Revisá el cron en Supabase." });

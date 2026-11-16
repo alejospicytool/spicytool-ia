@@ -26,7 +26,7 @@ function useRevenueData(sb) {
       catch (e) { if (!/rev_payment_failures/i.test(e.message || "")) throw e; v2 = false; }
       const [events, plans, runs, history, fx, audit] = await Promise.all([
         fetchAll((a, b) => sb.from("rev_mrr_events").select("id,customer_key,date,type,mrr_before,mrr_after,delta,baseline,cause").order("id").range(a, b)),
-        fetchAll((a, b) => sb.from("rev_plans").select("price_id,name,category,counts_in_mrr").order("price_id").range(a, b)),
+        fetchAll((a, b) => sb.from("rev_plans").select("price_id,name,category,counts_in_mrr,created_at,updated_at").order("price_id").range(a, b)),
         sb.from("rev_sync_runs").select("id,at,kind,fixes,stale,unclassified,errors").order("at", { ascending: false }).limit(30).then((r) => { if (r.error) throw r.error; return r.data || []; }),
         fetchAll((a, b) => sb.from("rev_history_monthly").select("month,data").order("month").range(a, b)),
         sb.from("rev_fx_rates").select("currency,rate").then((r) => { if (r.error) throw r.error; return r.data || []; }),

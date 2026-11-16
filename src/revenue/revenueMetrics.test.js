@@ -115,6 +115,24 @@ describe("avisos", () => {
   it("errores y suscripciones perdidas de la última corrida", () => {
     expect(codes({ events, runs: [{ at: "2026-11-12T06:00:00Z", errors: [{ customerKey: "x", error: "Falta tipo de cambio" }], stale: 2 }] })).toEqual(["errores", "perdidas"]);
   });
+  it("un plan clasificado DESPUÉS de la última corrida avisa que falta recalcular", () => {
+    const runs = [{ at: "2026-11-12T11:59:00Z", errors: [], stale: 0 }, { at: "2026-11-12T11:00:00Z", errors: [], stale: 0 }];
+    const nuevo = { category: "saas", created_at: "2026-11-12T11:50:00Z", updated_at: "2026-11-12T11:55:00Z" };   // clasificado antes de la corrida: ya está reflejado
+    const pendiente = { category: "saas", created_at: "2026-11-12T11:50:00Z", updated_at: "2026-11-12T11:59:30Z" }; // clasificado después
+    expect(codes({ events, runs, plans: [nuevo] })).toEqual([]);
+    const a = healthAlerts({ now, events, runs, plans: [nuevo, pendiente] }).find((x) => x.code === "plan_sin_recalcular");
+    expect(a).toMatchObject({ level: "warn", tab: "planes" });
+    expect(a.text).toContain("1 plan");
+    expect(healthAlerts({ now, events, runs, plans: [pendiente, pendiente] }).find((x) => x.code === "plan_sin_recalcular").text).toContain("2 planes");
+  });
+  it("un plan cargado ya clasificado (creado = actualizado) o todavía sin clasificar no cuenta como pendiente", () => {
+    const runs = [{ at: "2026-11-10T00:00:00Z", errors: [], stale: 0 }];
+    expect(codes({ events, runs: [{ ...runs[0], at: "2026-11-12T06:00:00Z" }], plans: [{ category: "saas", created_at: "2026-11-12T08:00:00Z", updated_at: "2026-11-12T08:00:00Z" }] })).toEqual([]);
+    expect(codes({ events, runs: [{ ...runs[0], at: "2026-11-12T06:00:00Z" }], plans: [{ category: "sin_clasificar", created_at: "2026-11-11T00:00:00Z", updated_at: "2026-11-12T08:00:00Z" }] })).toEqual(["sin_clasificar"]);
+  });
+  it("sin carga inicial no se avisa (todavía no hay recálculo posible)", () => {
+    expect(codes({ events: [], plans: [{ category: "saas", created_at: "2026-11-11T00:00:00Z", updated_at: "2026-11-12T08:00:00Z" }] })).toEqual(["sin_baseline"]);
+  });
   it("todo en orden: sin avisos", () => {
     expect(codes({ events, runs: [{ at: "2026-11-12T06:00:00Z", errors: [], stale: 0 }], plans: [{ category: "saas" }] })).toEqual([]);
   });
