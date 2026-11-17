@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useSyncExternalStore } from "react";
+import { useState, useEffect, useRef, useSyncExternalStore, createContext, useContext } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { ONBOARDING_STAGES, ONBOARDING_LEAD_SOURCES, ONBOARDING_PAYMENT_STATUS, calcularEstado, calcularAvance, diasEntre, ESTADO_BADGE } from "./onboardingLogic.js";
 import {
@@ -13,6 +13,10 @@ import RevenueApp from "./revenue/RevenueApp.jsx";
 import AdminApp from "./admin/AdminApp.jsx";
 import { configureAdminApi } from "./admin/adminApi.js";
 import ErrorBoundary from "./ErrorBoundary.jsx";
+import { canWriteOps, canDeleteOps, ROLE_HELP } from "./roles.js";
+
+// Qué puede hacer el usuario en las tablas de trabajo (solo decide qué botones se ven; la base es la que lo exige).
+const RoleContext = createContext({ canWriteOps: false, canDeleteOps: false });
 import { readPrefs, orderSections, moveLabel, toggleLabel } from "./menuPrefs.js";
 
 // Preferencias del menú (orden y secciones plegadas): se guardan en Supabase (user_menu_prefs) y también en el navegador, por usuario.
@@ -149,6 +153,7 @@ function BrandStyles() {
       .spicy-badge-green { background: #EDFAF3; color: #16A34A; font-size: 10px; padding: 2px 7px; border-radius: 5px; font-weight: 600; }
       .spicy-badge-gray { background: #F4F4F5; color: #666; font-size: 10px; padding: 2px 7px; border-radius: 5px; font-weight: 500; }
       .spicy-badge-amber { background: #FEF3C7; color: #D97706; font-size: 10px; padding: 2px 7px; border-radius: 5px; font-weight: 600; }
+      .spicy-badge-blue { background: #EEF4FB; color: #185FA5; font-size: 10px; padding: 2px 7px; border-radius: 5px; font-weight: 600; }
       .spicy-inline-edit { border: 1px solid transparent !important; border-radius: 6px; padding: 3px 7px !important; margin-left: -8px; width: calc(100% + 8px) !important; cursor: text; transition: all 0.15s; }
       .spicy-inline-edit:hover { border-color: #E0E0E0 !important; background: #FAFAFA !important; }
       .spicy-inline-edit:focus { border-color: ${ST_RED} !important; background: white !important; outline: none; }
@@ -753,7 +758,7 @@ function UserPermissionsPanel({ users, allowedSections, onRefresh }) {
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20 }}>
         <div>
           <div style={{ fontSize:16,fontWeight:700,color:"#111",marginBottom:4 }}>Usuarios y permisos</div>
-          <div style={{ fontSize:13,color:"#888" }}>Tildá qué secciones puede ver cada usuario — arrancan sin ver ninguna. Métricas y Admin Spicy son de solo lectura; para que además pueda hacer cambios en Admin Spicy, tildá también “Admin Spicy · acciones”. Los admins siempre ven y hacen todo.</div>
+          <div style={{ fontSize:13,color:"#888" }}>Tildá qué secciones puede ver cada usuario — arrancan sin ver ninguna. Métricas y Admin Spicy son de solo lectura; para que además pueda hacer cambios en Admin Spicy, tildá también “Admin Spicy · acciones”. Los admins siempre ven y hacen todo. Roles: <b>dev</b> crea, edita y borra tickets, tareas y onboarding; <b>editor</b> crea y edita sin borrar; <b>reader</b> solo lee.</div>
         </div>
         <button className="spicy-btn-primary" onClick={()=>{setError("");setForm(emptyForm());setShowAdd(true);}}>+ Agregar usuario</button>
       </div>
@@ -775,7 +780,7 @@ function UserPermissionsPanel({ users, allowedSections, onRefresh }) {
                     <div style={{ flex:1,minWidth:0 }}>
                       <div style={{ fontSize:13,color:"#111",fontWeight:600 }}>{displayName(u)}</div>
                       {(u.first_name||u.last_name)&&<div style={{ fontSize:11,color:"#aaa" }}>{u.email}</div>}
-                      <span className={u.role==="admin"?"spicy-badge-green":u.role==="dev"?"spicy-badge-amber":"spicy-badge-gray"}>{u.role}</span>
+                      <span className={u.role==="admin"?"spicy-badge-green":u.role==="dev"?"spicy-badge-amber":u.role==="editor"?"spicy-badge-blue":"spicy-badge-gray"} title={ROLE_HELP[u.role]||undefined}>{u.role}</span>
                     </div>
                     <button onClick={()=>openEdit(u)} title="Editar" style={{ background:"none",border:"none",cursor:"pointer",color:"#bbb",fontSize:13,padding:4 }}>✎</button>
                   </div>
@@ -819,8 +824,9 @@ function UserPermissionsPanel({ users, allowedSections, onRefresh }) {
 
             <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Rol
               <select className="spicy-select" value={form.role} onChange={e=>setForm(f=>({...f,role:e.target.value}))} style={{ width:"100%",marginTop:4 }}>
-                <option value="reader">reader</option>
-                <option value="dev">dev</option>
+                <option value="reader">reader (solo lectura)</option>
+                <option value="editor">editor (crea y edita, no borra)</option>
+                <option value="dev">dev (crea, edita y borra)</option>
                 <option value="admin">admin</option>
               </select>
             </label>
@@ -857,8 +863,9 @@ function UserPermissionsPanel({ users, allowedSections, onRefresh }) {
 
             <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Rol
               <select className="spicy-select" value={editForm.role} onChange={e=>setEditForm(f=>({...f,role:e.target.value}))} style={{ width:"100%",marginTop:4 }}>
-                <option value="reader">reader</option>
-                <option value="dev">dev</option>
+                <option value="reader">reader (solo lectura)</option>
+                <option value="editor">editor (crea y edita, no borra)</option>
+                <option value="dev">dev (crea, edita y borra)</option>
                 <option value="admin">admin</option>
               </select>
             </label>
@@ -2852,6 +2859,7 @@ function HistoryList({ entries, labelKey }) {
 }
 
 function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, currentUserId, assignees, comments, attachments, subtasks, devTasks, setView, onRefresh, openId, onOpenHandled }) {
+  const { canWriteOps: canCreate, canDeleteOps: canRemove } = useContext(RoleContext);
   const [showNew, setShowNew] = useState(false);
   const [detail,  setDetail]  = useState(null);
   const [dragOverStatus, setDragOverStatus] = useState(null);
@@ -2951,7 +2959,7 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
             <option value="">Todas las categorías</option>
             {TICKET_CATEGORIES.map(c=><option key={c.key} value={c.key}>{c.emoji} {c.key}</option>)}
           </select>
-          <button className="spicy-btn-primary" onClick={()=>setShowNew(true)}>+ Nuevo ticket</button>
+          {canCreate&&<button className="spicy-btn-primary" onClick={()=>setShowNew(true)}>+ Nuevo ticket</button>}
         </div>
       </div>
 
@@ -3193,7 +3201,7 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
               </div>
 
               <div style={{ display:"flex",justifyContent:"space-between",marginTop:8 }}>
-                <button className="spicy-btn-secondary" style={{ color:ST_RED,borderColor:ST_RED_BG }} onClick={()=>deleteTicket(detail)}>Eliminar ticket</button>
+                {canRemove&&<button className="spicy-btn-secondary" style={{ color:ST_RED,borderColor:ST_RED_BG }} onClick={()=>deleteTicket(detail)}>Eliminar ticket</button>}
                 <button className="spicy-btn-primary" onClick={()=>setDetail(null)}>Listo</button>
               </div>
             </div>
@@ -3206,6 +3214,7 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
 
 // ── Dev Tasks View (Kanban, tareas de desarrollo de producto) ──────────────
 function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, currentUserId, assignees, comments, attachments, subtasks, tickets, onRefresh, openId, onOpenHandled }) {
+  const { canWriteOps: canCreate, canDeleteOps: canRemove } = useContext(RoleContext);
   const [showNew, setShowNew] = useState(false);
   const [detail,  setDetail]  = useState(null);
   const [dragOverStage, setDragOverStage] = useState(null);
@@ -3296,7 +3305,7 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
           <label style={{ display:"flex",alignItems:"center",gap:5,fontSize:12,color:"#666" }}>
             <input type="checkbox" checked={filterUnestimated} onChange={e=>setFilterUnestimated(e.target.checked)}/> Sin estimar
           </label>
-          <button className="spicy-btn-primary" onClick={()=>setShowNew(true)}>+ Nueva tarea</button>
+          {canCreate&&<button className="spicy-btn-primary" onClick={()=>setShowNew(true)}>+ Nueva tarea</button>}
         </div>
       </div>
 
@@ -3457,7 +3466,7 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
             </div>
 
             <div style={{ display:"flex",justifyContent:"space-between",marginTop:8 }}>
-              <button className="spicy-btn-secondary" style={{ color:ST_RED,borderColor:ST_RED_BG }} onClick={()=>deleteDevTask(detail)}>Eliminar tarea</button>
+              {canRemove&&<button className="spicy-btn-secondary" style={{ color:ST_RED,borderColor:ST_RED_BG }} onClick={()=>deleteDevTask(detail)}>Eliminar tarea</button>}
               <button className="spicy-btn-primary" onClick={()=>setDetail(null)}>Listo</button>
             </div>
           </div>
@@ -3692,6 +3701,7 @@ function DevsMetricsView({ tickets, ticketHistory, devTasks, devTaskHistory, ass
 
 // ── Tasks View (Kanban + Calendario) ────────────────────────────────────────
 function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks, currentUserEmail, currentUserId, onRefresh, openId, onOpenHandled }) {
+  const { canWriteOps: canCreate, canDeleteOps: canRemove } = useContext(RoleContext);
   const todayISO = new Date().toISOString().split("T")[0];
   const emptyForm = () => ({ title:"", start_date:todayISO, end_date:todayISO, assigneeIds:[], priority:"Media", description:"" });
 
@@ -3806,7 +3816,7 @@ function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks
             <button onClick={()=>setMode("kanban")} style={toggleBtn(mode==="kanban")}>Kanban</button>
             <button onClick={()=>setMode("calendar")} style={toggleBtn(mode==="calendar")}>Calendario</button>
           </div>
-          <button className="spicy-btn-primary" onClick={()=>setShowNew(true)}>+ Nueva tarea</button>
+          {canCreate&&<button className="spicy-btn-primary" onClick={()=>setShowNew(true)}>+ Nueva tarea</button>}
         </div>
       </div>
 
@@ -4026,7 +4036,7 @@ function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks
             </div>
 
             <div style={{ display:"flex",justifyContent:"space-between",marginTop:4 }}>
-              <button className="spicy-btn-secondary" style={{ color:ST_RED,borderColor:ST_RED_BG }} onClick={()=>deleteTask(detail)}>Eliminar tarea</button>
+              {canRemove&&<button className="spicy-btn-secondary" style={{ color:ST_RED,borderColor:ST_RED_BG }} onClick={()=>deleteTask(detail)}>Eliminar tarea</button>}
               <button className="spicy-btn-primary" onClick={()=>setDetail(null)}>Listo</button>
             </div>
           </div>
@@ -5206,6 +5216,7 @@ function UserContractsEditor({ user }) {
 
 // ── Onboarding View (Kanban + Tabla) ─────────────────────────────────────────
 function OnboardingView({ onboarding, history, onRefresh }) {
+  const { canWriteOps: canCreate, canDeleteOps: canRemove } = useContext(RoleContext);
   const todayISO = new Date().toISOString().split("T")[0];
   const emptyForm = () => ({ client_name:"", fecha_registro:todayISO, responsable:"", fuente_de_leads:[], bloqueado:false });
 
@@ -5303,7 +5314,7 @@ function OnboardingView({ onboarding, history, onRefresh }) {
             <button onClick={()=>setMode("kanban")} style={toggleBtn(mode==="kanban")}>Kanban</button>
             <button onClick={()=>setMode("tabla")} style={toggleBtn(mode==="tabla")}>Tabla</button>
           </div>
-          <button className="spicy-btn-primary" onClick={()=>setShowNew(true)}>+ Nuevo cliente</button>
+          {canCreate&&<button className="spicy-btn-primary" onClick={()=>setShowNew(true)}>+ Nuevo cliente</button>}
         </div>
       </div>
 
@@ -5549,7 +5560,7 @@ function OnboardingView({ onboarding, history, onRefresh }) {
               </div>
 
               <div style={{ display:"flex",justifyContent:"space-between",marginTop:4 }}>
-                <button className="spicy-btn-secondary" style={{ color:ST_RED,borderColor:ST_RED_BG }} onClick={()=>deleteRecord(detail)}>Eliminar</button>
+                {canRemove&&<button className="spicy-btn-secondary" style={{ color:ST_RED,borderColor:ST_RED_BG }} onClick={()=>deleteRecord(detail)}>Eliminar</button>}
                 <button className="spicy-btn-primary" onClick={()=>setDetail(null)}>Listo</button>
               </div>
             </div>
@@ -5886,6 +5897,7 @@ export default function SpicyFinanzas() {
   const allFolded = foldable.length > 0 && foldable.every(l => menuPrefs.collapsed.includes(l));
 
   return (
+    <RoleContext.Provider value={{ role, canWriteOps: canWriteOps(role), canDeleteOps: canDeleteOps(role) }}>
     <div className="spicy-root">
       <BrandStyles/>
 
@@ -5958,6 +5970,7 @@ export default function SpicyFinanzas() {
       {/* Main content */}
       <div className="spicy-main">
         <TimeTrackerBar/>
+        {role==="reader"&&<div role="status" style={{ fontSize:13,color:"#185FA5",marginBottom:16,padding:"10px 14px",background:"#EEF4FB",borderRadius:10,border:"1px solid #CFE0F3" }}>Tu usuario es de <b>solo lectura</b>: podés ver tickets, tareas y onboarding, pero no crearlos ni cambiarlos. Si necesitás editar, pedile a un admin que te pase a editor.</div>}
         {syncError&&<div style={{ fontSize:13,color:ST_RED,marginBottom:16,padding:"10px 14px",background:ST_RED_BG,borderRadius:10,border:`1px solid ${ST_RED}22` }}>{syncError}</div>}
 
       {currentViewBlocked ? (
@@ -6184,5 +6197,6 @@ export default function SpicyFinanzas() {
 
       </div>{/* end spicy-main */}
     </div>
+    </RoleContext.Provider>
   );
 }
