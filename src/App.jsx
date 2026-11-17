@@ -2858,12 +2858,33 @@ function HistoryList({ entries, labelKey }) {
   );
 }
 
+// Selector "Mis X / Todos / de una persona" de Tickets, Tareas y Tareas de devs: por defecto cada uno ve lo que tiene asignado y puede pasar a ver todo.
+function AssigneeScope({ value, onChange, allUsers, meId, mine, all, noun }) {
+  return (
+    <select aria-label={`Ver ${noun} de`} value={value} onChange={e=>onChange(e.target.value)} className="spicy-select">
+      <option value={meId}>{mine}</option>
+      <option value="">{all}</option>
+      {allUsers.filter(u=>u.user_id!==meId).map(u=><option key={u.user_id} value={u.user_id}>De {userDisplayName(u)}</option>)}
+    </select>
+  );
+}
+// Si en "Mis X" no hay nada pero sí hay de otros, se avisa y se ofrece pasar a ver todo (para que no parezca que está vacío).
+function NoMineHint({ show, text, total, onAll }) {
+  if (!show) return null;
+  return (
+    <div role="status" style={{ fontSize:13,color:"#92400E",background:"#FEF3C7",border:"1px solid #FCE4A0",borderRadius:10,padding:"10px 14px",marginBottom:14,display:"flex",gap:12,alignItems:"center",flexWrap:"wrap" }}>
+      <span>{text}</span><button className="spicy-btn-secondary" onClick={onAll}>Ver todos ({total})</button>
+    </div>
+  );
+}
+
 function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, currentUserId, assignees, comments, attachments, subtasks, devTasks, setView, onRefresh, openId, onOpenHandled }) {
   const { canWriteOps: canCreate, canDeleteOps: canRemove } = useContext(RoleContext);
   const [showNew, setShowNew] = useState(false);
   const [detail,  setDetail]  = useState(null);
   const [dragOverStatus, setDragOverStatus] = useState(null);
   const [filterCategory, setFilterCategory] = useState("");
+  const [filterAssignee, setFilterAssignee] = useState(currentUserId || ""); // por defecto: mis tickets
   const [form, setForm] = useState({ title:"", client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigneeIds:[], files:[] });
   const [saving, setSaving] = useState(false);
   const [statusError, setStatusError] = useState(null); // { id, msg }: el aviso es del ticket abierto
@@ -2874,11 +2895,14 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
   useEffect(() => {
     if (!openId) return;
     const found = tickets.find(x => x.id === openId);
+    if (found && filterAssignee && !assignees.some(a=>a.entity_type==="ticket"&&a.entity_id===found.id&&a.user_id===filterAssignee)) setFilterAssignee(""); // un link a un ticket ajeno: se pasa a ver todos
     if (found) setDetail(found);
     onOpenHandled();
   }, [openId]);
 
-  const visibleTickets = filterCategory ? tickets.filter(t=>t.category===filterCategory) : tickets;
+  const visibleTickets = tickets.filter(t =>
+    (!filterCategory || t.category===filterCategory) &&
+    (!filterAssignee || assignees.some(a=>a.entity_type==="ticket"&&a.entity_id===t.id&&a.user_id===filterAssignee)));
   const assigneesFor = (ticketId) => assignees.filter(a=>a.entity_type==="ticket" && a.entity_id===ticketId).map(a=>allUsers.find(u=>u.user_id===a.user_id)).filter(Boolean);
   const commentsCount = (ticketId) => comments.filter(c=>c.entity_type==="ticket" && c.entity_id===ticketId).length;
   const attachmentsCount = (ticketId) => attachments.filter(a=>a.entity_type==="ticket" && a.entity_id===ticketId).length;
@@ -2952,9 +2976,10 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,gap:12,flexWrap:"wrap" }}>
         <div>
           <div style={{ fontSize:20,fontWeight:700,color:"#111" }}>Tickets</div>
-          <div style={{ fontSize:13,color:"#888",marginTop:4 }}>{visibleTickets.length} tickets · Operaciones</div>
+          <div style={{ fontSize:13,color:"#888",marginTop:4 }}>{visibleTickets.length} {visibleTickets.length===1?(filterAssignee===currentUserId?"ticket tuyo":"ticket"):(filterAssignee===currentUserId?"tickets tuyos":"tickets")} · Operaciones</div>
         </div>
         <div style={{ display:"flex",gap:10,alignItems:"center" }}>
+          <AssigneeScope value={filterAssignee} onChange={setFilterAssignee} allUsers={allUsers} meId={currentUserId||""} mine="Mis tickets" all="Todos los tickets" noun="tickets"/>
           <select aria-label="Filtrar por categoría" value={filterCategory} onChange={e=>setFilterCategory(e.target.value)} className="spicy-select">
             <option value="">Todas las categorías</option>
             {TICKET_CATEGORIES.map(c=><option key={c.key} value={c.key}>{c.emoji} {c.key}</option>)}
@@ -2962,6 +2987,8 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
           {canCreate&&<button className="spicy-btn-primary" onClick={()=>setShowNew(true)}>+ Nuevo ticket</button>}
         </div>
       </div>
+
+      <NoMineHint show={filterAssignee===currentUserId && visibleTickets.length===0 && tickets.length>0} text="No tenés tickets asignados." total={tickets.length} onAll={()=>setFilterAssignee("")}/>
 
       {/* Kanban board */}
       <div style={{ overflowX:"auto", paddingBottom:8 }}>
@@ -3222,7 +3249,7 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
   const [saving, setSaving] = useState(false);
   const [stageError, setStageError] = useState(null); // { id, msg }
   const [pendingStage, setPendingStage] = useState(null); // { id, stage }
-  const [filterAssignee, setFilterAssignee] = useState("");
+  const [filterAssignee, setFilterAssignee] = useState(currentUserId || ""); // por defecto: mis tareas
   const [filterUnestimated, setFilterUnestimated] = useState(false);
 
   const assigneesFor = (taskId) => assignees.filter(a=>a.entity_type==="dev_task" && a.entity_id===taskId).map(a=>allUsers.find(u=>u.user_id===a.user_id)).filter(Boolean);
@@ -3230,6 +3257,7 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
   useEffect(() => {
     if (!openId) return;
     const found = devTasks.find(x => x.id === openId);
+    if (found && filterAssignee && !assignees.some(a=>a.entity_type==="dev_task"&&a.entity_id===found.id&&a.user_id===filterAssignee)) setFilterAssignee(""); // un link a una tarea ajena: se pasa a ver todas
     if (found) setDetail(found);
     onOpenHandled();
   }, [openId]);
@@ -3298,16 +3326,15 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
           <div style={{ fontSize:13,color:"#888",marginTop:4 }}>{visibleTasks.length} tareas · Devs</div>
         </div>
         <div style={{ display:"flex",gap:10,alignItems:"center",flexWrap:"wrap" }}>
-          <select aria-label="Filtrar por asignado" value={filterAssignee} onChange={e=>setFilterAssignee(e.target.value)} className="spicy-select">
-            <option value="">Todos los asignados</option>
-            {allUsers.map(u=><option key={u.user_id} value={u.user_id}>{userDisplayName(u)}</option>)}
-          </select>
+          <AssigneeScope value={filterAssignee} onChange={setFilterAssignee} allUsers={allUsers} meId={currentUserId||""} mine="Mis tareas" all="Todas las tareas" noun="tareas de devs"/>
           <label style={{ display:"flex",alignItems:"center",gap:5,fontSize:12,color:"#666" }}>
             <input type="checkbox" checked={filterUnestimated} onChange={e=>setFilterUnestimated(e.target.checked)}/> Sin estimar
           </label>
           {canCreate&&<button className="spicy-btn-primary" onClick={()=>setShowNew(true)}>+ Nueva tarea</button>}
         </div>
       </div>
+
+      <NoMineHint show={filterAssignee===currentUserId && visibleTasks.length===0 && devTasks.length>0} text="No tenés tareas de devs asignadas." total={devTasks.length} onAll={()=>setFilterAssignee("")}/>
 
       <div style={{ overflowX:"auto", paddingBottom:8 }}>
         <div style={{ display:"flex", gap:14, minWidth: DEV_TASK_STAGES.length * 250 }}>
@@ -3708,7 +3735,7 @@ function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks
   const [mode, setMode] = useState("kanban"); // 'kanban' | 'calendar'
   const [calMode, setCalMode] = useState("month"); // 'month' | 'week'
   const [calCursor, setCalCursor] = useState(new Date());
-  const [filterAssigned, setFilterAssigned] = useState("");
+  const [filterAssigned, setFilterAssigned] = useState(currentUserId || ""); // por defecto: mis tareas
   const [showNew, setShowNew] = useState(false);
   const [detail, setDetail] = useState(null);
   const [dragOverStage, setDragOverStage] = useState(null);
@@ -3725,6 +3752,7 @@ function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks
   useEffect(() => {
     if (!openId) return;
     const found = tasks.find(x => x.id === openId);
+    if (found && filterAssigned && !assignees.some(a=>a.entity_type==="task"&&a.entity_id===found.id&&a.user_id===filterAssigned)) setFilterAssigned(""); // un link a una tarea ajena: se pasa a ver todas
     if (found) setDetail(found);
     onOpenHandled();
   }, [openId]);
@@ -3805,13 +3833,10 @@ function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,gap:12,flexWrap:"wrap" }}>
         <div>
           <div style={{ fontSize:20,fontWeight:700,color:"#111" }}>Tareas</div>
-          <div style={{ fontSize:13,color:"#888",marginTop:4 }}>{visible.length} tareas · Operaciones</div>
+          <div style={{ fontSize:13,color:"#888",marginTop:4 }}>{visible.length} {visible.length===1?(filterAssigned===currentUserId?"tarea tuya":"tarea"):(filterAssigned===currentUserId?"tareas tuyas":"tareas")} · Operaciones</div>
         </div>
         <div style={{ display:"flex",gap:8,alignItems:"center",flexWrap:"wrap" }}>
-          <select aria-label="Filtrar por responsable" className="spicy-select" value={filterAssigned} onChange={e=>setFilterAssigned(e.target.value)}>
-            <option value="">Todos los responsables</option>
-            {allUsers.map(u=><option key={u.user_id} value={u.user_id}>{userDisplayName(u)}</option>)}
-          </select>
+          <AssigneeScope value={filterAssigned} onChange={setFilterAssigned} allUsers={allUsers} meId={currentUserId||""} mine="Mis tareas" all="Todas las tareas" noun="tareas"/>
           <div style={{ display:"flex",border:"1px solid #E0E0E0",borderRadius:8,overflow:"hidden" }}>
             <button onClick={()=>setMode("kanban")} style={toggleBtn(mode==="kanban")}>Kanban</button>
             <button onClick={()=>setMode("calendar")} style={toggleBtn(mode==="calendar")}>Calendario</button>
@@ -3834,6 +3859,8 @@ function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks
           </div>
         </div>
       )}
+
+      <NoMineHint show={filterAssigned===currentUserId && visible.length===0 && tasks.length>0} text="No tenés tareas asignadas." total={tasks.length} onAll={()=>setFilterAssigned("")}/>
 
       {mode==="kanban" ? (
         <div style={{ overflowX:"auto", paddingBottom:8 }}>
