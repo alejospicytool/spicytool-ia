@@ -233,7 +233,7 @@ export function FailedPage({ d, now }) {
 
 // ── Clientes ─────────────────────────────────────────────────────────────────────────────────────────
 const EMPTY = { customerKey: "", customerName: "", email: "", planPriceId: "", newPlanName: "", amount: "", currency: "usd", interval: "month", status: "active", subscriptionId: "", segment: "" };
-export function CustomersPage({ d, rows, seg, now, sb, reload, ro }) {
+export function CustomersPage({ d, rows, seg, now, sb, reload, ro, roSeg = ro }) {
   const [q, setQ] = useState(""), [onlyActive, setOnlyActive] = useState(true), [form, setForm] = useState(null), [busy, setBusy] = useState(false), [notice, setNotice] = useState(null);
   const customers = useMemo(() => d.customers.filter((c) => matchSegment(c, seg) && (!onlyActive || Number(c.mrr) > 0) && (!q || ((c.name || "") + " " + (c.email || "") + " " + c.key).toLowerCase().includes(q.toLowerCase()))).sort((a, b) => Number(b.mrr) - Number(a.mrr) || String(a.name).localeCompare(String(b.name))), [d.customers, seg, onlyActive, q]);
   const summary = useMemo(() => segmentSummary(d.customers), [d.customers]);
@@ -246,8 +246,9 @@ export function CustomersPage({ d, rows, seg, now, sb, reload, ro }) {
 
   async function setSegment(c, segment) {
     setNotice(null);
-    const { error } = await sb.from("rev_customers").update({ segment: segment || null }).eq("key", c.key);
+    const { data: saved, error } = await sb.from("rev_customers").update({ segment: segment || null }).eq("key", c.key).select("key");
     if (error) { setNotice({ ok: false, text: "No se pudo guardar el segmento: " + error.message }); return; }
+    if (!saved || !saved.length) { setNotice({ ok: false, text: "No se guardó el segmento: tu usuario no tiene permiso para cambiarlo. Pedile a un admin que revise tus permisos." }); await reload(); return; }
     await reload();
   }
   function edit(c) {
@@ -305,7 +306,7 @@ export function CustomersPage({ d, rows, seg, now, sb, reload, ro }) {
                   <div className="customer-name">{c.name || c.email || c.key} <span className={"badge " + (active ? "badge-green" : "badge-red")} style={{ marginLeft: 6 }}>{active ? "Activo" : "Churneado"}</span></div>
                   <div className="customer-plan">{(it.priceId && planName[it.priceId]) || "—"} · <span style={{ color: c.source === "stripe" ? "var(--blue)" : "var(--yellow)" }}>{c.source === "stripe" ? "Stripe" : "Por fuera"}</span>{c.email && c.name ? " · " + c.email : ""}</div>
                 </div>
-                {d.v2 && <select className="seg-select" disabled={ro} aria-label={"Segmento de " + (c.name || c.key)} value={c.segment || ""} onChange={(e) => setSegment(c, e.target.value)}><option value="">Sin segmento</option><option value="inmobiliaria">🏠 Inmobiliaria</option><option value="otro">◎ Otro</option></select>}
+                {d.v2 && <select className="seg-select" disabled={roSeg} aria-label={"Segmento de " + (c.name || c.key)} value={c.segment || ""} onChange={(e) => setSegment(c, e.target.value)}><option value="">Sin segmento</option><option value="inmobiliaria">🏠 Inmobiliaria</option><option value="otro">◎ Otro</option></select>}
                 <div className="customer-mrr">{money(c.mrr)}<span style={{ fontSize: 10, color: "#888", fontWeight: 400 }}>/mes</span></div>
                 <div style={{ display: "flex", gap: 6 }}>
                   {c.source === "manual" ? (<>
