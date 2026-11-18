@@ -1,5 +1,5 @@
 -- Métricas: los editores (y devs) con la sección 'Métricas' también pueden asignar el segmento de cada cliente.
--- ESTADO: PENDIENTE DE APLICAR (probado en una transacción que se deshizo el 2026-11-18).
+-- ESTADO: YA APLICADO en el proyecto real (khuavhbraikzreyhptog) el 2026-11-18 (probado antes en una transacción que se deshizo).
 -- Solo cambia quién puede actualizar rev_customers.segment. La columna sigue siendo la ÚNICA actualizable desde la app
 -- (grant update (segment), ver supabase_revenue_v2.sql): MRR, planes, tipos de cambio y sincronizaciones siguen siendo solo de admins.
 -- Un reader sigue sin poder.
