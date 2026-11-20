@@ -1,5 +1,6 @@
 -- CRM → Onboarding automático: cuando un deal del CRM pasa a una etapa "Ganado" se crea solo su fila de Onboarding.
--- ESTADO: PENDIENTE DE APLICAR (probado en una transacción que se deshace el 2026-11-20).
+-- ESTADO: YA APLICADO en el proyecto real (khuavhbraikzreyhptog) el 2026-11-20 (probado antes en una transacción que se deshizo).
+-- Ese mismo día se crearon a mano (una sola vez) los 9 onboardings de los deals ya ganados en estado 'onboarding' o 'nopago'.
 --
 -- Cómo se unen: el onboarding guarda el id del deal (deal_id), NO el email (el email del CRM suele ser distinto al de la cuenta
 -- de Spicytool). Un índice único evita duplicados: un deal tiene como mucho un onboarding.
