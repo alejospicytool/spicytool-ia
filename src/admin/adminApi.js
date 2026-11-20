@@ -11,8 +11,6 @@ let tokenProvider = null, mode = "mock";
 export function configureAdminApi(getToken) { tokenProvider = getToken; }
 export const adminMode = () => mode;
 const real = () => mode === "real";
-const READ_ONLY_MSG = "Todavía no está conectado: por ahora esta sección es de solo lectura.";
-const readOnly = () => { if (real()) throw new Error(READ_ONLY_MSG); };
 
 async function http(path, params = {}, { method = "GET", body: payload } = {}) {
   const token = tokenProvider ? await tokenProvider() : null;
@@ -266,15 +264,21 @@ export async function getMyPermissions(actor) {
   if (real()) {
     // canAct / level vienen del servidor (la que manda es esa API; esto solo deshabilita botones).
     const me = await http("/me");
-    return { support: false, disabledReason: "Entrar como usuario todavía no está conectado.", canAct: !!(me && me.canAct), level: me && me.level };
+    return { support: !!(me && me.support), disabledReason: "Entrar como usuario solo está habilitado para admins.", canAct: !!(me && me.canAct), level: me && me.level };
   }
   needActor(actor);
   return { support: !SUPPORT_DENIED.includes(String(actor).trim().toLowerCase()), canAct: true, level: "admin" };
 }
 
 // POST /admin/support-sessions/link
-export async function createSupportLink(userId, reason, actor, now = new Date()) {
-  readOnly();
+// En modo real el servidor hace el login con la cuenta de Spicytool de quien lo pide ({ email, password }, solo para este pedido: no se guardan)
+// y devuelve el link. El email y la company del usuario los toma el servidor de Mongo; acá solo viaja el motivo.
+export async function createSupportLink(userId, reason, actor, now = new Date(), creds = null) {
+  if (real()) {
+    const v = validateSupportReason(reason);
+    if (!v.ok) sup(422, "MOTIVO_INVALIDO", v.error);
+    return http(`/users/${encodeURIComponent(userId)}/support-link`, {}, { method: "POST", body: { reason: v.value, spicyEmail: creds && creds.email, spicyPassword: creds && creds.password } });
+  }
   needActor(actor);
   const u = byId("users", userId);
   const co = u && byId("companies", companyIdOf(u));

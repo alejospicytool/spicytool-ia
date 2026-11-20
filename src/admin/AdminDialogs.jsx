@@ -6,6 +6,8 @@ import { validateCompanyEdit, validateContactEdit, validatePlanAssignment, PAID_
 import { useAsync } from "./adminHooks.js";
 import { listPrices, listCoupons } from "./adminApi.js";
 
+const SPICY_EMAIL_KEY = "bo_spicy_support_email"; // solo el email de la cuenta de Spicytool (nunca la contraseña)
+
 function useSubmit(validate, onSubmit, onClose) {
   const [errors, setErrors] = useState({}), [busy, setBusy] = useState(false), [error, setError] = useState("");
   async function submit(form) {
@@ -195,21 +197,29 @@ export function CardLinkDialog({ user, onSubmit, onClose }) {
 }
 
 // Entrar como usuario (sesión de soporte). Pide un motivo obligatorio y avisa que queda registrado. El link se ve una sola vez.
-export function SupportSessionDialog({ user, onSubmit, onClose, onDone }) {
+export function SupportSessionDialog({ user, onSubmit, onClose, onDone, needsCredentials = false }) {
   const [reason, setReason] = useState(""), [ack, setAck] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(""), [touched, setTouched] = useState(false), [result, setResult] = useState(null);
+  // Con el servidor real hace falta la cuenta de Spicytool de quien pide el acceso. El email se recuerda en este navegador; la contraseña NUNCA se guarda y se borra apenas se usa.
+  const [spicyEmail, setSpicyEmail] = useState(() => { try { return localStorage.getItem(SPICY_EMAIL_KEY) || ""; } catch { return ""; } }), [spicyPass, setSpicyPass] = useState("");
   const v = validateSupportReason(reason);
+  const credsOk = !needsCredentials || (spicyEmail.trim() !== "" && spicyPass !== "");
   const finish = () => { if (result || error) onDone(); onClose(); };
   async function generate() {
     setTouched(true);
-    if (!v.ok) return;
+    if (!v.ok || !credsOk) return;
     setBusy(true); setError("");
-    try { setResult(await onSubmit(v.value)); }
+    const creds = needsCredentials ? { email: spicyEmail.trim(), password: spicyPass } : null;
+    setSpicyPass(""); // la contraseña no se queda en pantalla ni en memoria del formulario
+    try {
+      setResult(await onSubmit(v.value, creds));
+      if (creds) { try { localStorage.setItem(SPICY_EMAIL_KEY, creds.email); } catch { /* sin almacenamiento: se escribe de nuevo la próxima vez */ } }
+    }
     catch (e) { const ex = explainSupportError(e.code); setError(`${ex.title}. ${ex.action}`); }
     setBusy(false);
   }
   const footer = result
     ? <><button className="btn-secondary" onClick={finish}>Cerrar</button><a className="btn-primary" style={{ textDecoration: "none", display: "inline-block" }} href={result.url} target="_blank" rel="noopener noreferrer">Abrir sesión</a></>
-    : <><button className="btn-secondary" disabled={busy} onClick={finish}>Cancelar</button><button className="btn-primary" disabled={busy || !ack} onClick={generate}>{busy ? "Generando…" : "Generar link de soporte"}</button></>;
+    : <><button className="btn-secondary" disabled={busy} onClick={finish}>Cancelar</button><button className="btn-primary" disabled={busy || !ack || !credsOk} onClick={generate}>{busy ? "Generando…" : "Generar link de soporte"}</button></>;
   return (
     <Modal title="Entrar como usuario (soporte)" onClose={busy ? () => {} : finish} footer={footer}>
       <dl className="kv" style={{ marginBottom: 14 }}>
@@ -230,6 +240,16 @@ export function SupportSessionDialog({ user, onSubmit, onClose, onDone }) {
           <textarea id="support-reason" className="inp" rows={3} maxLength={REASON_MAX + 50} placeholder="Ej: ticket 4821: el cliente no ve sus contactos" value={reason} onChange={(e) => setReason(e.target.value)} onBlur={() => setTouched(true)} />
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--muted)", marginTop: 4 }}><span>{touched && !v.ok ? <span className="err" role="alert">{v.error}</span> : `Mínimo ${REASON_MIN} caracteres`}</span><span>{v.value.length}/{REASON_MAX}</span></div>
         </div>
+        {needsCredentials && (
+          <div className="field" style={{ marginTop: 12 }}>
+            <div className="field-label">Tu cuenta de Spicytool</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <input className="inp" type="email" aria-label="Email de tu cuenta de Spicytool" autoComplete="off" placeholder="Email con el que entrás a Spicytool" value={spicyEmail} onChange={(e) => setSpicyEmail(e.target.value)} style={{ flex: "1 1 200px" }} />
+              <input className="inp" type="password" aria-label="Contraseña de tu cuenta de Spicytool" autoComplete="off" placeholder="Contraseña de Spicytool" value={spicyPass} onChange={(e) => setSpicyPass(e.target.value)} style={{ flex: "1 1 160px" }} />
+            </div>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>Se usa solo para pedir este link y se descarta: no se guarda en ningún lado. Es la cuenta de Spicytool, no la del backoffice.</div>
+          </div>
+        )}
         <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13 }}><input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />Entiendo que esta sesión queda registrada a mi nombre.</label>
         {error && <div className="err" role="alert" style={{ marginTop: 10 }}>{error}</div>}
       </>)}

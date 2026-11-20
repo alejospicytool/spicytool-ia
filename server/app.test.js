@@ -26,11 +26,15 @@ const companies = {
 };
 const users = { editContact: vi.fn(async () => ({ status: 200, body: { _id: "x", changed: true } })) };
 const audit = { list: vi.fn(async (token, a) => [{ id: "1", echo: { token, ...a } }]) };
+const support = {
+  isAllowed: vi.fn((a) => a.level === "admin"),
+  createLink: vi.fn(async () => ({ status: 201, body: { url: "https://app.test/support-session?code=x", expiresAt: null, auditWarning: false } })),
+};
 const prices = [{ id: "price_1", plan: "SpicyPro", amount: 40000 }];
 
 let server, base;
 beforeAll(async () => {
-  const app = createApp({ queries, authenticate, billing, companies, users, audit, prices, log: () => {} });
+  const app = createApp({ queries, authenticate, billing, companies, users, audit, support, prices, log: () => {} });
   await new Promise((r) => { server = app.listen(0, "127.0.0.1", r); });
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -128,6 +132,15 @@ describe("API del backoffice (solo lectura)", () => {
     expect(r.status).toBe(200);
     expect(billing.paymentMethodUrl).toHaveBeenCalledWith(ADMIN, "admin", ID);
   });
+  it("entrar como usuario: POST con admin; pasa admin, token, id y el cuerpo, y la respuesta no se cachea", async () => {
+    const body = { reason: "ticket 4821: no ve sus contactos", spicyEmail: "a@b.co", spicyPassword: "x" };
+    const r = await call(`/api/admin/users/${ID}/support-link`, { method: "POST", body });
+    expect(r.status).toBe(201);
+    expect(r.headers.get("cache-control")).toBe("no-store");
+    expect(support.createLink).toHaveBeenCalledWith(ADMIN, "admin", ID, body);
+    expect((await call("/api/admin/users/xyz/support-link", { method: "POST", body })).status).toBe(400);
+    expect((await call(`/api/admin/users/${ID}/support-link`, { method: "GET" })).status).toBe(404);
+  });
   it("pausar/activar: solo POST con admin; pasa admin, token, id y el estado pedido", async () => {
     const r = await call(`/api/admin/companies/${ID}/status`, { method: "POST", body: { status: "paused" } });
     expect(r.status).toBe(200);
@@ -163,9 +176,9 @@ describe("permisos: ver sin poder hacer cambios", () => {
     expect((await call("/api/admin/audit", { token: "reader" })).status).toBe(200);
   });
   it("quien solo puede ver recibe 403 en TODA escritura y no se llega a ejecutar nada", async () => {
-    for (const m of [billing.assignPlan, billing.paymentMethodUrl, companies.setStatus, companies.edit, users.editContact]) m.mockClear();
+    for (const m of [billing.assignPlan, billing.paymentMethodUrl, companies.setStatus, companies.edit, users.editContact, support.createLink]) m.mockClear();
     const posts = [
-      [`/api/admin/users/${ID}/subscription`, { plan: "SpicyPro" }], [`/api/admin/users/${ID}/payment-method-url`, {}],
+      [`/api/admin/users/${ID}/subscription`, { plan: "SpicyPro" }], [`/api/admin/users/${ID}/payment-method-url`, {}], [`/api/admin/users/${ID}/support-link`, { reason: "x" }],
       [`/api/admin/companies/${ID}/status`, { status: "paused" }], [`/api/admin/companies/${ID}`, { name: "X" }], [`/api/admin/users/${ID}`, { name: "X" }],
       ["/api/admin/cualquier-cosa-nueva", {}],
     ];
@@ -174,15 +187,15 @@ describe("permisos: ver sin poder hacer cambios", () => {
       expect(r.status).toBe(403);
       expect((await r.json()).code).toBe("SIN_PERMISO_ACCIONES");
     }
-    for (const m of [billing.assignPlan, billing.paymentMethodUrl, companies.setStatus, companies.edit, users.editContact]) expect(m).not.toHaveBeenCalled();
+    for (const m of [billing.assignPlan, billing.paymentMethodUrl, companies.setStatus, companies.edit, users.editContact, support.createLink]) expect(m).not.toHaveBeenCalled();
     for (const method of ["PUT", "PATCH", "DELETE"]) expect((await call(`/api/admin/companies/${ID}`, { method, token: "reader", body: {} })).status).toBe(403);
   });
   it("quien puede hacer cambios sigue pasando", async () => {
     expect((await call(`/api/admin/companies/${ID}/status`, { method: "POST", body: { status: "paused" } })).status).toBe(200);
   });
   it("/me dice qué puede hacer cada uno", async () => {
-    expect(await (await call("/api/admin/me", { token: "reader" })).json()).toEqual({ email: "soporte@spicytool.test", level: "read", canAct: false });
-    expect(await (await call("/api/admin/me")).json()).toEqual({ email: "nico@spicytool.test", level: "admin", canAct: true });
+    expect(await (await call("/api/admin/me", { token: "reader" })).json()).toEqual({ email: "soporte@spicytool.test", level: "read", canAct: false, support: false });
+    expect(await (await call("/api/admin/me")).json()).toEqual({ email: "nico@spicytool.test", level: "admin", canAct: true, support: true });
     expect((await call("/api/admin/me", { token: null })).status).toBe(401);
   });
 });

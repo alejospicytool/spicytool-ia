@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { resetMock, listUsers, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, listCoupons, getPaymentMethodUrl, listPrices, WebhookError, getUser, listCompanies, listCompanyUsers, getMyPermissions, createSupportLink, listSupportLog, SupportError } from "./adminApi.js";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { resetMock, listUsers, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, listCoupons, getPaymentMethodUrl, listPrices, WebhookError, getUser, listCompanies, listCompanyUsers, getMyPermissions, createSupportLink, listSupportLog, SupportError, configureAdminApi, probeAdminApi } from "./adminApi.js";
 import { MOCK } from "./adminMock.js";
 
 const ACTOR = "admin@ejemplo.test";
@@ -471,5 +471,49 @@ describe("cupones al asignar plan (simulado)", () => {
     const u = MOCK.users.find((x) => x.name === "Lucía");
     await assignPlan(u._id, { plan: "SpicyStart", stripePriceId: START }, ACTOR);
     expect((await listAudit())[0].detail.couponId).toBeUndefined();
+  });
+});
+
+// Modo real: se habla con el servidor del backoffice (fetch falso: no sale nada a la red ni se abre ninguna sesión de soporte de verdad).
+describe("entrar como usuario con el servidor real", () => {
+  const calls = [];
+  const fakeFetch = (routes) => vi.fn(async (url, opts = {}) => {
+    calls.push({ url: String(url), method: opts.method || "GET", headers: opts.headers, body: opts.body ? JSON.parse(opts.body) : null });
+    const r = routes(String(url), opts);
+    return { ok: r.status < 400, status: r.status, json: async () => r.body };
+  });
+  beforeEach(() => { calls.length = 0; configureAdminApi(async () => "token-del-admin"); });
+  afterEach(async () => { vi.unstubAllGlobals(); configureAdminApi(null); await probeAdminApi(); });
+
+  it("manda al servidor el motivo y la cuenta de Spicytool, con el token del admin, y devuelve el link", async () => {
+    vi.stubGlobal("fetch", fakeFetch((url) => (url.endsWith("/health") ? { status: 200, body: { ok: true, mode: "real" } } : { status: 201, body: { url: "https://app.test/s?c=1", expiresAt: "2026-11-20T15:00:00Z" } })));
+    expect(await probeAdminApi()).toBe("real");
+    const r = await createSupportLink("6650000000000000000000a1", "  ticket 4821:  el cliente no ve sus contactos ", ACTOR, new Date(), { email: "nico@spicytool.net", password: "clave-123" });
+    expect(r).toEqual({ url: "https://app.test/s?c=1", expiresAt: "2026-11-20T15:00:00Z" });
+    const c = calls.find((x) => x.url.includes("support-link"));
+    expect(c).toMatchObject({ method: "POST", url: "/api/admin/users/6650000000000000000000a1/support-link", headers: { Authorization: "Bearer token-del-admin" } });
+    expect(c.body).toEqual({ reason: "ticket 4821: el cliente no ve sus contactos", spicyEmail: "nico@spicytool.net", spicyPassword: "clave-123" });
+  });
+  it("un motivo inválido ni siquiera sale del navegador", async () => {
+    vi.stubGlobal("fetch", fakeFetch(() => ({ status: 200, body: { ok: true, mode: "real" } })));
+    await probeAdminApi();
+    calls.length = 0;
+    const e = await createSupportLink("6650000000000000000000a1", "ok", ACTOR, new Date(), { email: "a@b.co", password: "x" }).catch((x) => x);
+    expect(e.code).toBe("MOTIVO_INVALIDO");
+    expect(calls).toHaveLength(0);
+  });
+  it("los errores del servidor llegan con su código para mostrar el mensaje claro", async () => {
+    vi.stubGlobal("fetch", fakeFetch((url) => (url.endsWith("/health") ? { status: 200, body: { ok: true, mode: "real" } } : { status: 401, body: { code: "SPICY_LOGIN_INVALIDO", message: "x" } })));
+    await probeAdminApi();
+    const e = await createSupportLink("6650000000000000000000a1", "ticket 4821: el cliente no ve sus contactos", ACTOR, new Date(), { email: "a@b.co", password: "mala" }).catch((x) => x);
+    expect(e.code).toBe("SPICY_LOGIN_INVALIDO");
+  });
+  it("el permiso de soporte lo dice el servidor", async () => {
+    vi.stubGlobal("fetch", fakeFetch((url) => (url.endsWith("/health") ? { status: 200, body: { ok: true, mode: "real" } } : { status: 200, body: { email: "x", level: "admin", canAct: true, support: true } })));
+    await probeAdminApi();
+    expect(await getMyPermissions(ACTOR)).toMatchObject({ support: true, canAct: true, level: "admin" });
+    vi.stubGlobal("fetch", fakeFetch((url) => (url.endsWith("/health") ? { status: 200, body: { ok: true, mode: "real" } } : { status: 200, body: { email: "x", level: "actions", canAct: true, support: false } })));
+    await probeAdminApi();
+    expect((await getMyPermissions(ACTOR)).support).toBe(false);
   });
 });

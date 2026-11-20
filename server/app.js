@@ -8,7 +8,7 @@ const int = (v, def, min, max) => { const n = Math.floor(Number(v)); return Numb
 const text = (v) => String(v ?? "").slice(0, 100);
 const flag = (v) => v === "1" || v === "true";
 
-export function createApp({ queries, authenticate, billing, companies, users, audit, prices = [], log = console.error }) {
+export function createApp({ queries, authenticate, billing, companies, users, audit, support = null, prices = [], log = console.error }) {
   const app = express();
   app.disable("x-powered-by");
   app.use((req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
@@ -34,7 +34,7 @@ export function createApp({ queries, authenticate, billing, companies, users, au
 
   app.get("/api/admin/health", route(async (req, res) => res.json(await queries.health())));
   // Qué puede hacer quien está conectado (el front deshabilita los botones de cambios si no puede). La que manda es esta API: el front solo lo refleja.
-  app.get("/api/admin/me", route(async (req, res) => res.json({ email: req.admin.email, level: req.admin.level, canAct: !!req.admin.canAct })));
+  app.get("/api/admin/me", route(async (req, res) => res.json({ email: req.admin.email, level: req.admin.level, canAct: !!req.admin.canAct, support: !!(support && support.isAllowed(req.admin)) })));
 
   app.get("/api/admin/users", route(async (req, res) => res.json(await queries.listUsers({
     search: text(req.query.search), page: int(req.query.page, 1, 1, 100000), pageSize: int(req.query.pageSize, 8, 1, 50), owners: flag(req.query.owners), activeOnly: flag(req.query.activeOnly),
@@ -69,6 +69,9 @@ export function createApp({ queries, authenticate, billing, companies, users, au
   const billed = (fn) => route(async (req, res) => { if (!needId(req, res)) return; const r = await fn(req); res.status(r.status).json(r.body); });
   app.post("/api/admin/users/:id/subscription", billed((req) => billing.assignPlan(req.admin, req.token, req.params.id, req.body)));
   app.post("/api/admin/users/:id/payment-method-url", billed((req) => billing.paymentMethodUrl(req.admin, req.token, req.params.id)));
+  // "Entrar como usuario": devuelve un link de un solo uso a la cuenta de un cliente. La contraseña de Spicytool de quien lo pide viaja solo en este pedido
+  // y no se guarda ni se loguea (ver server/support.js). La respuesta nunca se cachea (Cache-Control: no-store más arriba).
+  app.post("/api/admin/users/:id/support-link", billed((req) => (support ? support.createLink(req.admin, req.token, req.params.id, req.body || {}) : { status: 503, body: { code: "SOPORTE_NO_CONFIGURADO", message: "El servidor todavía no tiene configurado el acceso de soporte." } })));
 
   // Pausar / activar una company (escribe solo el campo status en Mongo, con auditoría previa).
   app.post("/api/admin/companies/:id/status", route(async (req, res) => {

@@ -220,6 +220,13 @@ export const SUPPORT_ERRORS = {
   MOTIVO_INVALIDO: { title: "El motivo no es válido", action: "Escribí qué vas a revisar y por qué." },
   SIN_COMPANY: { title: "Este usuario no tiene company", action: "La sesión de soporte necesita una company. Si el usuario no terminó el registro, no hay nada para revisar." },
   SESION_NO_DISPONIBLE: { title: "Spicytool no pudo generar la sesión", action: "Probá de nuevo en un minuto; si sigue, avisá a un desarrollador." },
+  SPICY_LOGIN_INVALIDO: { title: "El email o la contraseña de Spicytool no son correctos", action: "Revisalos y volvé a intentar. Es tu cuenta de Spicytool, no la del backoffice." },
+  CREDENCIALES_REQUERIDAS: { title: "Faltan los datos de tu cuenta de Spicytool", action: "Escribí el email y la contraseña con los que entrás a Spicytool." },
+  DEMASIADOS_INTENTOS: { title: "Demasiados intentos en un minuto", action: "Esperá un momento y volvé a intentar." },
+  AUDITORIA_NO_DISPONIBLE: { title: "No se pudo guardar el registro de auditoría", action: "Por seguridad no se pidió ningún link. Probá de nuevo en un minuto." },
+  RESPUESTA_INESPERADA: { title: "Spicytool respondió algo que no esperábamos", action: "Avisá a un desarrollador." },
+  SOPORTE_NO_CONFIGURADO: { title: "El acceso de soporte no está configurado en el servidor", action: "Avisá a un desarrollador." },
+  SIN_PERMISO_ACCIONES: { title: "Tu usuario no puede hacer cambios", action: "Pedile a un admin que te habilite las acciones de Admin Spicy." },
   ERROR: { title: "Error inesperado", action: "Avisá a un desarrollador." },
 };
 export const explainSupportError = (code) => SUPPORT_ERRORS[code] || SUPPORT_ERRORS.ERROR;

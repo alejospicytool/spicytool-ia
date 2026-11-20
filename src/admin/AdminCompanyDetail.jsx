@@ -3,7 +3,7 @@
 // (editar, pausar/activar, cambiar plan, link de tarjeta), todas con confirmación o formulario y con auditoría.
 import { useState } from "react";
 import { Kpi, fmtDate, fmtDateTime } from "../revenue/revenueUi.jsx";
-import { getUser, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, getPaymentMethodUrl, createSupportLink, getMyPermissions } from "./adminApi.js";
+import { getUser, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, getPaymentMethodUrl, createSupportLink, getMyPermissions, adminMode } from "./adminApi.js";
 import { companyIdOf, userFullName, whatsappProvider, planOf, planLabel, sortByPosition } from "./adminLogic.js";
 import { Tabs, DataTable, StatusBadge, ConfirmDialog, AuditList, IdCell, ActGroup, PhoneLink } from "./adminUi.jsx";
 import { useAsync } from "./adminHooks.js";
@@ -235,7 +235,7 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
       {dialog === "company" && <EditCompanyDialog company={co} onClose={() => setDialog(null)} onSubmit={submitted((v) => updateCompany(co._id, v, actor))} />}
       {dialog === "contact" && <EditContactDialog user={user} onClose={() => setDialog(null)} onSubmit={submitted((v) => updateUserContact(user._id, v, actor))} />}
       {dialog === "plan" && <AssignPlanDialog user={user} onClose={() => setDialog(null)} onDone={refresh} onSubmit={(v) => assignPlan(user._id, v, actor)} />}
-      {dialog === "support" && <SupportSessionDialog user={user} onClose={() => setDialog(null)} onDone={refresh} onSubmit={(reason) => createSupportLink(user._id, reason, actor)} />}
+      {dialog === "support" && <SupportSessionDialog user={user} onClose={() => setDialog(null)} onDone={refresh} needsCredentials={adminMode() === "real"} onSubmit={(reason, creds) => createSupportLink(user._id, reason, actor, new Date(), creds)} />}
       {dialog === "card" && <CardLinkDialog user={user} onClose={() => { setDialog(null); refresh(); }} onSubmit={() => getPaymentMethodUrl(user._id, actor)} />}
       {confirm && <ConfirmDialog title={confirm.title} confirmLabel={confirm.label} danger={confirm.danger} busy={confirmBusy} error={confirmError} onConfirm={runConfirmed} onCancel={() => setConfirm(null)}>{confirm.text}</ConfirmDialog>}
     </div>
