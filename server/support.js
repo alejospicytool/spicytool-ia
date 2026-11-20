@@ -17,10 +17,11 @@ const EMAIL_RE = /^[^\s@]{1,100}@[^\s@]{1,100}\.[^\s@]{2,30}$/;
 const pick = (o, keys) => { for (const k of keys) if (o && typeof o[k] === "string" && o[k]) return o[k]; return null; };
 const inner = (b) => (b && typeof b === "object" && b.data && typeof b.data === "object" ? b.data : null);
 
-// El nombre exacto de los campos de la respuesta de Spicytool no está documentado: se aceptan los nombres habituales.
+// La respuesta real de admin/support-sessions/link trae { supportSessionId, supportUrl, expiresAt } (comprobado con el servidor el 2026-11-20).
+// El login no está documentado: se aceptan los nombres habituales del token.
 export const tokenOf = (b) => pick(b, ["token", "accessToken", "access_token", "jwt"]) || pick(inner(b), ["token", "accessToken", "access_token", "jwt"]);
 export const linkOf = (b) => ({
-  url: pick(b, ["url", "link", "sessionUrl"]) || pick(inner(b), ["url", "link", "sessionUrl"]),
+  url: pick(b, ["supportUrl", "url", "link", "sessionUrl"]) || pick(inner(b), ["supportUrl", "url", "link", "sessionUrl"]),
   expiresAt: pick(b, ["expiresAt", "expires_at"]) || pick(inner(b), ["expiresAt", "expires_at"]),
 });
 

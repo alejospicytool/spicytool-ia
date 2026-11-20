@@ -54,6 +54,13 @@ describe("camino feliz", () => {
     await s.support.createLink(ADMIN, TOKEN, UID, INPUT);
     expect(order).toEqual(["support_link_requested", "login", "admin/support-sessions/link", "support_link_created"]);
   });
+  it("la respuesta real de Spicytool: { supportSessionId, supportUrl, expiresAt }", async () => {
+    const { support, records } = setup({ link: () => json(200, { supportSessionId: "665000000000000000000abc", supportUrl: "https://app.spicytool.net/support/enter?code=zzz", expiresAt: "2026-11-20T22:00:00.000Z" }) });
+    const r = await support.createLink(ADMIN, TOKEN, UID, INPUT);
+    expect(r.status).toBe(201);
+    expect(r.body).toEqual({ url: "https://app.spicytool.net/support/enter?code=zzz", expiresAt: "2026-11-20T22:00:00.000Z", auditWarning: false });
+    expect(JSON.stringify(records)).not.toContain("code=zzz");
+  });
   it("acepta los nombres habituales de la respuesta (data.token, data.url…)", async () => {
     const { support, calls } = setup({ login: () => json(200, { data: { accessToken: "t2" } }), link: () => json(200, { data: { link: "https://x.test/s", expires_at: "2026-12-01T00:00:00Z" } }) });
     const r = await support.createLink(ADMIN, TOKEN, UID, INPUT);
@@ -168,6 +175,7 @@ describe("tokenOf / linkOf", () => {
     expect(tokenOf({})).toBeNull();
     expect(tokenOf(null)).toBeNull();
     expect(linkOf({ url: "https://a.test", expiresAt: "x" })).toEqual({ url: "https://a.test", expiresAt: "x" });
+    expect(linkOf({ supportUrl: "https://b.test", expiresAt: "y" })).toEqual({ url: "https://b.test", expiresAt: "y" });
     expect(linkOf(null)).toEqual({ url: null, expiresAt: null });
   });
 });
