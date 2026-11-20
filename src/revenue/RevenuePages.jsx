@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { periodKpis, customerMonthly, segmentSummary, matchSegment, projectionMonths, projectionDefaults, computeProjection, failuresSummary, liveCustomerKeys, planUsage, movementsFor } from "./revenueMetrics.js";
 import { Kpi, PageHeader, Notice, Alerts, Modal, MonthBars, money, signed, pct, monthLabel, monthShort, fmtDate, fmtDateTime, initials } from "./revenueUi.jsx";
 import { callFn } from "./revenueApi.js";
+import { askConfirm } from "../confirmStore.js";
 
 const SEG_LABEL = { inmobiliaria: "🏠 Inmobiliaria", otro: "◎ Otro" };
 const CATEGORIES = [["sin_clasificar", "Sin clasificar"], ["saas", "SaaS (suma al MRR)"], ["pass_through", "Pass-through (créditos Ads)"], ["servicio", "Servicio (honorarios, landing, web)"], ["test", "Test (planes de 1 dólar)"]];
@@ -453,7 +454,7 @@ export function PlansPage({ d, done, sb, reload, ro }) {
     if (error) { setNotice({ ok: false, text: "No se pudo guardar: " + error.message }); return; }
     setFxForm({ currency: "", rate: "" }); setDirty(true); await reload();
   }
-  async function delFx(currency) { await sb.from("rev_fx_rates").delete().eq("currency", currency); setDirty(true); await reload(); }
+  async function delFx(currency) { if (!(await askConfirm({ title: "Quitar tipo de cambio", message: `Se va a quitar el tipo de cambio de ${String(currency).toUpperCase()}. Puede cambiar el MRR de los clientes que pagan en esa moneda.`, confirmLabel: "Quitar" }))) return; await sb.from("rev_fx_rates").delete().eq("currency", currency); setDirty(true); await reload(); }
 
   return (
     <div>

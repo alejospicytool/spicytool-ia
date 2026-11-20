@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { addMonths, fmtDate, initials, money, monthLabel, daysBetween, sum, ESTADOS, EST_NEXT, EST_TO, EST_LATE, KINDS_STAGE, TKINDS, TTIPO } from "./crmLogic.js";
 import * as A from "./crmActions.js";
 import { callAi } from "./crmAi.js";
+import { askConfirm } from "../confirmStore.js";
 import { WA_ICON, md } from "./crmUi.jsx";
 
 const Table = ({ head, rows, total }) => (
@@ -370,7 +371,7 @@ export function ConfigView({ crm, commit }) {
             <Text type="number" min="0" max="365" aria-label="Días límite antes de frenarse" value={s.rot || 0} disabled={s.kind !== "open"} onCommit={(v) => edit((x) => A.setStageField(x, i, "rot", v))} />
             <ColorPick value={s.color} onCommit={(v) => edit((x) => A.setStageField(x, i, "color", v))} />
             <span className="crm-acts"><button className="crm-icon" aria-label="Subir" onClick={() => edit((x) => A.moveStage(x, i, -1))}>↑</button><button className="crm-icon" aria-label="Bajar" onClick={() => edit((x) => A.moveStage(x, i, 1))}>↓</button>
-              <button className="crm-icon" aria-label="Eliminar etapa" onClick={() => { let msg = ""; const res = commit((x) => { msg = A.deleteStage(x, i); return msg ? { error: msg } : null; }); if (res && res.error) alert(res.error); }}>✕</button></span>
+              <button className="crm-icon" aria-label="Eliminar etapa" onClick={async () => { if (!(await askConfirm({ title: "Eliminar etapa", message: `Se va a eliminar la etapa "${s.name || "sin nombre"}" del embudo.` }))) return; let msg = ""; const res = commit((x) => { msg = A.deleteStage(x, i); return msg ? { error: msg } : null; }); if (res && res.error) alert(res.error); }}>✕</button></span>
           </div>))}
         <p><button className="crm-btn" onClick={() => edit((x) => A.addStage(x))}>Agregar etapa</button></p></section>
       <section className="crm-panel"><h2>Etiquetas</h2><p className="crm-note">El grupo ordena las etiquetas en el filtro y en la ficha del deal.</p>
@@ -380,7 +381,7 @@ export function ConfigView({ crm, commit }) {
             <Text aria-label="Etiqueta" value={t.name} onCommit={(v) => edit((x) => { x.S.config.tags[i].name = v; })} />
             <Text aria-label="Grupo" list="crm-tag-groups" value={t.group} onCommit={(v) => edit((x) => { x.S.config.tags[i].group = v; })} />
             <ColorPick value={t.color} onCommit={(v) => edit((x) => { x.S.config.tags[i].color = v; })} />
-            <span className="crm-acts"><button className="crm-icon" aria-label="Eliminar etiqueta" onClick={() => edit((x) => A.deleteTag(x, i))}>✕</button></span>
+            <span className="crm-acts"><button className="crm-icon" aria-label="Eliminar etiqueta" onClick={async () => { if (await askConfirm({ title: "Eliminar etiqueta", message: `Se va a eliminar la etiqueta "${t.name || "sin nombre"}".` })) edit((x) => A.deleteTag(x, i)); }}>✕</button></span>
           </div>))}
         <p><button className="crm-btn" onClick={() => edit((x) => A.addTag(x))}>Agregar etiqueta</button></p></section>
       <section className="crm-panel"><h2>Mensajes de WhatsApp</h2><p className="crm-note">El botón de WhatsApp usa el mensaje de la próxima acción del deal; si no hay uno para esa acción, usa el general. Podés usar {"{nombre}"}, {"{empresa}"} y {"{vendedor}"}.</p>

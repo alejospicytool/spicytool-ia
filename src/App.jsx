@@ -15,6 +15,8 @@ import SeguimientoApp, { SeguimientoBanner } from "./seguimiento/SeguimientoApp.
 import { resumen as seguimientoResumen } from "./seguimiento/seguimientoLogic.js";
 import { configureAdminApi, probeAdminApi, listCompanies } from "./admin/adminApi.js";
 import ErrorBoundary from "./ErrorBoundary.jsx";
+import ConfirmHost from "./ConfirmHost.jsx";
+import { askConfirm } from "./confirmStore.js";
 import { canWriteOps, canDeleteOps, ROLE_HELP } from "./roles.js";
 
 // Qué puede hacer el usuario en las tablas de trabajo (solo decide qué botones se ven; la base es la que lo exige).
@@ -611,6 +613,7 @@ function CategoriesPanel({ catsIncome, catsExpense, isAdmin, onRefresh }) {
   }
   async function deleteCat(cat, allCats) {
     if (allCats.length<=1) return;
+    if (!(await askConfirm({ title:"Eliminar categoría", message:`Se va a eliminar la categoría "${cat.name}". No se puede deshacer.` }))) return;
     await sb.from("categories").delete().eq("id",cat.id);
     onRefresh();
   }
@@ -914,7 +917,8 @@ function ReferralDashboard({ txns, referrers, referredClients, payments, isAdmin
     onRefresh();
   }
 
-  async function deleteClient(id) {
+  async function deleteClient(id, name) {
+    if (!(await askConfirm({ title:"Eliminar cliente referido", message:`Se va a eliminar a "${name||"este cliente"}" de los referidos. No se puede deshacer.` }))) return;
     await sb.from("referred_clients").delete().eq("id", id);
     onRefresh();
   }
@@ -925,6 +929,7 @@ function ReferralDashboard({ txns, referrers, referredClients, payments, isAdmin
   }
 
   async function deletePayment(id) {
+    if (!(await askConfirm({ title:"Eliminar pago", message:"Se va a eliminar este pago del cliente referido. No se puede deshacer." }))) return;
     await sb.from("referred_client_payments").delete().eq("id", id);
     onRefresh();
   }
@@ -1290,7 +1295,7 @@ function ReferralDashboard({ txns, referrers, referredClients, payments, isAdmin
                       </div>
                       <div style={{ fontSize:12, color:"#888" }}>{c.transactions.length} pago{c.transactions.length!==1?"s":""}</div>
                       {isAdmin && (
-                        <button onClick={()=>deleteClient(c.id)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:16,color:"#ccc",padding:"0 2px",lineHeight:1 }}>×</button>
+                        <button onClick={()=>deleteClient(c.id, c.name)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:16,color:"#ccc",padding:"0 2px",lineHeight:1 }}>×</button>
                       )}
                     </div>
 
@@ -2592,6 +2597,7 @@ function CommentsThread({ entityType, entityId, comments, currentUserId, current
     onChange();
   }
   async function deleteComment(c) {
+    if (!(await askConfirm({ title:"Borrar comentario", message:`Se va a borrar este comentario:\n"${String(c.body||"").slice(0,120)}${String(c.body||"").length>120?"…":""}"` }))) return;
     await sb.from("comments").delete().eq("id", c.id);
     onChange();
   }
@@ -2667,6 +2673,7 @@ function SubtasksList({ entityType, entityId, subtasks, currentUserId, onChange 
     onChange();
   }
   async function remove(st) {
+    if (!(await askConfirm({ title:"Borrar subtarea", message:`Se va a borrar la subtarea "${st.title}".` }))) return;
     await sb.from("subtasks").delete().eq("id", st.id);
     onChange();
   }
@@ -2828,6 +2835,7 @@ function AttachmentsList({ entityType, entityId, attachments, currentUserEmail, 
     window.open(data.signedUrl, "_blank");
   }
   async function remove(a) {
+    if (!(await askConfirm({ title:"Borrar adjunto", message:`Se va a borrar el archivo "${a.file_name}". No se puede deshacer.` }))) return;
     await sb.storage.from("attachments").remove([a.storage_path]);
     await sb.from("attachments").delete().eq("id", a.id);
     onChange();
@@ -2895,7 +2903,7 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
   const [dragOverStatus, setDragOverStatus] = useState(null);
   const [filterCategory, setFilterCategory] = useState("");
   const [filterAssignee, setFilterAssignee] = useState(currentUserId || ""); // por defecto: mis tickets
-  const [form, setForm] = useState({ title:"", client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigneeIds:[], files:[] });
+  const [form, setForm] = useState({ title:"", client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigneeIds:currentUserId?[currentUserId]:[], files:[] }); // quien crea el ticket queda como responsable (se puede sacar)
   const [saving, setSaving] = useState(false);
   const [statusError, setStatusError] = useState(null); // { id, msg }: el aviso es del ticket abierto
   const [pendingMove, setPendingMove] = useState(null); // { id, status }: movimiento frenado por falta de Fibonacci
@@ -2943,7 +2951,7 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
       if (err) failed.push(`${f.name} (${err})`);
     }
     setSaving(false);
-    setForm({ title:"", client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigneeIds:[], files:[] });
+    setForm({ title:"", client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigneeIds:currentUserId?[currentUserId]:[], files:[] });
     setShowNew(false);
     onRefresh();
     if (failed.length) alert("El ticket se creó, pero no se pudieron subir estos archivos:\n- " + failed.join("\n- ") + "\nPodés adjuntarlos de nuevo desde el detalle del ticket.");
@@ -2973,6 +2981,7 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
   }
 
   async function deleteTicket(ticket) {
+    if (!(await askConfirm({ title:"Eliminar ticket", message:`Se va a eliminar el ticket "${ticket.title||ticket.client_name||"sin título"}" y sus subtareas. No se puede deshacer.` }))) return;
     await sb.from("tickets").delete().eq("id", ticket.id);
     await sb.from("subtasks").delete().match({ entity_type:"ticket", entity_id:ticket.id });
     setDetail(null);
@@ -3255,7 +3264,7 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
   const [showNew, setShowNew] = useState(false);
   const [detail,  setDetail]  = useState(null);
   const [dragOverStage, setDragOverStage] = useState(null);
-  const [form, setForm] = useState({ title:"", description:"", assigneeIds:[] });
+  const [form, setForm] = useState({ title:"", description:"", assigneeIds:currentUserId?[currentUserId]:[] }); // quien crea la tarea queda como responsable
   const [saving, setSaving] = useState(false);
   const [stageError, setStageError] = useState(null); // { id, msg }
   const [pendingStage, setPendingStage] = useState(null); // { id, stage }
@@ -3295,7 +3304,7 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
       await sb.from("entity_assignees").insert(form.assigneeIds.map(userId=>({ id:"ea_"+Date.now()+"_"+Math.random().toString(36).slice(2,6), entity_type:"dev_task", entity_id:id, user_id:userId })));
     }
     setSaving(false);
-    setForm({ title:"", description:"", assigneeIds:[] });
+    setForm({ title:"", description:"", assigneeIds:currentUserId?[currentUserId]:[] });
     setShowNew(false);
     onRefresh();
   }
@@ -3322,6 +3331,7 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
   }
 
   async function deleteDevTask(task) {
+    if (!(await askConfirm({ title:"Eliminar tarea de devs", message:`Se va a eliminar la tarea "${task.title||"sin título"}" y sus subtareas. No se puede deshacer.` }))) return;
     await sb.from("dev_tasks").delete().eq("id", task.id);
     await sb.from("subtasks").delete().match({ entity_type:"dev_task", entity_id:task.id });
     setDetail(null);
@@ -3740,7 +3750,7 @@ function DevsMetricsView({ tickets, ticketHistory, devTasks, devTaskHistory, ass
 function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks, currentUserEmail, currentUserId, onRefresh, openId, onOpenHandled }) {
   const { canWriteOps: canCreate, canDeleteOps: canRemove } = useContext(RoleContext);
   const todayISO = new Date().toISOString().split("T")[0];
-  const emptyForm = () => ({ title:"", start_date:todayISO, end_date:todayISO, assigneeIds:[], priority:"Media", description:"" });
+  const emptyForm = () => ({ title:"", start_date:todayISO, end_date:todayISO, assigneeIds:currentUserId?[currentUserId]:[], priority:"Media", description:"" }); // quien crea la tarea queda como responsable
 
   const [mode, setMode] = useState("kanban"); // 'kanban' | 'calendar'
   const [calMode, setCalMode] = useState("month"); // 'month' | 'week'
@@ -3805,6 +3815,7 @@ function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks
   }
 
   async function deleteTask(task) {
+    if (!(await askConfirm({ title:"Eliminar tarea", message:`Se va a eliminar la tarea "${task.title||"sin título"}" y sus subtareas. No se puede deshacer.` }))) return;
     await sb.from("tasks").delete().eq("id", task.id);
     await sb.from("subtasks").delete().match({ entity_type:"task", entity_id:task.id });
     setDetail(null);
@@ -4152,6 +4163,7 @@ function NotesView({ notes, currentUserId, currentUserEmail, isAdmin, onRefresh 
   }
 
   async function deleteNote(note) {
+    if (!(await askConfirm({ title:"Eliminar nota", message:`Se va a eliminar la nota "${note.title||"sin título"}". No se puede deshacer.` }))) return;
     await sb.from("notes").delete().eq("id", note.id);
     setDetail(null);
     onRefresh();
@@ -5129,7 +5141,7 @@ function ControlJornadaView({ allUsers }) {
               <span style={{ fontWeight: 600, color: "#111", minWidth: 110 }}>{weekdayShort(d.fecha)} {formatISODateShort(d.fecha)}</span>
               <span className={d.user_id ? "spicy-badge-amber" : "spicy-badge-gray"}>{d.user_id ? nameOf(d.user_id) : "Todos"}</span>
               <span style={{ color: "#777", flex: 1 }}>{d.motivo || ""}</span>
-              <button className="spicy-btn-secondary" style={{ fontSize: 12, padding: "3px 10px", color: ST_RED, borderColor: ST_RED_BG }} disabled={busy} onClick={() => run(async () => { await timeRpc("admin_borrar_dia_no_laborable", { p_id: d.id }); await loadDias(); })}>Quitar</button>
+              <button className="spicy-btn-secondary" style={{ fontSize: 12, padding: "3px 10px", color: ST_RED, borderColor: ST_RED_BG }} disabled={busy} onClick={async () => { if (!(await askConfirm({ title:"Quitar día no laborable", message:`Se va a quitar el día ${d.fecha}${d.motivo?" ("+d.motivo+")":""}.`, confirmLabel:"Quitar" }))) return; run(async () => { await timeRpc("admin_borrar_dia_no_laborable", { p_id: d.id }); await loadDias(); }); }}>Quitar</button>
             </div>
           ))}
         </div>
@@ -5401,6 +5413,7 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
   }
 
   async function deleteRecord(record) {
+    if (!(await askConfirm({ title:"Eliminar cliente de onboarding", message:`Se va a eliminar a "${record.client_name}" del onboarding, con su historial de etapas y sus notas de seguimiento. No se puede deshacer.` }))) return;
     await sb.from("onboarding").delete().eq("id", record.id);
     setDetail(null);
     onRefresh();
@@ -5880,6 +5893,8 @@ export default function SpicyFinanzas() {
     setTxns(prev => prev.map(t => t.id === id ? { ...t, category } : t));
   }
   async function deleteTxn(id) {
+    const t = txns.find(x=>x.id===id);
+    if (!(await askConfirm({ title:"Eliminar movimiento", message:t ? `Se va a eliminar el movimiento "${t.description||t.category||"sin descripción"}" del ${t.date}. No se puede deshacer.` : "Se va a eliminar este movimiento. No se puede deshacer." }))) return;
     await sb.from("transactions").delete().eq("id",id);
     setTxns(prev=>prev.filter(t=>t.id!==id));
   }
@@ -6325,6 +6340,7 @@ export default function SpicyFinanzas() {
       )}
 
       </div>{/* end spicy-main */}
+    <ConfirmHost/>
     </div>
     </RoleContext.Provider>
   );

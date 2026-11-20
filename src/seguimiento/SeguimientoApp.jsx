@@ -2,6 +2,7 @@
 // Los datos viven en Supabase (client_followup y client_touches, ver supabase_seguimiento_clientes.sql). Acá solo está la pantalla.
 import { useEffect, useMemo, useState } from "react";
 import { baDateISO } from "../timeTracking.js";
+import { askConfirm } from "../confirmStore.js";
 import { listUsers, listCompanies, probeAdminApi } from "../admin/adminApi.js";
 import {
   CANALES, RESULTADOS, SEMAFOROS, DEFAULT_FRECUENCIA, canalLabel, resultadoInfo, semaforoInfo, diasDesde, fmtFecha, normFrecuencia,
@@ -168,7 +169,7 @@ function FichaDialog({ sb, row, today, me, isAdmin, canWrite, responsables, onCl
     return patch({ contact_name: f.contact_name.trim() || null, contact_email: f.contact_email.trim() || null, contact_phone: f.contact_phone.trim() || null, responsable_id: f.responsable_id || null, frecuencia_dias: freq, semaforo: f.semaforo, semaforo_motivo: f.semaforo_motivo.trim() || null, proximo_toque: f.proximo_toque || null }, "Guardado.");
   };
   async function borrarToque(t) {
-    if (!window.confirm("¿Borrar este contacto del historial? Es parte de la constancia y no se puede deshacer.")) return;
+    if (!(await askConfirm({ title: "Borrar contacto", message: "Se va a borrar este contacto del historial. Es parte de la constancia y no se puede deshacer.", confirmLabel: "Borrar" }))) return;
     const { data, error } = await sb.from("client_touches").delete().eq("id", t.id).select("id");
     if (error || !data || !data.length) { setMsg("No se pudo borrar: solo puede hacerlo quien lo registró (o un admin)."); return; }
     onChanged(); load();
