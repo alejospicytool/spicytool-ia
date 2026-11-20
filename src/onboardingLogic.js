@@ -75,3 +75,14 @@ export const ESTADO_BADGE = {
   verde:             { label: "A tiempo",         color: "#16A34A", bg: "#EDFAF3" },
   rojo:              { label: "Atrasado",         color: "#EF3E3E", bg: "#FEF0F0" },
 };
+
+// ── Vínculo con la cuenta de Spicytool ────────────────────────────────────────────────────────────
+// El onboarding guarda el id de la company de Spicytool (no el email: el del CRM suele ser otro). Lo elige una persona
+// en un buscador; esto solo da forma a cada resultado para mostrarlo y guardarlo.
+export function companyOption(c) {
+  if (!c || !c._id) return null;
+  return { id: String(c._id), name: String(c.name || "").trim() || "Sin nombre", email: c.userEmail ? String(c.userEmail) : "", phone: c.phoneNumber ? String(c.phoneNumber) : "" };
+}
+
+// Texto que se busca por defecto: el nombre del cliente tal cual, sin espacios de más.
+export const defaultCompanySearch = (clientName) => String(clientName || "").trim().replace(/\s+/g, " ");

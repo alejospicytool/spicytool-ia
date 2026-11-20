@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { calcularEstado, calcularAvance, diasEntre, ONBOARDING_STAGES } from "./onboardingLogic.js";
+import { calcularEstado, calcularAvance, diasEntre, ONBOARDING_STAGES, companyOption, defaultCompanySearch } from "./onboardingLogic.js";
 
 const HOY = new Date("2026-09-23T12:00:00");
 const haceNDias = (n) => {
@@ -89,5 +89,20 @@ describe("diasEntre", () => {
   });
   it("null si no hay fecha", () => {
     expect(diasEntre(null, HOY)).toBe(null);
+  });
+});
+
+describe("vínculo con la cuenta de Spicytool", () => {
+  it("da forma al resultado del buscador", () => {
+    expect(companyOption({ _id: "abc123", name: " Inmo Sur ", userEmail: "dueno@inmo.test", phoneNumber: "+54911" })).toEqual({ id: "abc123", name: "Inmo Sur", email: "dueno@inmo.test", phone: "+54911" });
+  });
+  it("tolera datos que faltan", () => {
+    expect(companyOption({ _id: "x" })).toEqual({ id: "x", name: "Sin nombre", email: "", phone: "" });
+    expect(companyOption(null)).toBeNull();
+    expect(companyOption({ name: "sin id" })).toBeNull();
+  });
+  it("la búsqueda por defecto es el nombre del cliente", () => {
+    expect(defaultCompanySearch("  Inmo   Sur ")).toBe("Inmo Sur");
+    expect(defaultCompanySearch(null)).toBe("");
   });
 });

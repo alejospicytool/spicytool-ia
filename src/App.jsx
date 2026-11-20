@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useSyncExternalStore, createContext, useContext } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { ONBOARDING_STAGES, ONBOARDING_LEAD_SOURCES, ONBOARDING_PAYMENT_STATUS, calcularEstado, calcularAvance, diasEntre, ESTADO_BADGE } from "./onboardingLogic.js";
+import { ONBOARDING_STAGES, ONBOARDING_LEAD_SOURCES, ONBOARDING_PAYMENT_STATUS, calcularEstado, calcularAvance, diasEntre, ESTADO_BADGE, companyOption, defaultCompanySearch } from "./onboardingLogic.js";
 import {
   formatClock, formatHM, formatHours, formatDiffHours, baDateISO, addDaysISO, weekRangeISO, monthRangeISO,
   baTimeToISO, formatTimeBA, formatDateBA, formatDateTimeBA, formatISODateShort, weekdayShort, estadoUI, liveSeconds,
@@ -11,7 +11,7 @@ import { dayBA, weekStartBA, closureEvents, scoreRequiredForStatus } from "./met
 import CrmApp from "./crm/CrmApp.jsx";
 import RevenueApp from "./revenue/RevenueApp.jsx";
 import AdminApp from "./admin/AdminApp.jsx";
-import { configureAdminApi } from "./admin/adminApi.js";
+import { configureAdminApi, probeAdminApi, listCompanies } from "./admin/adminApi.js";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import { canWriteOps, canDeleteOps, ROLE_HELP } from "./roles.js";
 
@@ -5242,7 +5242,72 @@ function UserContractsEditor({ user }) {
 }
 
 // ── Onboarding View (Kanban + Tabla) ─────────────────────────────────────────
-function OnboardingView({ onboarding, history, onRefresh }) {
+// Vínculo del onboarding con la cuenta (company) de Spicytool. Lo elige una persona: acá solo se busca y se muestra.
+// Se guarda el id de la company, no el email, porque el email del CRM muchas veces no es el de la cuenta.
+function SpicyCompanyLink({ record, canSearch, canEdit, onSave }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState(null);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const linked = record.spicy_company_id;
+
+  async function search(text) {
+    setBusy(true); setMsg(""); setResults(null);
+    try {
+      // Hasta que se prueba el backend el módulo usa datos de ejemplo: nunca vincular una empresa inventada.
+      if ((await probeAdminApi()) !== "real") { setMsg("El buscador de cuentas de Spicytool no está conectado en este momento."); return; }
+      const found = await listCompanies({ status: "active", search: text, pageSize: 6 });
+      const paused = (found.counts && found.counts.paused) ? await listCompanies({ status: "paused", search: text, pageSize: 3 }) : { items: [] };
+      const list = [...(found.items || []), ...(paused.items || [])].map(companyOption).filter(Boolean);
+      setResults(list);
+      if (!list.length) setMsg("No encontré cuentas con ese nombre. Probá con parte del nombre o con el email del dueño.");
+    } catch (e) { setMsg("No se pudo buscar: " + (e.message || "error")); } finally { setBusy(false); }
+  }
+  const start = () => { const t = defaultCompanySearch(record.client_name); setQ(t); setOpen(true); if (t) search(t); };
+  const choose = (c) => { onSave({ spicy_company_id: c.id, spicy_company_name: c.name }); setOpen(false); setResults(null); };
+
+  return (
+    <div style={{ fontSize:12,color:"#666",fontWeight:500 }}>
+      Cuenta de Spicytool
+      {linked ? (
+        <div style={{ display:"flex",alignItems:"center",gap:8,marginTop:6,flexWrap:"wrap" }}>
+          <span style={{ fontSize:13,fontWeight:600,color:"#111",background:"#EDFAF3",border:"1px solid #BFE9D2",borderRadius:6,padding:"3px 9px" }} title={"id " + linked}>✓ {record.spicy_company_name || linked}</span>
+          {canEdit && <button type="button" className="spicy-btn-secondary" style={{ padding:"3px 10px",fontSize:12 }} onClick={()=>onSave({ spicy_company_id: null, spicy_company_name: null })}>Quitar vínculo</button>}
+        </div>
+      ) : (
+        <div style={{ marginTop:6 }}>
+          <div style={{ fontSize:12,fontWeight:400,color:"#92400E",background:"#FEF3C7",border:"1px solid #FCE4A0",borderRadius:6,padding:"6px 9px",marginBottom:6 }}>Sin cuenta vinculada: este cliente todavía no está unido a su cuenta de Spicytool.</div>
+          {canEdit && canSearch && !open && <button type="button" className="spicy-btn-secondary" style={{ padding:"4px 12px",fontSize:12 }} onClick={start}>Buscar y vincular la cuenta</button>}
+          {canEdit && !canSearch && <div style={{ fontSize:11,fontWeight:400,color:"#999" }}>Para vincularla hace falta el permiso de Admin Spicy.</div>}
+        </div>
+      )}
+      {open && (
+        <div style={{ marginTop:8,border:"1px solid #E5E5E5",borderRadius:8,padding:10,background:"#FAFAFA" }}>
+          <form onSubmit={e=>{ e.preventDefault(); search(q.trim()); }} style={{ display:"flex",gap:6 }}>
+            <input aria-label="Buscar cuenta de Spicytool" className="spicy-input" value={q} onChange={e=>setQ(e.target.value)} placeholder="Nombre de la empresa o email del dueño" style={{ flex:1 }}/>
+            <button type="submit" className="spicy-btn-primary" disabled={busy||!q.trim()}>{busy?"Buscando…":"Buscar"}</button>
+            <button type="button" className="spicy-btn-secondary" onClick={()=>{ setOpen(false); setResults(null); setMsg(""); }}>Cancelar</button>
+          </form>
+          {msg && <div role="status" style={{ fontSize:12,fontWeight:400,color:"#92400E",marginTop:8 }}>{msg}</div>}
+          {results && results.length>0 && (
+            <div style={{ display:"flex",flexDirection:"column",gap:4,marginTop:8 }}>
+              <div style={{ fontSize:11,fontWeight:400,color:"#888" }}>Elegí la cuenta correcta (no se une sola):</div>
+              {results.map(c=>(
+                <button key={c.id} type="button" onClick={()=>choose(c)} style={{ textAlign:"left",background:"white",border:"1px solid #EBEBEB",borderRadius:6,padding:"7px 10px",cursor:"pointer",fontFamily:"inherit" }}>
+                  <div style={{ fontSize:13,fontWeight:600,color:"#111" }}>{c.name}</div>
+                  <div style={{ fontSize:11,fontWeight:400,color:"#888" }}>{[c.email, c.phone].filter(Boolean).join(" · ") || "sin datos de contacto"}</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy }) {
   const { canWriteOps: canCreate, canDeleteOps: canRemove } = useContext(RoleContext);
   const todayISO = new Date().toISOString().split("T")[0];
   const emptyForm = () => ({ client_name:"", fecha_registro:todayISO, responsable:"", fuente_de_leads:[], bloqueado:false });
@@ -5402,7 +5467,11 @@ function OnboardingView({ onboarding, history, onRefresh }) {
                         <div style={{ height:4,background:"#F3F3F3",borderRadius:2,overflow:"hidden",marginBottom:6 }}>
                           <div style={{ height:"100%",width:`${Math.round(calcularAvance(r.etapa_actual)*100)}%`,background:"#533AB7",borderRadius:2 }}/>
                         </div>
-                        <div style={{ fontSize:11,color:"#aaa" }}>{r.responsable||"Sin asignar"}</div>
+                        <div style={{ fontSize:11,color:"#aaa",display:"flex",gap:6,alignItems:"center",flexWrap:"wrap" }}>
+                          <span>{r.responsable||"Sin asignar"}</span>
+                          {r.deal_id && <span title="Viene de un deal ganado del CRM" style={{ fontSize:9,fontWeight:700,color:"#533AB7",background:"#F1EEFB",borderRadius:4,padding:"1px 5px" }}>CRM</span>}
+                          {r.spicy_company_id ? <span title={"Cuenta de Spicytool: "+(r.spicy_company_name||r.spicy_company_id)} style={{ fontSize:9,fontWeight:700,color:"#16A34A",background:"#EDFAF3",borderRadius:4,padding:"1px 5px" }}>✓ Spicy</span> : <span title="Sin cuenta de Spicytool vinculada" style={{ fontSize:9,fontWeight:700,color:"#B45309",background:"#FEF3C7",borderRadius:4,padding:"1px 5px" }}>sin cuenta</span>}
+                        </div>
                       </div>
                     );
                   })}
@@ -5415,10 +5484,10 @@ function OnboardingView({ onboarding, history, onRefresh }) {
       ) : (
         <div className="spicy-card" style={{ padding:0,overflow:"hidden" }}>
           <div style={{ overflowX:"auto" }}>
-            <table style={{ borderCollapse:"collapse",width:"100%",minWidth:820 }}>
+            <table style={{ borderCollapse:"collapse",width:"100%",minWidth:920 }}>
               <thead>
                 <tr style={{ background:"#FAFAFA" }}>
-                  {["Cliente","Etapa","Responsable","Estado","Avance","Días registro","Días etapa","Pago","Bloq."].map(h=>(
+                  {["Cliente","Etapa","Responsable","Estado","Avance","Días registro","Días etapa","Pago","Cuenta Spicy","Bloq."].map(h=>(
                     <th key={h} style={{ textAlign:"left",fontSize:11,color:"#888",fontWeight:600,padding:"10px 12px",borderBottom:"1px solid #EBEBEB",whiteSpace:"nowrap" }}>{h}</th>
                   ))}
                 </tr>
@@ -5442,12 +5511,13 @@ function OnboardingView({ onboarding, history, onRefresh }) {
                       <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:"#555" }}>{diasEntre(r.fecha_registro)}</td>
                       <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:"#555" }}>{diasEntre(r.fecha_entrada_etapa_actual)}</td>
                       <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:"#555" }}>{r.estado_de_pago}</td>
+                      <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:r.spicy_company_id?"#16A34A":"#B45309" }}>{r.spicy_company_id ? "✓ "+(r.spicy_company_name||"vinculada") : "sin vincular"}</td>
                       <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12 }}>{r.bloqueado?"🔒":""}</td>
                     </tr>
                   );
                 })}
                 {visible.length===0 && (
-                  <tr><td colSpan={9} style={{ padding:"20px",textAlign:"center",color:"#ccc",fontSize:13 }}>Sin resultados.</td></tr>
+                  <tr><td colSpan={10} style={{ padding:"20px",textAlign:"center",color:"#ccc",fontSize:13 }}>Sin resultados.</td></tr>
                 )}
               </tbody>
             </table>
@@ -5544,6 +5614,9 @@ function OnboardingView({ onboarding, history, onRefresh }) {
                   </select>
                 </label>
               </div>
+
+              {detail.deal_id && <div style={{ fontSize:11,color:"#533AB7",background:"#F1EEFB",border:"1px solid #DDD5F6",borderRadius:6,padding:"5px 9px" }}>Creado automáticamente desde el CRM al ganar el deal. El estado de pago se actualiza solo cuando cambia allá.</div>}
+              <SpicyCompanyLink record={detail} canSearch={!!canSearchSpicy} canEdit={canCreate} onSave={(patch)=>updateRecord(detail, patch)}/>
 
               <label style={{ display:"flex",alignItems:"center",gap:6,fontSize:13,color:"#666" }}>
                 <input type="checkbox" checked={detail.bloqueado} onChange={e=>updateRecord(detail,{bloqueado:e.target.checked})}/> Bloqueado
@@ -6159,7 +6232,7 @@ export default function SpicyFinanzas() {
       {view==="opsdash"&&<OperationsSummaryView tickets={tickets} tasks={tasks} statusHistory={ticketStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
       {view==="tickets"&&<TicketsView tickets={tickets} statusHistory={ticketStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} devTasks={devTasks} setView={setView} onRefresh={loadAll} openId={pendingLink?.type==="ticket"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)}/>}
       {view==="tasks"&&<TasksView tasks={tasks} allUsers={allUsers} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} currentUserEmail={session.user.email} currentUserId={session.user.id} onRefresh={loadAll} openId={pendingLink?.type==="task"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)}/>}
-      {view==="onboarding"&&<OnboardingView onboarding={onboarding} history={onboardingHistory} onRefresh={loadAll}/>}
+      {view==="onboarding"&&<OnboardingView onboarding={onboarding} history={onboardingHistory} onRefresh={loadAll} canSearchSpicy={canSeeSection("Admin Spicy")}/>}
       {view==="devdash"&&<DevsMetricsView tickets={tickets} ticketHistory={ticketStatusHistory} devTasks={devTasks} devTaskHistory={devTaskStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
       {view==="devtasks"&&<DevTasksView devTasks={devTasks} statusHistory={devTaskStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} tickets={tickets} onRefresh={loadAll} openId={pendingLink?.type==="dev_task"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)}/>}
       {view==="services"&&<ServicesView/>}
