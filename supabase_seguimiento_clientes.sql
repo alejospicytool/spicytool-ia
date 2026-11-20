@@ -1,5 +1,5 @@
 -- Seguimiento de clientes (sección Operaciones): cartera de clientes activos + registro de "toques" (contactos).
--- ESTADO: PENDIENTE DE APLICAR.
+-- ESTADO: YA APLICADO en el proyecto real (khuavhbraikzreyhptog) el 2026-11-20 (probado antes en una transacción que se deshizo, incluido el comportamiento por rol).
 --
 -- client_followup: una fila por cliente de la cartera. La clave es el id de la company de Spicytool (no el email).
 --   El contacto (nombre/email/teléfono) y el plan son una copia al momento de sumar al cliente; se pueden editar a mano.
