@@ -110,7 +110,14 @@ export function paginate(items, page, pageSize) {
 
 // ── Datos del usuario / company ────────────────────────────────────────────────────────────────
 export const userFullName = (u) => [u && u.name, u && u.surname].filter(Boolean).join(" ") || (u && u.email) || "—";
-export const companyIdOf = (u) => (u && Array.isArray(u.companies) && u.companies[0]) || null;
+// La company de un usuario: la suya (companies) o, si es solo colaborador, la primera en la que colabora (collaboratesIn,
+// que sale de users.companiesWhereICollaborate en Mongo).
+export const collaboratesInOf = (u) => (u && Array.isArray(u.collaboratesIn) ? u.collaboratesIn : []);
+export const companyIdOf = (u) => (u && Array.isArray(u.companies) && u.companies[0]) || collaboratesInOf(u)[0] || null;
+// ¿Pertenece a esa company? Como dueño/miembro (companies) o como colaborador (collaboratesIn).
+export const isMemberOf = (u, companyId) => !!companyId && ((u && Array.isArray(u.companies) && u.companies.includes(companyId)) || collaboratesInOf(u).includes(companyId));
+// Colaborador de esa company: pertenece por colaboración y no por tener la company como propia.
+export const isCollaboratorOf = (u, companyId) => !!companyId && collaboratesInOf(u).includes(companyId) && !(u && Array.isArray(u.companies) && u.companies.includes(companyId));
 
 // Proveedor de WhatsApp: users.activeWhatsAppProvider ("kapso" | "gupshup"; vacío si no tiene) y, como respaldo, el id cargado.
 export function whatsappProvider(user) {

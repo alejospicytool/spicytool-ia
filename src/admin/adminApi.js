@@ -2,7 +2,7 @@
 // la página vuelve todo al estado inicial. Las funciones tienen la forma de los endpoints que va a tener el backend
 // (ver PLAN.md), así que al conectar Mongo / Postgres solo se reemplaza este archivo; las pantallas no cambian.
 import { MOCK } from "./adminMock.js";
-import { matchesSearch, matchesFilters, isOwner, isPaused, matchesCompanySearch, sortCompaniesByName, sortUsersRecent, paginate, companyIdOf, userFullName, planOf, isPaidPlan, PAID_PLANS, validateCompanyEdit, validateContactEdit, validateSupportReason, buildSupportRequest, SUPPORT_ACTIONS, diffFields, buildAuditEntry, sortByPosition } from "./adminLogic.js";
+import { matchesSearch, matchesFilters, isOwner, isPaused, matchesCompanySearch, sortCompaniesByName, sortUsersRecent, paginate, companyIdOf, isMemberOf, isCollaboratorOf, userFullName, planOf, isPaidPlan, PAID_PLANS, validateCompanyEdit, validateContactEdit, validateSupportReason, buildSupportRequest, SUPPORT_ACTIONS, diffFields, buildAuditEntry, sortByPosition } from "./adminLogic.js";
 
 // ── Modo real o de ejemplo ───────────────────────────────────────────────────────────────────────
 // Al abrir Admin Spicy se prueba el backend (/api/admin, en el servidor). Si responde, las LECTURAS salen de Mongo (solo lectura);
@@ -67,7 +67,7 @@ export async function listUsers({ search = "", page = 1, pageSize = 8, owners = 
     ...p,
     items: p.items.map((u) => {
       const co = byId("companies", companyIdOf(u));
-      return { ...copy(u), companyName: co ? co.name : "—", companyStatus: co ? co.status : null, isOwner: isOwner(u, co) };
+      return { ...copy(u), companyName: co ? co.name : "—", companyStatus: co ? co.status : null, isCollaborator: !!co && isCollaboratorOf(u, co._id), isOwner: isOwner(u, co) };
     }),
   };
 }
@@ -80,14 +80,14 @@ export async function listCompanies({ status = "active", search = "", page = 1, 
   const counts = { active: found.filter((c) => !isPaused(c)).length, paused: found.filter(isPaused).length };
   const list = sortCompaniesByName(found.filter((c) => (status === "paused" ? isPaused(c) : !isPaused(c))));
   const p = paginate(list, page, pageSize);
-  return { ...p, counts, items: p.items.map((c) => ({ ...copy(c), userCount: db.users.filter((u) => (u.companies || []).includes(c._id)).length })) };
+  return { ...p, counts, items: p.items.map((c) => ({ ...copy(c), userCount: db.users.filter((u) => isMemberOf(u, c._id)).length })) };
 }
 
 // GET /admin/companies/:id/users   (el owner primero)
 export async function listCompanyUsers(companyId) {
   if (real()) return http(`/companies/${companyId}/users`);
   const co = byId("companies", companyId) || fail("No se encontró la company.");
-  const users = db.users.filter((u) => (u.companies || []).includes(companyId)).map((u) => ({ ...copy(u), isOwner: isOwner(u, co) }));
+  const users = db.users.filter((u) => isMemberOf(u, companyId)).map((u) => ({ ...copy(u), isOwner: isOwner(u, co), isCollaborator: isCollaboratorOf(u, companyId) }));
   return users.sort((a, b) => Number(b.isOwner) - Number(a.isOwner) || userFullName(a).localeCompare(userFullName(b), "es", { sensitivity: "base" }));
 }
 
@@ -106,7 +106,7 @@ export async function getCompanyBundle(companyId) {
   const own = (coll) => copy(db[coll].filter((x) => x.companyId === companyId));
   return {
     company: copy(company),
-    users: copy(db.users.filter((u) => (u.companies || []).includes(companyId))),
+    users: copy(db.users.filter((u) => isMemberOf(u, companyId))),
     campaigns: own("campaigns"),
     landings: own("landings"),
     conversions: own("companyconversions"),

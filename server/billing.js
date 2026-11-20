@@ -7,7 +7,7 @@
 //  5. Si la respuesta del cobro no llega (red, tiempo), no se afirma que falló: se avisa que hay que revisar Stripe, y reintentar con la
 //     misma clave de idempotencia no cobra dos veces.
 //  6. Ni el token del webhook ni los links de Stripe se guardan en la auditoría.
-import { validatePlanAssignment, userFullName } from "../src/admin/adminLogic.js";
+import { validatePlanAssignment, userFullName, companyIdOf } from "../src/admin/adminLogic.js";
 import { UncertainOutcome } from "./webhooks.js";
 
 const KEY_RE = /^[A-Za-z0-9_.:-]{8,100}$/;
@@ -35,7 +35,7 @@ export function makeBilling({ getUser, webhook, audit, coupons = [], allowedEmai
     if (tooMany(admin.email)) return { error: fail(429, "DEMASIADOS_INTENTOS", "Demasiados intentos en un minuto. Esperá un momento.") };
     return { user };
   }
-  const targetOf = (user, userId) => ({ targetType: "user", targetId: userId, targetLabel: userFullName(user), companyId: (user.companies && user.companies[0]) || null });
+  const targetOf = (user, userId) => ({ targetType: "user", targetId: userId, targetLabel: userFullName(user), companyId: companyIdOf(user) });
 
   return {
     // Cupones que el formulario puede ofrecer: ninguno mientras el servidor no sepa mandarlos al webhook.

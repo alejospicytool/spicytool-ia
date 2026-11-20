@@ -10,7 +10,7 @@
 //  5. Solo admins del backoffice (la tabla de auditoría solo deja escribir a admins) y tope de intentos por minuto
 //     (frena también el probar contraseñas de Spicytool a ciegas).
 // Los tests usan siempre un fetch falso: nunca se llama al servicio real.
-import { validateSupportReason, userFullName } from "../src/admin/adminLogic.js";
+import { validateSupportReason, userFullName, companyIdOf } from "../src/admin/adminLogic.js";
 
 const fail = (status, code, message, extra = {}) => ({ status, body: { code, message, ...extra } });
 const EMAIL_RE = /^[^\s@]{1,100}@[^\s@]{1,100}\.[^\s@]{2,30}$/;
@@ -61,7 +61,7 @@ export function makeSupport({ getUser, audit, apiBase = "https://api.spicytool.n
 
       const user = await getUser(userId);
       if (!user) return fail(404, "USUARIO_NO_ENCONTRADO", "No se encontró el usuario.");
-      const companyId = (user.companies && user.companies[0]) || null;
+      const companyId = companyIdOf(user); // la suya o, si solo colabora, la company en la que colabora
       if (!user.email || !companyId) return fail(422, "SIN_COMPANY", "El usuario no tiene company: no hay cuenta para revisar.");
       if (tooMany(admin.email)) return fail(429, "DEMASIADOS_INTENTOS", "Demasiados intentos en un minuto. Esperá un momento.");
 

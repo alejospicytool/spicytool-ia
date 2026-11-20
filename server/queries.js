@@ -1,7 +1,7 @@
 // Consultas de SOLO LECTURA a Mongo para el backoffice. Nada acá escribe, actualiza ni borra.
 // Las pantallas esperan la misma forma que tenía el simulador (src/admin/adminApi.js); la forma la fija shape.js.
 import { ObjectId } from "mongodb";
-import { matchesSearch, matchesFilters, isOwner, isPaused, matchesCompanySearch, sortCompaniesByName, sortUsersRecent, paginate, companyIdOf } from "../src/admin/adminLogic.js";
+import { matchesSearch, matchesFilters, isOwner, isPaused, matchesCompanySearch, sortCompaniesByName, sortUsersRecent, paginate, companyIdOf, isMemberOf, isCollaboratorOf, collaboratesInOf } from "../src/admin/adminLogic.js";
 import { USER_PROJECTION, COMPANY_PROJECTION, CHILD, SUPPORT_PROJECTION, shapeUser, shapeCompany, shapeSupportSession, numbered } from "./shape.js";
 
 const MAX_MS = 8000;
@@ -46,7 +46,7 @@ export function makeQueries(db) {
       const s = await snapshot();
       const rows = s.users.map((u) => ({ u, co: s.companyById.get(companyIdOf(u)) })).filter(({ u, co }) => matchesSearch(u, search) && matchesFilters(u, co, { owners, activeOnly }));
       const p = paginate(sortUsersRecent(rows.map((r) => r.u)), page, pageSize);
-      return { ...p, items: p.items.map((u) => { const co = s.companyById.get(companyIdOf(u)); return { ...u, companyName: co ? co.name : "—", companyStatus: co ? co.status : null, isOwner: isOwner(u, co) }; }) };
+      return { ...p, items: p.items.map((u) => { const co = s.companyById.get(companyIdOf(u)); return { ...u, companyName: co ? co.name : "—", companyStatus: co ? co.status : null, isCollaborator: !!co && isCollaboratorOf(u, co._id), otherCollabs: Math.max(0, collaboratesInOf(u).filter((x) => x !== (co && co._id)).length), isOwner: isOwner(u, co) }; }) };
     },
 
     async listCompanies({ status = "active", search = "", page = 1, pageSize = 8 } = {}) {
@@ -54,14 +54,14 @@ export function makeQueries(db) {
       const found = s.companies.filter((c) => matchesCompanySearch(c, search));
       const counts = { active: found.filter((c) => !isPaused(c)).length, paused: found.filter(isPaused).length };
       const p = paginate(sortCompaniesByName(found.filter((c) => (status === "paused" ? isPaused(c) : !isPaused(c)))), page, pageSize);
-      return { ...p, counts, items: p.items.map((c) => ({ ...c, userCount: s.users.filter((u) => u.companies.includes(c._id)).length })) };
+      return { ...p, counts, items: p.items.map((c) => ({ ...c, userCount: s.users.filter((u) => isMemberOf(u, c._id)).length })) };
     },
 
     async listCompanyUsers(companyId) {
       const s = await snapshot();
       const co = s.companyById.get(companyId);
       if (!co) return null;
-      return s.users.filter((u) => u.companies.includes(companyId)).map((u) => ({ ...u, isOwner: isOwner(u, co) }))
+      return s.users.filter((u) => isMemberOf(u, companyId)).map((u) => ({ ...u, isOwner: isOwner(u, co), isCollaborator: isCollaboratorOf(u, companyId) }))
         .sort((a, b) => Number(b.isOwner) - Number(a.isOwner) || `${a.name} ${a.surname}`.localeCompare(`${b.name} ${b.surname}`, "es", { sensitivity: "base" }));
     },
 
@@ -80,7 +80,7 @@ export function makeQueries(db) {
       if (!d) return null;
       const byCompany = { companyId };
       const [users, campaigns, landings, conversions, whatsappConversions, pipelines, templates, webforms, contactLists, workflows] = await Promise.all([
-        col("users").find({ companies: companyId }, { projection: USER_PROJECTION }).maxTimeMS(MAX_MS).toArray(),
+        col("users").find({ $or: [{ companies: companyId }, { companiesWhereICollaborate: { $in: [companyId, ...(oid(companyId) ? [oid(companyId)] : [])] } }] }, { projection: USER_PROJECTION }).maxTimeMS(MAX_MS).toArray(),
         find("campaigns", byCompany), find("landings", byCompany), find("companyconversions", byCompany),
         find("whatsappconversions", byCompany, { sort: { _id: -1 }, limit: 100 }),
         find("pipelines", byCompany), find("whatsapptemplates", byCompany), find("webforms", byCompany, { sort: { created: 1 } }),

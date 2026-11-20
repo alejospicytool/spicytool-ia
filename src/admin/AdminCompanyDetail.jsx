@@ -4,7 +4,7 @@
 import { useState } from "react";
 import { Kpi, fmtDate, fmtDateTime } from "../revenue/revenueUi.jsx";
 import { getUser, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, getPaymentMethodUrl, createSupportLink, getMyPermissions, adminMode } from "./adminApi.js";
-import { companyIdOf, userFullName, whatsappProvider, planOf, planLabel, sortByPosition } from "./adminLogic.js";
+import { companyIdOf, isCollaboratorOf, userFullName, whatsappProvider, planOf, planLabel, sortByPosition } from "./adminLogic.js";
 import { Tabs, DataTable, StatusBadge, ConfirmDialog, AuditList, IdCell, ActGroup, PhoneLink } from "./adminUi.jsx";
 import { useAsync } from "./adminHooks.js";
 import { EditCompanyDialog, EditContactDialog, AssignPlanDialog, CardLinkDialog, SupportSessionDialog } from "./AdminDialogs.jsx";
@@ -163,6 +163,9 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
   const { user, bundle: b } = res.data;
   if (!b) return <NoCompanyView user={user} actor={actor} onBack={onBack} refresh={refresh} dialog={dialog} setDialog={setDialog} acts={acts} />;
   const co = b.company, paused = co.status === "paused";
+  // Colaborador: pertenece a la company de otra persona (el owner). El plan y el cobro son del owner, no de este usuario.
+  const collab = isCollaboratorOf(user, co._id), collabTitle = "Este usuario es colaborador: el plan y el cobro son del owner de la company, no suyos.";
+  const billActs = collab ? { disabled: true, title: collabTitle } : acts;
 
   const tabs = [
     { key: "resumen", label: "Resumen" }, { key: "campanas", label: "Campañas", count: b.campaigns.length },
@@ -176,8 +179,8 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
       <button className="btn-secondary" style={{ marginBottom: 14 }} onClick={onBack}>← Volver a usuarios</button>
       <div className="detail-head">
         <div>
-          <div className="page-title">{userFullName(user)} <StatusBadge status={co.status} /></div>
-          <div className="page-sub">{user.email} · {co.name} · Plan: {planLabel(planOf(user))}</div>
+          <div className="page-title">{userFullName(user)} <StatusBadge status={co.status} />{collab && <span className="badge badge-muted" style={{ marginLeft: 6 }}>Colaborador</span>}</div>
+          <div className="page-sub">{user.email} · {co.name} · {collab ? "Colaborador (el plan es del owner de la company)" : `Plan: ${planLabel(planOf(user))}`}</div>
         </div>
         <div className="detail-actions">
           <ActGroup label="Editar">
@@ -185,8 +188,8 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
             <button className="btn-secondary" {...acts} onClick={() => setDialog("contact")}>Editar contacto</button>
           </ActGroup>
           <ActGroup label="Plan y cobro">
-            <button className="btn-charge" {...acts} onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
-            <button className="btn-secondary" {...acts} onClick={() => setDialog("card")}>Link de tarjeta</button>
+            <button className="btn-charge" {...billActs} onClick={() => setDialog("plan")}>Asignar plan (cobra)</button>
+            <button className="btn-secondary" {...billActs} onClick={() => setDialog("card")}>Link de tarjeta</button>
           </ActGroup>
           <ActGroup label="Cuenta">
             <button className="btn-access" disabled={!perms.data || !perms.data.support} title={perms.data && !perms.data.support ? (perms.data.disabledReason || "Tu usuario no tiene permiso de soporte. Pedile a un admin que te habilite.") : "Generar un link para entrar a la cuenta de este usuario"} onClick={() => setDialog("support")}>Entrar como usuario</button>

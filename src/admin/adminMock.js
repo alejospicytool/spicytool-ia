@@ -29,6 +29,8 @@ const U = [
   [110, 6, "Facundo", "Ríos", {}], [111, 5, "Julieta", "Vega", {}], [112, 1, "Bruno", "Castro", {}],
   // company 0 = usuario SIN company (se registró y no terminó el alta): en la base real es el 62% de los usuarios.
   [113, 0, "Rocío", "Navarro", {}], [114, 0, "Emilio", "Cruz", {}],
+  // Colaboradora: no tiene company propia pero colabora en la company 2 (en Mongo: users.companiesWhereICollaborate).
+  [115, 0, "Paula", "Colaboradora", { collaboratesIn: [oid(2)] }],
 ];
 
 // Planes: Freemium y free trial no se cobran; los otros cuatro son los planes pagos (ver el doc de webhooks de back office).

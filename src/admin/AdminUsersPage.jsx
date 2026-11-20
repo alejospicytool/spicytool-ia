@@ -37,7 +37,7 @@ export default function AdminUsersPage({ actor }) {
             <DataTable rows={r?.items || []} empty={search || owners || activeOnly ? "Ningún usuario coincide con la búsqueda y los filtros." : "Todavía no hay usuarios."} onRowClick={(u) => setSelected(u._id)} columns={[
               { key: "name", label: "Usuario", render: (u) => <><b>{userFullName(u)}</b>{u.isOwner && <span className="badge badge-blue" style={{ marginLeft: 6 }}>Owner</span>}<div style={{ color: "var(--muted)", fontSize: 11 }}>{u.email}</div></> },
               { key: "phoneNumber", label: "Teléfono", render: (u) => <PhoneLink phone={u.phoneNumber} /> },
-              { key: "companyName", label: "Company" },
+              { key: "companyName", label: "Company", render: (u) => <>{u.companyName}{u.isCollaborator && <span className="badge badge-muted" style={{ marginLeft: 6 }} title="Es colaborador de esta company: no es el dueño">Colaborador</span>}</> },
               { key: "companyStatus", label: "Estado", render: (u) => (u.companyStatus ? <StatusBadge status={u.companyStatus} /> : <span style={{ color: "var(--muted)" }}>Sin company</span>) },
               { key: "plan", label: "Plan", render: (u) => planLabel(planOf(u)) },
               { key: "wa", label: "WhatsApp", muted: true, render: (u) => whatsappProvider(u)?.provider || "—" },

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { shapeUser, shapeCompany, shapeSupportSession, numbered, CHILD, USER_PROJECTION, COMPANY_PROJECTION, SUPPORT_PROJECTION } from "./shape.js";
+import { shapeUser, idsOf, shapeCompany, shapeSupportSession, numbered, CHILD, USER_PROJECTION, COMPANY_PROJECTION, SUPPORT_PROJECTION } from "./shape.js";
 
 // Documento "como lo guarda Mongo", con campos peligrosos mezclados: nada de eso puede salir.
 const rawUser = {
@@ -21,6 +21,16 @@ describe("shapeUser", () => {
     const out = shapeUser({ _id: "6650000000000000000000a2", email: "x@y.test" });
     expect(out).toMatchObject({ companies: [], name: "", subscription: { subscriptionType: null }, stripe: { customerId: null }, kapso: { kapsoAppId: null } });
     expect(out.creationDate).toBe("2024-05-24T02:48:32.000Z"); // sale de la fecha que lleva el _id
+  });
+  it("companiesWhereICollaborate sale como collaboratesIn (ids en texto) y se pide a Mongo", () => {
+    expect(shapeUser({ _id: "6650000000000000000000a2", email: "x@y.test", companiesWhereICollaborate: ["6650000000000000000000c1", "6650000000000000000000c2"] }).collaboratesIn).toEqual(["6650000000000000000000c1", "6650000000000000000000c2"]);
+    expect(shapeUser({ _id: "6650000000000000000000a2", email: "x@y.test" }).collaboratesIn).toEqual([]);
+    expect(USER_PROJECTION.companiesWhereICollaborate).toBe(1);
+  });
+  it("idsOf: ids sueltos, ObjectId, objetos con el id adentro, sin repetidos ni vacíos", () => {
+    const oidLike = { _bsontype: "ObjectId", toString: () => "6650000000000000000000c3" };
+    expect(idsOf(["a", " b ", "a", "", null, oidLike, { _id: "c" }, { companyId: "d" }, { company: "e" }, { id: "f" }, {}, 7])).toEqual(["a", "b", "6650000000000000000000c3", "c", "d", "e", "f", "7"]);
+    for (const nada of [undefined, null, "texto", 5, {}]) expect(idsOf(nada)).toEqual([]);
   });
   it("la projection pedida a Mongo no incluye campos peligrosos", () => {
     const pedidos = Object.keys(USER_PROJECTION).join(" ");

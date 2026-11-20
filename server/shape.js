@@ -8,7 +8,7 @@ const iso = (v) => { if (v == null) return null; const d = new Date(v); return N
 
 // Campos que se le piden a Mongo (projection). Es la misma lista que usan los shape*: pedir de más no está permitido.
 export const USER_PROJECTION = {
-  email: 1, name: 1, surname: 1, phoneNumber: 1, companies: 1, creationDate: 1, activeWhatsAppProvider: 1,
+  email: 1, name: 1, surname: 1, phoneNumber: 1, companies: 1, companiesWhereICollaborate: 1, creationDate: 1, activeWhatsAppProvider: 1,
   "kapso.kapsoAppId": 1, "gupshup.whatsAppAppId": 1, "subscription.subscriptionType": 1, "subscription.subscriptionId": 1,
   "stripe.customerId": 1, "stripe.subscriptionId": 1,
 };
@@ -17,11 +17,26 @@ export const COMPANY_PROJECTION = {
   activeWhatsAppConversations: 1, isConfigured: 1, onboardingEnded: 1, trackId: 1, lastUnpaidBill: 1,
 };
 
+// users.companiesWhereICollaborate: las companies en las que la persona es COLABORADORA (no dueña). Si viene completo, esa persona
+// pertenece a esas companies aunque su propio campo "companies" esté vacío. Se aceptan ids sueltos (texto u ObjectId) o,
+// por las dudas, objetos con el id adentro (_id, companyId, company o id). Lo que no se reconoce se ignora.
+export function idsOf(v) {
+  if (!Array.isArray(v)) return [];
+  const out = [];
+  for (const x of v) {
+    const id = x && typeof x === "object" && !x._bsontype ? (x._id ?? x.companyId ?? x.company ?? x.id) : x;
+    const s = id == null ? "" : String(id).trim();
+    if (s && !out.includes(s)) out.push(s);
+  }
+  return out;
+}
+
 export function shapeUser(d) {
   return {
     _id: str(d._id), email: d.email || "", name: d.name || "", surname: d.surname || "", phoneNumber: d.phoneNumber || "",
     creationDate: d.creationDate || dateOf(d._id),
     companies: Array.isArray(d.companies) ? d.companies.map(String) : [],
+    collaboratesIn: idsOf(d.companiesWhereICollaborate),
     activeWhatsAppProvider: d.activeWhatsAppProvider || null,
     kapso: { kapsoAppId: (d.kapso && d.kapso.kapsoAppId) || null },
     gupshup: { whatsAppAppId: (d.gupshup && d.gupshup.whatsAppAppId) || null },

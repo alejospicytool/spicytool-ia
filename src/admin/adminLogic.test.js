@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  PAID_PLANS, planOf, planLabel, isPaidPlan, validatePlanAssignment, newIdempotencyKey, formatPrice, explainWebhookError, WEBHOOK_ERRORS, validateSupportReason, buildSupportRequest, explainSupportError, SUPPORT_ERRORS, SUPPORT_ACTIONS, AUDIT_ACTIONS, expiryText, REASON_MIN, REASON_MAX, matchesSearch, escapeRegExp, sortUsersRecent, paginate, whatsappProvider, companyIdOf,
+  PAID_PLANS, planOf, planLabel, isPaidPlan, validatePlanAssignment, newIdempotencyKey, formatPrice, explainWebhookError, WEBHOOK_ERRORS, validateSupportReason, buildSupportRequest, explainSupportError, SUPPORT_ERRORS, SUPPORT_ACTIONS, AUDIT_ACTIONS, expiryText, REASON_MIN, REASON_MAX, matchesSearch, escapeRegExp, sortUsersRecent, paginate, whatsappProvider, companyIdOf, isMemberOf, isCollaboratorOf,
   validateCompanyEdit, validateContactEdit, diffFields, waLink, couponSummary, buildAuditEntry, userFullName, sortByPosition, isOwner, matchesFilters, isPaused, matchesCompanySearch, sortCompaniesByName,
 } from "./adminLogic.js";
 
@@ -166,6 +166,17 @@ describe("datos del usuario", () => {
     expect(companyIdOf({ companies: ["c1", "c2"] })).toBe("c1");
     expect(companyIdOf({ companies: [] })).toBeNull();
     expect(companyIdOf({})).toBeNull();
+  });
+  it("un colaborador sin company propia usa la company en la que colabora; la propia gana si tiene", () => {
+    expect(companyIdOf({ companies: [], collaboratesIn: ["c9"] })).toBe("c9");
+    expect(companyIdOf({ companies: ["c1"], collaboratesIn: ["c9"] })).toBe("c1");
+    expect(companyIdOf({ collaboratesIn: "no-es-lista" })).toBeNull();
+  });
+  it("pertenece a una company como miembro o como colaborador; colaborador es solo quien no la tiene como propia", () => {
+    const u = { companies: ["c1"], collaboratesIn: ["c9"] };
+    expect(isMemberOf(u, "c1")).toBe(true); expect(isMemberOf(u, "c9")).toBe(true); expect(isMemberOf(u, "c5")).toBe(false); expect(isMemberOf(u, null)).toBe(false);
+    expect(isCollaboratorOf(u, "c9")).toBe(true); expect(isCollaboratorOf(u, "c1")).toBe(false);
+    expect(isCollaboratorOf({ companies: ["c1"], collaboratesIn: ["c1"] }, "c1")).toBe(false);
   });
   it("nombre completo con respaldo al email", () => {
     expect(userFullName({ name: "Ana", surname: "Paz", email: "a@x" })).toBe("Ana Paz");

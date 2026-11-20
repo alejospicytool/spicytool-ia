@@ -46,7 +46,7 @@ export default function AdminCompaniesPage({ actor }) {
           <div className="card-title"><span>Usuarios de {company.name}<span className="card-sub">{users.data ? users.data.length : ""}</span></span></div>
           {users.loading ? <div className="empty">Cargando…</div> : users.error ? <div className="err">{users.error}</div> : (
             <DataTable rows={users.data} onRowClick={(u) => setUserId(u._id)} empty="Esta company no tiene usuarios." columns={[
-              { key: "name", label: "Nombre", render: (u) => <>{u.name || "—"}{u.isOwner && <span className="badge badge-blue" style={{ marginLeft: 6 }}>Owner</span>}</> },
+              { key: "name", label: "Nombre", render: (u) => <>{u.name || "—"}{u.isOwner && <span className="badge badge-blue" style={{ marginLeft: 6 }}>Owner</span>}{u.isCollaborator && <span className="badge badge-muted" style={{ marginLeft: 6 }}>Colaborador</span>}</> },
               { key: "surname", label: "Apellido" }, { key: "email", label: "Email" }, { key: "phoneNumber", label: "Teléfono", render: (u) => <PhoneLink phone={u.phoneNumber} /> },
               { key: "open", label: "", muted: true, render: (u) => <span title={userFullName(u)}>Ver detalle →</span> },
             ]} />

@@ -65,14 +65,15 @@ describe("listUsers: filtros", () => {
     const paused = new Set(MOCK.companies.filter((c) => c.status === "paused").map((c) => c._id));
     const r = await all({ activeOnly: true });
     // los usuarios sin company no cuentan como "company activa"
-    expect(r.length).toBe(MOCK.users.filter((u) => u.companies[0] && !paused.has(u.companies[0])).length);
+    // (un colaborador cuenta por la company en la que colabora)
+    expect(r.length).toBe(MOCK.users.filter((u) => { const c = u.companies[0] || (u.collaboratesIn || [])[0]; return c && !paused.has(c); }).length);
     expect(r.every((u) => u.companyStatus === "active")).toBe(true);
   });
   it("los usuarios sin company aparecen en la lista, sin nombre de company ni owner, y no entran en el filtro de company activa", async () => {
-    const sin = (await all({})).filter((u) => u.companies.length === 0);
+    const sin = (await all({})).filter((u) => u.companies.length === 0 && !(u.collaboratesIn || []).length);
     expect(sin.length).toBeGreaterThan(0);
     expect(sin.every((u) => u.companyName === "—" && u.companyStatus === null && u.isOwner === false)).toBe(true);
-    expect((await all({ activeOnly: true })).some((u) => u.companies.length === 0)).toBe(false);
+    expect((await all({ activeOnly: true })).some((u) => u.companies.length === 0 && !(u.collaboratesIn || []).length)).toBe(false);
     expect((await all({ owners: true })).some((u) => u.companies.length === 0)).toBe(false);
   });
   it("owners + activa + búsqueda se combinan, y el total sale del filtro", async () => {
@@ -107,7 +108,7 @@ describe("listCompanies / listCompanyUsers", () => {
     const a = await listCompanies({ status: "active", pageSize: 50 });
     const names = a.items.map((c) => c.name);
     expect(names).toEqual([...names].sort((x, y) => x.localeCompare(y, "es", { sensitivity: "base" })));
-    for (const c of a.items) expect(c.userCount).toBe(MOCK.users.filter((u) => u.companies[0] === c._id).length);
+    for (const c of a.items) expect(c.userCount).toBe(MOCK.users.filter((u) => u.companies[0] === c._id || (u.collaboratesIn || []).includes(c._id)).length);
   });
   it("busca por nombre o por email del owner, y los totales siguen la búsqueda", async () => {
     const r = await listCompanies({ search: "demo", pageSize: 50 });
@@ -515,5 +516,27 @@ describe("entrar como usuario con el servidor real", () => {
     vi.stubGlobal("fetch", fakeFetch((url) => (url.endsWith("/health") ? { status: 200, body: { ok: true, mode: "real" } } : { status: 200, body: { email: "x", level: "actions", canAct: true, support: false } })));
     await probeAdminApi();
     expect((await getMyPermissions(ACTOR)).support).toBe(false);
+  });
+});
+
+describe("colaboradores (users.companiesWhereICollaborate)", () => {
+  const paula = () => MOCK.users.find((u) => u.name === "Paula");
+  it("un colaborador sin company propia aparece con la company en la que colabora, marcado como colaborador y no como owner", async () => {
+    const r = (await listUsers({ search: "paula", pageSize: 50 })).items.find((u) => u._id === paula()._id);
+    const co = MOCK.companies.find((c) => c._id === paula().collaboratesIn[0]);
+    expect(r).toMatchObject({ companyName: co.name, companyStatus: co.status, isCollaborator: true, isOwner: false });
+  });
+  it("un colaborador cuenta como usuario de la company y figura como colaborador (el owner sigue primero)", async () => {
+    const cid = paula().collaboratesIn[0];
+    const list = await listCompanyUsers(cid);
+    const p = list.find((u) => u._id === paula()._id);
+    expect(p).toMatchObject({ isCollaborator: true, isOwner: false });
+    expect(list[0].isOwner).toBe(true);
+    expect((await getCompanyBundle(cid)).users.some((u) => u._id === paula()._id)).toBe(true);
+  });
+  it("el filtro 'solo owners' no los incluye y 'company activa' sí, si su company está activa", async () => {
+    expect((await listUsers({ owners: true, pageSize: 50 })).items.some((u) => u._id === paula()._id)).toBe(false);
+    const co = MOCK.companies.find((c) => c._id === paula().collaboratesIn[0]);
+    expect((await listUsers({ activeOnly: true, pageSize: 50 })).items.some((u) => u._id === paula()._id)).toBe(co.status === "active");
   });
 });

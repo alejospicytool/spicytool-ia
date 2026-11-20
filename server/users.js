@@ -5,7 +5,8 @@
 // Reglas: se escribe solo lo que cambió, solo si nadie lo tocó en el medio, con auditoría ANTES (sin registro no se cambia nada),
 // tope por minuto, y un segundo registro "contact_edit_failed" si la escritura falla.
 import { ObjectId } from "mongodb";
-import { validateContactEdit, diffFields, userFullName } from "../src/admin/adminLogic.js";
+import { validateContactEdit, diffFields, userFullName, companyIdOf } from "../src/admin/adminLogic.js";
+import { idsOf } from "./shape.js";
 
 const ID_RE = /^[0-9a-f]{24}$/i;
 const fail = (status, code, message) => ({ status, body: { code, message } });
@@ -28,7 +29,7 @@ export function makeUserAdmin({ db, audit, invalidate = () => {}, now = () => Da
       const _id = new ObjectId(String(userId));
       const col = db.collection("users");
 
-      const u = await col.findOne({ _id }, { projection: { name: 1, surname: 1, phoneNumber: 1, email: 1, companies: 1 } });
+      const u = await col.findOne({ _id }, { projection: { name: 1, surname: 1, phoneNumber: 1, email: 1, companies: 1, companiesWhereICollaborate: 1 } });
       if (!u) return fail(404, "USUARIO_NO_ENCONTRADO", "No se encontró el usuario.");
 
       // El email se muestra pero no se cambia: si viene uno distinto, se rechaza en vez de ignorarlo en silencio.
@@ -47,7 +48,7 @@ export function makeUserAdmin({ db, audit, invalidate = () => {}, now = () => Da
       if (changes.length === 0) return { status: 200, body: { ...shown, changed: false, changes: [] } };
       if (tooMany(admin.email)) return fail(429, "DEMASIADOS_INTENTOS", "Demasiados cambios en un minuto. Esperá un momento.");
 
-      const base = { actor: admin.email, targetType: "user", targetId: String(userId), targetLabel: userFullName(u), companyId: (Array.isArray(u.companies) && u.companies[0] && String(u.companies[0])) || null };
+      const base = { actor: admin.email, targetType: "user", targetId: String(userId), targetLabel: userFullName(u), companyId: companyIdOf({ companies: Array.isArray(u.companies) ? u.companies.map(String) : [], collaboratesIn: idsOf(u.companiesWhereICollaborate) }) };
       try { await audit.record(token, { ...base, action: "contact_edit", detail: { changes } }); }
       catch (e) { log("Auditoría no disponible:", e.message); return fail(503, "AUDITORIA_NO_DISPONIBLE", "No se pudo guardar el registro de auditoría, por eso no se cambió nada."); }
       const failedAudit = async () => { try { await audit.record(token, { ...base, action: "contact_edit_failed", detail: { changes } }); } catch (e2) { log("AUDITORÍA SIN GUARDAR (contact_edit_failed):", userId, e2.message); } };
