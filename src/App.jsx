@@ -5990,7 +5990,7 @@ export default function SpicyFinanzas() {
   const myOpenDevTasks = devTasks.filter(t=>myAssignedDevTaskIds.has(t.id) && !DEV_TASK_STAGES_CERRADOS.includes(t.stage));
   const myOpenTasks    = tasks.filter(t=>myAssignedTaskIds.has(t.id) && !["Finalizado","Archivado"].includes(t.stage));
   const myAssignedCount = myOpenTickets.length + myOpenDevTasks.length + myOpenTasks.length;
-  const seguimientoDue = seguimientoResumen(followup, new Date().toLocaleDateString("en-CA",{timeZone:"America/Argentina/Buenos_Aires"}), session.user.id).toca;
+  const seguimientoDue = seguimientoResumen(followup, new Date().toLocaleDateString("en-CA",{timeZone:"America/Argentina/Buenos_Aires"}), session?.user?.id || null).toca;
 
   const sourceBadge=(t)=>{
     if(t.source)return <span style={{ fontSize:10,padding:"1px 5px",borderRadius:4,marginLeft:5,background:t.source==="mercury"?"var(--color-background-info)":"var(--color-background-success)",color:t.source==="mercury"?"var(--color-text-info)":"var(--color-text-success)" }}>{t.source}</span>;
