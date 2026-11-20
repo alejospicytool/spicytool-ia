@@ -11,6 +11,8 @@ import { dayBA, weekStartBA, closureEvents, scoreRequiredForStatus } from "./met
 import CrmApp from "./crm/CrmApp.jsx";
 import RevenueApp from "./revenue/RevenueApp.jsx";
 import AdminApp from "./admin/AdminApp.jsx";
+import SeguimientoApp, { SeguimientoBanner } from "./seguimiento/SeguimientoApp.jsx";
+import { resumen as seguimientoResumen } from "./seguimiento/seguimientoLogic.js";
 import { configureAdminApi, probeAdminApi, listCompanies } from "./admin/adminApi.js";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import { canWriteOps, canDeleteOps, ROLE_HELP } from "./roles.js";
@@ -171,7 +173,7 @@ const NAV_ICONS = {
   dashboard:"▦", accounts:"🏦", add:"+", history:"☰", runway:"📈", pnl:"📊",
   referrals:"🤝",
   services:"⚡", categories:"⊞",
-  opsdash:"🧭", tickets:"🎫", tasks:"📋", onboarding:"🚀", usuarios:"👥",
+  opsdash:"🧭", tickets:"🎫", tasks:"📋", onboarding:"🚀", seguimiento:"📞", usuarios:"👥",
   devdash:"📈", devtasks:"🛠️",
   crm:"💼",
   metrics:"💹", metrics_mrr:"↗", metrics_churn:"↘", metrics_retention:"⟳", metrics_failed:"⚠️", metrics_customers:"👤", metrics_projection:"⇢", metrics_plans:"🏷️",
@@ -182,7 +184,7 @@ const NAV_LABELS = {
   dashboard:"Resumen financiero", accounts:"Cuentas", add:"Registrar", history:"Historial", runway:"Runway", pnl:"P&L",
   referrals:"Referidos",
   services:"Servicios", categories:"Categorías",
-  opsdash:"Resumen operativo", tickets:"Tickets", tasks:"Tareas", onboarding:"Onboarding", usuarios:"Usuarios y permisos",
+  opsdash:"Resumen operativo", tickets:"Tickets", tasks:"Tareas", onboarding:"Onboarding", seguimiento:"Seguimiento de clientes", usuarios:"Usuarios y permisos",
   devdash:"Resumen de devs", devtasks:"Tareas de devs",
   crm:"CRM comercial",
   metrics:"Overview", metrics_mrr:"MRR & ARR", metrics_churn:"Churn", metrics_retention:"Retención", metrics_failed:"Pagos fallidos", metrics_customers:"Clientes", metrics_projection:"Proyección", metrics_plans:"Planes",
@@ -236,7 +238,7 @@ const NAV_SECTIONS = [
   },
   {
     label: "Operaciones",
-    views: ["opsdash","tickets","tasks","onboarding"],
+    views: ["opsdash","tickets","tasks","onboarding","seguimiento"],
     adminOnly: false,
   },
   {
@@ -2225,7 +2227,7 @@ function fmtDuration(ms) {
 // ── Inicio (landing personal) ───────────────────────────────────────────────
 const INICIO_LAST_VISIT_KEY = "spicy_inicio_last_visit";
 
-function InicioView({ myOpenTickets, myOpenDevTasks, myOpenTasks, ticketHistory, devTaskHistory, comments, currentUserEmail, canSeeOperaciones, canSeeDevs, setView }) {
+function InicioView({ myOpenTickets, myOpenDevTasks, myOpenTasks, ticketHistory, devTaskHistory, comments, currentUserEmail, canSeeOperaciones, canSeeDevs, setView, followup=[], meId=null }) {
   // Se lee la visita anterior UNA sola vez (antes de pisarla) para poder marcar
   // qué cambió desde la última vez que el usuario entró a Inicio.
   const [lastVisit] = useState(() => {
@@ -2270,6 +2272,8 @@ function InicioView({ myOpenTickets, myOpenDevTasks, myOpenTasks, ticketHistory,
       <div style={{ fontSize:13,color:"#888",marginBottom:20 }}>
         {total>0 ? `Tenés ${total} cosa${total===1?"":"s"} asignada${total===1?"":"s"} sin cerrar${newCount>0?`, ${newCount} con novedades desde tu última visita`:""}.` : "No tenés nada asignado sin cerrar. 🎉"}
       </div>
+
+      {canSeeOperaciones && <SeguimientoBanner rows={followup} userId={meId} onOpen={()=>setView("seguimiento")}/>}
 
       <div style={{ display:"flex",gap:16,flexWrap:"wrap" }}>
         {canSeeOperaciones && (
@@ -5710,6 +5714,7 @@ export default function SpicyFinanzas() {
   const [allowedSections, setAllowedSections] = useState([]);
   const [onboarding,        setOnboarding]        = useState([]);
   const [onboardingHistory, setOnboardingHistory] = useState([]);
+  const [followup,         setFollowup]         = useState([]);
   const [devTasks,            setDevTasks]            = useState([]);
   const [devTaskStatusHistory,setDevTaskStatusHistory]= useState([]);
   const [entityAssignees, setEntityAssignees] = useState([]);
@@ -5753,7 +5758,7 @@ export default function SpicyFinanzas() {
     // cada acción chica (agregar un asignado, comentar, etc.) y si tira abajo
     // dataLoaded, el gate de "Cargando datos..." desmonta toda la vista actual
     // (y con ella, el modal de detalle abierto) en cada una de esas acciones.
-    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,ticketHistoryRes,tasksRes,usersRes,allowedRes,onboardingRes,onboardingHistoryRes,devTasksRes,devTaskHistoryRes,assigneesRes,commentsRes,attachmentsRes,notesRes,subtasksRes]=await Promise.all([
+    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,ticketHistoryRes,tasksRes,usersRes,allowedRes,onboardingRes,onboardingHistoryRes,devTasksRes,devTaskHistoryRes,assigneesRes,commentsRes,attachmentsRes,notesRes,subtasksRes,followupRes]=await Promise.all([
       sb.from("user_roles").select("role").eq("user_id",session.user.id).single(),
       sb.from("transactions").select("*").order("date",{ascending:false}),
       sb.from("accounts").select("*").order("created_at"),
@@ -5775,6 +5780,7 @@ export default function SpicyFinanzas() {
       sb.from("attachments").select("*"),
       sb.from("notes").select("*").order("updated_at",{ascending:false}),
       sb.from("subtasks").select("*"),
+      sb.from("client_followup").select("*"),
     ]);
     setRole(roleRes.data?.role||"reader");
     setTxns(txRes.data||[]);
@@ -5798,6 +5804,7 @@ export default function SpicyFinanzas() {
     setAttachments(attachmentsRes.data||[]);
     setNotes(notesRes.data||[]);
     setSubtasks(subtasksRes.data||[]);
+    setFollowup(followupRes.data||[]);
     setDataLoaded(true);
   }
 
@@ -5983,6 +5990,7 @@ export default function SpicyFinanzas() {
   const myOpenDevTasks = devTasks.filter(t=>myAssignedDevTaskIds.has(t.id) && !DEV_TASK_STAGES_CERRADOS.includes(t.stage));
   const myOpenTasks    = tasks.filter(t=>myAssignedTaskIds.has(t.id) && !["Finalizado","Archivado"].includes(t.stage));
   const myAssignedCount = myOpenTickets.length + myOpenDevTasks.length + myOpenTasks.length;
+  const seguimientoDue = seguimientoResumen(followup, new Date().toLocaleDateString("en-CA",{timeZone:"America/Argentina/Buenos_Aires"}), session.user.id).toca;
 
   const sourceBadge=(t)=>{
     if(t.source)return <span style={{ fontSize:10,padding:"1px 5px",borderRadius:4,marginLeft:5,background:t.source==="mercury"?"var(--color-background-info)":"var(--color-background-success)",color:t.source==="mercury"?"var(--color-text-info)":"var(--color-text-success)" }}>{t.source}</span>;
@@ -6062,6 +6070,7 @@ export default function SpicyFinanzas() {
                     {v==="inicio"&&myAssignedCount>0&&<span className="spicy-nav-badge">{myAssignedCount}</span>}
                     {v==="tickets"&&urgentTicketsCount>0&&<span className="spicy-nav-badge">{urgentTicketsCount}</span>}
                     {v==="tasks"&&overdueTasksCount>0&&<span className="spicy-nav-badge">{overdueTasksCount}</span>}
+                    {v==="seguimiento"&&seguimientoDue>0&&<span className="spicy-nav-badge" title="Clientes que te toca contactar esta semana">{seguimientoDue}</span>}
                   </button>
                 ))}
               </div>
@@ -6247,10 +6256,11 @@ export default function SpicyFinanzas() {
       {view==="referrals"&&<ReferralDashboard txns={txns} referrers={referrers} referredClients={referredClients} payments={referredClientPayments} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="runway"&&<RunwayView txns={txns} accounts={accounts}/>}
       {view==="pnl"&&<PnLView txns={txns}/>}
-      {view==="inicio"&&<InicioView myOpenTickets={myOpenTickets} myOpenDevTasks={myOpenDevTasks} myOpenTasks={myOpenTasks} ticketHistory={ticketStatusHistory} devTaskHistory={devTaskStatusHistory} comments={comments} currentUserEmail={session.user.email} canSeeOperaciones={canSeeSection("Operaciones")} canSeeDevs={canSeeSection("Devs")} setView={setView}/>}
+      {view==="inicio"&&<InicioView myOpenTickets={myOpenTickets} myOpenDevTasks={myOpenDevTasks} myOpenTasks={myOpenTasks} ticketHistory={ticketStatusHistory} devTaskHistory={devTaskStatusHistory} comments={comments} currentUserEmail={session.user.email} canSeeOperaciones={canSeeSection("Operaciones")} canSeeDevs={canSeeSection("Devs")} setView={setView} followup={followup} meId={session.user.id}/>}
       {view==="opsdash"&&<OperationsSummaryView tickets={tickets} tasks={tasks} statusHistory={ticketStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
       {view==="tickets"&&<TicketsView tickets={tickets} statusHistory={ticketStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} devTasks={devTasks} setView={setView} onRefresh={loadAll} openId={pendingLink?.type==="ticket"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)}/>}
       {view==="tasks"&&<TasksView tasks={tasks} allUsers={allUsers} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} currentUserEmail={session.user.email} currentUserId={session.user.id} onRefresh={loadAll} openId={pendingLink?.type==="task"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)}/>}
+      {view==="seguimiento"&&<SeguimientoApp sb={sb} rows={followup} allUsers={allUsers} me={{ id:session.user.id, email:session.user.email }} isAdmin={isAdmin} canWrite={canWriteOps(role)} canSearchSpicy={canSeeSection("Admin Spicy")} onRefresh={loadAll}/>}
       {view==="onboarding"&&<OnboardingView onboarding={onboarding} history={onboardingHistory} onRefresh={loadAll} canSearchSpicy={canSeeSection("Admin Spicy")} comments={comments} currentUserId={session.user.id} currentUserEmail={session.user.email}/>}
       {view==="devdash"&&<DevsMetricsView tickets={tickets} ticketHistory={ticketStatusHistory} devTasks={devTasks} devTaskHistory={devTaskStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
       {view==="devtasks"&&<DevTasksView devTasks={devTasks} statusHistory={devTaskStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} tickets={tickets} onRefresh={loadAll} openId={pendingLink?.type==="dev_task"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)}/>}
