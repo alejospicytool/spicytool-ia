@@ -15,7 +15,7 @@ describe("autenticación de admins", () => {
   it("un admin con token válido pasa", async () => {
     const f = supabase();
     const a = makeAuthenticator({ fetchImpl: f });
-    expect(await a("Bearer abc.def-123")).toEqual({ id: "u1", email: "nico@spicytool.test", level: "admin", canAct: true });
+    expect(await a("Bearer abc.def-123")).toEqual({ id: "u1", email: "nico@spicytool.test", level: "admin", canAct: true, support: true });
     expect(f.mock.calls[0][1].headers.Authorization).toBe("Bearer abc.def-123");
   });
   it("sin cabecera, con otro esquema o con caracteres raros: no pasa y ni siquiera consulta", async () => {
@@ -35,11 +35,17 @@ describe("autenticación de admins", () => {
   });
   it("con la sección 'Admin Spicy' puede VER pero no hacer cambios", async () => {
     const a = makeAuthenticator({ fetchImpl: supabase({ role: "reader", sections: ["Admin Spicy"] }) });
-    expect(await a("Bearer x")).toEqual({ id: "u1", email: "nico@spicytool.test", level: "read", canAct: false });
+    expect(await a("Bearer x")).toEqual({ id: "u1", email: "nico@spicytool.test", level: "read", canAct: false, support: false });
   });
   it("con 'Admin Spicy' y 'Admin Spicy: acciones' puede hacer cambios", async () => {
     const a = makeAuthenticator({ fetchImpl: supabase({ role: "dev", sections: ["Operaciones", "Admin Spicy", "Admin Spicy: acciones"] }) });
-    expect(await a("Bearer x")).toEqual({ id: "u1", email: "nico@spicytool.test", level: "actions", canAct: true });
+    expect(await a("Bearer x")).toEqual({ id: "u1", email: "nico@spicytool.test", level: "actions", canAct: true, support: false });
+  });
+  it("entrar como usuario es un permiso aparte: hace falta 'Admin Spicy: soporte' Y las acciones; sin las acciones no sirve", async () => {
+    const con = makeAuthenticator({ fetchImpl: supabase({ role: "editor", sections: ["Admin Spicy", "Admin Spicy: acciones", "Admin Spicy: soporte"] }) });
+    expect(await con("Bearer x")).toMatchObject({ level: "actions", canAct: true, support: true });
+    const sinAcciones = makeAuthenticator({ fetchImpl: supabase({ role: "editor", sections: ["Admin Spicy", "Admin Spicy: soporte"] }) });
+    expect(await sinAcciones("Bearer x")).toMatchObject({ level: "read", support: false });
   });
   it("si falla la consulta de secciones de un no admin: no pasa", async () => {
     expect(await makeAuthenticator({ fetchImpl: supabase({ role: "reader", sections: ["Admin Spicy"], secOk: false }) })("Bearer x")).toBeNull();

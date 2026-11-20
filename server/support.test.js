@@ -4,7 +4,7 @@ import { makeSupport, tokenOf, linkOf } from "./support.js";
 // Todo falso: ni Mongo, ni Supabase, ni Spicytool. Estos tests NUNCA abren una sesión real en la cuenta de un cliente.
 const UID = "6650000000000000000000a1";
 const CID = "6650000000000000000000c1";
-const ADMIN = { id: "u-admin", email: "nico@spicytool.test", level: "admin", canAct: true };
+const ADMIN = { id: "u-admin", email: "nico@spicytool.test", level: "admin", canAct: true, support: true };
 const TOKEN = "jwt-supabase-del-admin";
 const PASS = "contraseña-secreta-123";
 const INPUT = { reason: "ticket 4821: el cliente no ve sus contactos", spicyEmail: "nico@spicytool.net", spicyPassword: PASS };
@@ -70,13 +70,19 @@ describe("camino feliz", () => {
 });
 
 describe("validaciones: nada de esto llega a Spicytool", () => {
-  it("solo admins del backoffice", async () => {
+  it("solo con el permiso de soporte (admins o quien lo tenga asignado)", async () => {
     const { support, fetchImpl } = setup();
-    for (const a of [{ ...ADMIN, level: "actions" }, { ...ADMIN, level: "read" }, null]) {
+    for (const a of [{ ...ADMIN, level: "actions", support: false }, { ...ADMIN, level: "read", support: false }, { ...ADMIN, support: undefined }, null]) {
       const r = await support.createLink(a, TOKEN, UID, INPUT);
       expect(r.body.code).toBe("SIN_PERMISO_SOPORTE");
     }
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+  it("una persona no admin con el permiso de soporte sí puede, y la auditoría queda a su nombre", async () => {
+    const tici = { id: "u-tici", email: "tici@spicytool.test", level: "actions", canAct: true, support: true };
+    const { support, records } = setup();
+    expect((await support.createLink(tici, TOKEN, UID, INPUT)).status).toBe(201);
+    expect(records[0].actor).toBe("tici@spicytool.test");
   });
   it("motivo obligatorio y con sentido", async () => {
     const { support, fetchImpl } = setup();

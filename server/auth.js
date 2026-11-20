@@ -7,6 +7,8 @@ export const SUPABASE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || "sb_publisha
 
 export const SECTION_READ = "Admin Spicy";
 export const SECTION_ACTIONS = "Admin Spicy: acciones";
+// Permiso aparte para "Entrar como usuario" (abre la cuenta de un cliente): se da persona por persona y exige tener también las acciones.
+export const SECTION_SUPPORT = "Admin Spicy: soporte";
 
 export function makeAuthenticator({ fetchImpl = globalThis.fetch, now = () => Date.now(), ttlMs = 60_000 } = {}) {
   const cache = new Map(); // token → { admin, at }  (solo aciertos, y solo 1 minuto)
@@ -29,7 +31,7 @@ export function makeAuthenticator({ fetchImpl = globalThis.fetch, now = () => Da
 
     // Tres niveles: "admin" (todo), "actions" (ve Admin Spicy y puede hacer cambios) y "read" (solo ve).
     // Los no admin necesitan la sección 'Admin Spicy' en allowed_sections; para hacer cambios, además 'Admin Spicy: acciones'.
-    let level = "admin";
+    let level = "admin", support = true; // los admins siempre pueden entrar como usuario
     if (rows[0]?.role !== "admin") {
       const secRes = await fetchImpl(`${SUPABASE_URL}/rest/v1/allowed_sections?select=section&user_id=eq.${encodeURIComponent(user.id)}`, { headers });
       if (!secRes.ok) return null;
@@ -38,9 +40,10 @@ export function makeAuthenticator({ fetchImpl = globalThis.fetch, now = () => Da
       const has = (name) => secs.some((s) => s && s.section === name);
       if (!has(SECTION_READ)) return null;
       level = has(SECTION_ACTIONS) ? "actions" : "read";
+      support = level === "actions" && has(SECTION_SUPPORT);
     }
 
-    const admin = { id: user.id, email: user.email, level, canAct: level !== "read" };
+    const admin = { id: user.id, email: user.email, level, canAct: level !== "read", support };
     cache.set(token, { admin, at: now() });
     if (cache.size > 200) for (const [k, v] of cache) if (now() - v.at >= ttlMs) cache.delete(k);
     return admin;

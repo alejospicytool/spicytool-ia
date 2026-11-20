@@ -12,8 +12,8 @@ const queries = {
   getPipelineStages: vi.fn(async () => []),
   listSupportSessions: vi.fn(async (a) => ({ items: [], echo: a })),
 };
-const ADMIN = { id: "u1", email: "nico@spicytool.test", level: "admin", canAct: true };
-const READER = { id: "u2", email: "soporte@spicytool.test", level: "read", canAct: false };
+const ADMIN = { id: "u1", email: "nico@spicytool.test", level: "admin", canAct: true, support: true };
+const READER = { id: "u2", email: "soporte@spicytool.test", level: "read", canAct: false, support: false };
 const authenticate = vi.fn(async (h) => (h === "Bearer admin" ? ADMIN : h === "Bearer reader" ? READER : null));
 const billing = {
   couponList: vi.fn(() => [{ id: "START-10-3M", label: "10% por 3 meses" }]),
@@ -27,7 +27,7 @@ const companies = {
 const users = { editContact: vi.fn(async () => ({ status: 200, body: { _id: "x", changed: true } })) };
 const audit = { list: vi.fn(async (token, a) => [{ id: "1", echo: { token, ...a } }]) };
 const support = {
-  isAllowed: vi.fn((a) => a.level === "admin"),
+  isAllowed: vi.fn((a) => a.support === true),
   createLink: vi.fn(async () => ({ status: 201, body: { url: "https://app.test/support-session?code=x", expiresAt: null, auditWarning: false } })),
 };
 const prices = [{ id: "price_1", plan: "SpicyPro", amount: 40000 }];

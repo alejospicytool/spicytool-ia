@@ -7,7 +7,7 @@
 //  2. El link es una llave a la cuenta del cliente: se devuelve una sola vez y NUNCA se guarda (ni en auditoría ni en logs).
 //  3. El email del cliente y su company salen de Mongo, no del navegador. El motivo es obligatorio.
 //  4. Primero se guarda la auditoría "solicitado"; si no se puede guardar, no se pide ningún link.
-//  5. Solo admins del backoffice (la tabla de auditoría solo deja escribir a admins) y tope de intentos por minuto
+//  5. Solo admins o quien tenga el permiso "Admin Spicy: soporte" (se da persona por persona) y tope de intentos por minuto
 //     (frena también el probar contraseñas de Spicytool a ciegas).
 // Los tests usan siempre un fetch falso: nunca se llama al servicio real.
 import { validateSupportReason, userFullName, companyIdOf } from "../src/admin/adminLogic.js";
@@ -46,14 +46,14 @@ export function makeSupport({ getUser, audit, apiBase = "https://api.spicytool.n
     return { res, body };
   }
 
-  // Solo admins del backoffice (la auditoría exige rol admin).
-  const isAllowed = (admin) => !!admin && admin.level === "admin";
+  // Admins, o quien tenga el permiso "Admin Spicy: soporte" (además de las acciones). Lo calcula server/auth.js en cada pedido.
+  const isAllowed = (admin) => !!admin && admin.support === true;
 
   return {
     isAllowed,
 
     async createLink(admin, token, userId, input = {}) {
-      if (!isAllowed(admin)) return fail(403, "SIN_PERMISO_SOPORTE", "Entrar como usuario solo está habilitado para admins.");
+      if (!isAllowed(admin)) return fail(403, "SIN_PERMISO_SOPORTE", "Entrar como usuario necesita el permiso de soporte. Pedíselo a un admin.");
       const reason = validateSupportReason(input.reason);
       if (!reason.ok) return fail(422, "MOTIVO_INVALIDO", reason.error);
       const spicyEmail = String(input.spicyEmail ?? "").trim();

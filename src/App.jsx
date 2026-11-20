@@ -205,6 +205,7 @@ const viewFromHash = () => {
 // quien no es admin (la base lo exige: supabase_permisos_metricas_admin.sql). Hacer cambios en Admin Spicy es un permiso aparte:
 // ACTIONS_SECTION. El servidor (server/auth.js) lo vuelve a comprobar en cada pedido: lo que se ve acá es solo un reflejo.
 const ACTIONS_SECTION = "Admin Spicy: acciones";
+const SUPPORT_SECTION = "Admin Spicy: soporte"; // entrar como usuario (abre la cuenta de un cliente); exige tener también las acciones
 // Inicio, Notas y Tiempo son visibles para todos sin pasar por allowed_sections — Inicio
 // es la landing personal, Notas es información de equipo que cualquiera puede
 // ver y crear (según el pedido), y Tiempo es el control de jornada de cada persona
@@ -693,7 +694,7 @@ function CategoriesPanel({ catsIncome, catsExpense, isAdmin, onRefresh }) {
 function UserPermissionsPanel({ users, allowedSections, onRefresh }) {
   const baseSections = NAV_SECTIONS.map(s=>s.label).filter(l=>!ALWAYS_VISIBLE_SECTIONS.includes(l));
   // Columnas: cada sección y, a continuación de Admin Spicy, el permiso de hacer cambios (key = lo que se guarda en la base).
-  const columns = baseSections.flatMap(l => l==="Admin Spicy" ? [{ key:l, label:l, hint:"Solo lectura: ve usuarios, companies y auditoría" }, { key:ACTIONS_SECTION, label:"Admin Spicy · acciones", hint:"Puede pausar, editar y asignar plan (COBRA tarjetas reales)", needs:"Admin Spicy" }] : [{ key:l, label:l, hint: l==="Métricas" ? "Solo lectura: ve MRR, churn, retención y clientes" : "" }]);
+  const columns = baseSections.flatMap(l => l==="Admin Spicy" ? [{ key:l, label:l, hint:"Solo lectura: ve usuarios, companies y auditoría" }, { key:ACTIONS_SECTION, label:"Admin Spicy · acciones", hint:"Puede pausar, editar y asignar plan (COBRA tarjetas reales)", needs:"Admin Spicy" }, { key:SUPPORT_SECTION, label:"Admin Spicy · soporte", hint:"Puede entrar como usuario a la cuenta de un cliente (queda registrado a su nombre)", needs:ACTIONS_SECTION }] : [{ key:l, label:l, hint: l==="Métricas" ? "Solo lectura: ve MRR, churn, retención y clientes" : "" }]);
   const emptyForm = () => ({ email:"", first_name:"", last_name:"", role:"reader" });
 
   const [showAdd, setShowAdd] = useState(false);
@@ -730,7 +731,8 @@ function UserPermissionsPanel({ users, allowedSections, onRefresh }) {
     else {
       await sb.from("allowed_sections").delete().eq("user_id",userId).eq("section",section);
       // Sacar "Admin Spicy" también saca el permiso de hacer cambios: no tiene sentido tener uno sin el otro.
-      if (section==="Admin Spicy") await sb.from("allowed_sections").delete().eq("user_id",userId).eq("section",ACTIONS_SECTION);
+      if (section==="Admin Spicy") await sb.from("allowed_sections").delete().eq("user_id",userId).in("section",[ACTIONS_SECTION,SUPPORT_SECTION]);
+      if (section===ACTIONS_SECTION) await sb.from("allowed_sections").delete().eq("user_id",userId).eq("section",SUPPORT_SECTION);
     }
     onRefresh();
   }

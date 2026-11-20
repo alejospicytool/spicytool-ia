@@ -264,7 +264,7 @@ export async function getMyPermissions(actor) {
   if (real()) {
     // canAct / level vienen del servidor (la que manda es esa API; esto solo deshabilita botones).
     const me = await http("/me");
-    return { support: !!(me && me.support), disabledReason: "Entrar como usuario solo está habilitado para admins.", canAct: !!(me && me.canAct), level: me && me.level };
+    return { support: !!(me && me.support), disabledReason: "Entrar como usuario necesita el permiso de soporte. Pedíselo a un admin.", canAct: !!(me && me.canAct), level: me && me.level };
   }
   needActor(actor);
   return { support: !SUPPORT_DENIED.includes(String(actor).trim().toLowerCase()), canAct: true, level: "admin" };
