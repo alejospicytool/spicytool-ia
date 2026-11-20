@@ -2568,7 +2568,7 @@ function SearchSelect({ options, value, onChange, placeholder }) {
   );
 }
 
-function CommentsThread({ entityType, entityId, comments, currentUserId, currentUserEmail, onChange }) {
+function CommentsThread({ entityType, entityId, comments, currentUserId, currentUserEmail, onChange, multiline=false, placeholder="Agregar comentario...", emptyText="Sin comentarios todavía.", sendLabel="Enviar" }) {
   const [newBody, setNewBody] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [editBody, setEditBody] = useState("");
@@ -2608,21 +2608,27 @@ function CommentsThread({ entityType, entityId, comments, currentUserId, current
             </div>
             {editingId===c.id ? (
               <div style={{ display:"flex",gap:6 }}>
-                <input className="spicy-input" value={editBody} onChange={e=>setEditBody(e.target.value)} style={{ flex:1 }}
-                  onKeyDown={e=>{ if(e.key==="Enter") saveEdit(c); if(e.key==="Escape") setEditingId(null); }}/>
+                {multiline
+                  ? <textarea className="spicy-input" rows={4} value={editBody} onChange={e=>setEditBody(e.target.value)} style={{ flex:1,resize:"vertical",fontFamily:"inherit" }}
+                      onKeyDown={e=>{ if(e.key==="Enter" && (e.metaKey||e.ctrlKey)) saveEdit(c); if(e.key==="Escape") setEditingId(null); }}/>
+                  : <input className="spicy-input" value={editBody} onChange={e=>setEditBody(e.target.value)} style={{ flex:1 }}
+                      onKeyDown={e=>{ if(e.key==="Enter") saveEdit(c); if(e.key==="Escape") setEditingId(null); }}/>}
                 <button className="spicy-btn-primary" onClick={()=>saveEdit(c)}>Guardar</button>
               </div>
             ) : (
-              <div style={{ fontSize:13,color:"#333" }}>{c.body}</div>
+              <div style={{ fontSize:13,color:"#333",whiteSpace:"pre-wrap",overflowWrap:"anywhere" }}>{c.body}</div>
             )}
           </div>
         ))}
-        {mine.length===0 && <div style={{ fontSize:12,color:"#ccc" }}>Sin comentarios todavía.</div>}
+        {mine.length===0 && <div style={{ fontSize:12,color:"#ccc" }}>{emptyText}</div>}
       </div>
-      <div style={{ display:"flex",gap:6 }}>
-        <input className="spicy-input" placeholder="Agregar comentario..." value={newBody} onChange={e=>setNewBody(e.target.value)}
-          onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); addComment(); } }} style={{ flex:1 }}/>
-        <button className="spicy-btn-primary" onClick={addComment} disabled={!newBody.trim()}>Enviar</button>
+      <div style={{ display:"flex",gap:6,alignItems:multiline?"flex-end":"stretch" }}>
+        {multiline
+          ? <textarea className="spicy-input" aria-label={placeholder} rows={3} placeholder={placeholder} value={newBody} onChange={e=>setNewBody(e.target.value)}
+              onKeyDown={e=>{ if(e.key==="Enter" && (e.metaKey||e.ctrlKey)){ e.preventDefault(); addComment(); } }} style={{ flex:1,resize:"vertical",fontFamily:"inherit" }}/>
+          : <input className="spicy-input" placeholder={placeholder} value={newBody} onChange={e=>setNewBody(e.target.value)}
+              onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); addComment(); } }} style={{ flex:1 }}/>}
+        <button className="spicy-btn-primary" onClick={addComment} disabled={!newBody.trim()}>{sendLabel}</button>
       </div>
     </div>
   );
@@ -5307,7 +5313,7 @@ function SpicyCompanyLink({ record, canSearch, canEdit, onSave }) {
   );
 }
 
-function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy }) {
+function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, comments, currentUserId, currentUserEmail }) {
   const { canWriteOps: canCreate, canDeleteOps: canRemove } = useContext(RoleContext);
   const todayISO = new Date().toISOString().split("T")[0];
   const emptyForm = () => ({ client_name:"", fecha_registro:todayISO, responsable:"", fuente_de_leads:[], bloqueado:false });
@@ -5333,6 +5339,10 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy }) {
   const responsables = [...new Set(onboarding.map(r=>r.responsable).filter(Boolean))];
 
   const getHistory = (id) => history.filter(h=>h.onboarding_id===id).sort((a,b)=>a.fecha_entrada.localeCompare(b.fecha_entrada));
+  // Notas del seguimiento (tabla comments, entity_type 'onboarding'): cuántas hay y cuándo fue la última
+  const notasDe = (id) => (comments||[]).filter(c=>c.entity_type==="onboarding" && c.entity_id===id);
+  const ultimaNota = (id) => notasDe(id).reduce((m,c)=>c.created_at>m?c.created_at:m, "");
+  const hace = (iso) => { const d = Math.floor((Date.now()-new Date(iso).getTime())/86400000); return d<=0 ? "hoy" : d===1 ? "ayer" : "hace "+d+" días"; };
 
   async function createRecord(e) {
     e.preventDefault();
@@ -5470,6 +5480,7 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy }) {
                         <div style={{ fontSize:11,color:"#aaa",display:"flex",gap:6,alignItems:"center",flexWrap:"wrap" }}>
                           <span>{r.responsable||"Sin asignar"}</span>
                           {r.deal_id && <span title="Viene de un deal ganado del CRM" style={{ fontSize:9,fontWeight:700,color:"#533AB7",background:"#F1EEFB",borderRadius:4,padding:"1px 5px" }}>CRM</span>}
+                          {notasDe(r.id).length>0 && <span title={"Notas de seguimiento · última "+hace(ultimaNota(r.id))} style={{ fontSize:10,fontWeight:600,color:"#555" }}>💬 {notasDe(r.id).length} · {hace(ultimaNota(r.id))}</span>}
                           {r.spicy_company_id ? <span title={"Cuenta de Spicytool: "+(r.spicy_company_name||r.spicy_company_id)} style={{ fontSize:9,fontWeight:700,color:"#16A34A",background:"#EDFAF3",borderRadius:4,padding:"1px 5px" }}>✓ Spicy</span> : <span title="Sin cuenta de Spicytool vinculada" style={{ fontSize:9,fontWeight:700,color:"#B45309",background:"#FEF3C7",borderRadius:4,padding:"1px 5px" }}>sin cuenta</span>}
                         </div>
                       </div>
@@ -5484,10 +5495,10 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy }) {
       ) : (
         <div className="spicy-card" style={{ padding:0,overflow:"hidden" }}>
           <div style={{ overflowX:"auto" }}>
-            <table style={{ borderCollapse:"collapse",width:"100%",minWidth:920 }}>
+            <table style={{ borderCollapse:"collapse",width:"100%",minWidth:1020 }}>
               <thead>
                 <tr style={{ background:"#FAFAFA" }}>
-                  {["Cliente","Etapa","Responsable","Estado","Avance","Días registro","Días etapa","Pago","Cuenta Spicy","Bloq."].map(h=>(
+                  {["Cliente","Etapa","Responsable","Estado","Avance","Días registro","Días etapa","Pago","Cuenta Spicy","Notas","Bloq."].map(h=>(
                     <th key={h} style={{ textAlign:"left",fontSize:11,color:"#888",fontWeight:600,padding:"10px 12px",borderBottom:"1px solid #EBEBEB",whiteSpace:"nowrap" }}>{h}</th>
                   ))}
                 </tr>
@@ -5512,12 +5523,13 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy }) {
                       <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:"#555" }}>{diasEntre(r.fecha_entrada_etapa_actual)}</td>
                       <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:"#555" }}>{r.estado_de_pago}</td>
                       <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:r.spicy_company_id?"#16A34A":"#B45309" }}>{r.spicy_company_id ? "✓ "+(r.spicy_company_name||"vinculada") : "sin vincular"}</td>
+                      <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:"#555",whiteSpace:"nowrap" }}>{notasDe(r.id).length>0 ? "💬 "+notasDe(r.id).length+" · "+hace(ultimaNota(r.id)) : "—"}</td>
                       <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12 }}>{r.bloqueado?"🔒":""}</td>
                     </tr>
                   );
                 })}
                 {visible.length===0 && (
-                  <tr><td colSpan={10} style={{ padding:"20px",textAlign:"center",color:"#ccc",fontSize:13 }}>Sin resultados.</td></tr>
+                  <tr><td colSpan={11} style={{ padding:"20px",textAlign:"center",color:"#ccc",fontSize:13 }}>Sin resultados.</td></tr>
                 )}
               </tbody>
             </table>
@@ -5575,7 +5587,7 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy }) {
         const badge = ESTADO_BADGE[calcularEstado(detail, new Date())] || ESTADO_BADGE["sin fecha"];
         return (
           <div onClick={()=>setDetail(null)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}>
-            <div onClick={e=>e.stopPropagation()} style={{ background:"white",borderRadius:16,width:"100%",maxWidth:540,maxHeight:"85vh",overflowY:"auto",padding:24,display:"flex",flexDirection:"column",gap:12 }}>
+            <div onClick={e=>e.stopPropagation()} style={{ background:"white",borderRadius:16,width:"100%",maxWidth:600,maxHeight:"88vh",overflowY:"auto",padding:24,display:"flex",flexDirection:"column",gap:12 }}>
               <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
                 <div style={{ flex:1 }}>
                   <input key={detail.id} defaultValue={detail.client_name}
@@ -5617,6 +5629,13 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy }) {
 
               {detail.deal_id && <div style={{ fontSize:11,color:"#533AB7",background:"#F1EEFB",border:"1px solid #DDD5F6",borderRadius:6,padding:"5px 9px" }}>Creado automáticamente desde el CRM al ganar el deal. El estado de pago se actualiza solo cuando cambia allá.</div>}
               <SpicyCompanyLink record={detail} canSearch={!!canSearchSpicy} canEdit={canCreate} onSave={(patch)=>updateRecord(detail, patch)}/>
+
+              <div style={{ borderTop:"1px solid #EEE",paddingTop:12 }}>
+                <div style={{ fontSize:13,fontWeight:700,color:"#111" }}>Seguimiento y notas</div>
+                <div style={{ fontSize:11,color:"#999",margin:"2px 0 8px" }}>Anotá reuniones, llamadas, pendientes o lo que haya pasado con este cliente. Quedan con tu nombre y la fecha. Ctrl/Cmd + Enter para guardar.</div>
+                <CommentsThread entityType="onboarding" entityId={detail.id} comments={comments||[]} currentUserId={currentUserId} currentUserEmail={currentUserEmail} onChange={onRefresh}
+                  multiline placeholder="Ej: Reunión de hoy: quedamos en que conecta Tokko el jueves…" emptyText="Todavía no hay notas de seguimiento." sendLabel="Guardar nota"/>
+              </div>
 
               <label style={{ display:"flex",alignItems:"center",gap:6,fontSize:13,color:"#666" }}>
                 <input type="checkbox" checked={detail.bloqueado} onChange={e=>updateRecord(detail,{bloqueado:e.target.checked})}/> Bloqueado
@@ -6232,7 +6251,7 @@ export default function SpicyFinanzas() {
       {view==="opsdash"&&<OperationsSummaryView tickets={tickets} tasks={tasks} statusHistory={ticketStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
       {view==="tickets"&&<TicketsView tickets={tickets} statusHistory={ticketStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} devTasks={devTasks} setView={setView} onRefresh={loadAll} openId={pendingLink?.type==="ticket"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)}/>}
       {view==="tasks"&&<TasksView tasks={tasks} allUsers={allUsers} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} currentUserEmail={session.user.email} currentUserId={session.user.id} onRefresh={loadAll} openId={pendingLink?.type==="task"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)}/>}
-      {view==="onboarding"&&<OnboardingView onboarding={onboarding} history={onboardingHistory} onRefresh={loadAll} canSearchSpicy={canSeeSection("Admin Spicy")}/>}
+      {view==="onboarding"&&<OnboardingView onboarding={onboarding} history={onboardingHistory} onRefresh={loadAll} canSearchSpicy={canSeeSection("Admin Spicy")} comments={comments} currentUserId={session.user.id} currentUserEmail={session.user.email}/>}
       {view==="devdash"&&<DevsMetricsView tickets={tickets} ticketHistory={ticketStatusHistory} devTasks={devTasks} devTaskHistory={devTaskStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
       {view==="devtasks"&&<DevTasksView devTasks={devTasks} statusHistory={devTaskStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} tickets={tickets} onRefresh={loadAll} openId={pendingLink?.type==="dev_task"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)}/>}
       {view==="services"&&<ServicesView/>}
