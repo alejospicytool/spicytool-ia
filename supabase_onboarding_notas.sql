@@ -1,5 +1,5 @@
 -- Onboarding: notas de seguimiento por cliente (reuniones, llamadas, pendientes).
--- ESTADO: PENDIENTE DE APLICAR.
+-- ESTADO: YA APLICADO en el proyecto real (khuavhbraikzreyhptog) el 2026-11-20 (probado antes en una transacción que se deshizo).
 --
 -- Reutiliza la tabla `comments` (la misma de Tickets y Tareas: autor, fecha, editar/borrar solo las propias).
 -- Solo hace falta permitir el tipo 'onboarding' y limpiar las notas cuando se borra un onboarding.
