@@ -12,6 +12,7 @@ import CrmApp from "./crm/CrmApp.jsx";
 import RevenueApp from "./revenue/RevenueApp.jsx";
 import AdminApp from "./admin/AdminApp.jsx";
 import SeguimientoApp, { SeguimientoBanner } from "./seguimiento/SeguimientoApp.jsx";
+import IdeasApp from "./ideas/IdeasApp.jsx";
 import { resumen as seguimientoResumen } from "./seguimiento/seguimientoLogic.js";
 import { configureAdminApi, probeAdminApi, listCompanies } from "./admin/adminApi.js";
 import ErrorBoundary from "./ErrorBoundary.jsx";
@@ -171,7 +172,7 @@ function BrandStyles() {
 
 // ── Nav icon map ───────────────────────────────────────────────────────────
 const NAV_ICONS = {
-  inicio:"🏠", notes:"📝", mytime:"⏱️", timeadmin:"🕒",
+  inicio:"🏠", notes:"📝", ideas:"💡", mytime:"⏱️", timeadmin:"🕒",
   dashboard:"▦", accounts:"🏦", add:"+", history:"☰", runway:"📈", pnl:"📊",
   referrals:"🤝",
   services:"⚡", categories:"⊞",
@@ -182,7 +183,7 @@ const NAV_ICONS = {
   adm_users:"🛡️", adm_companies:"🏢", adm_whatsapp:"💬", adm_support:"🎧",
 };
 const NAV_LABELS = {
-  inicio:"Inicio", notes:"Notas", mytime:"Mi tiempo", timeadmin:"Control de jornada",
+  inicio:"Inicio", notes:"Notas", ideas:"Ideas y feedback", mytime:"Mi tiempo", timeadmin:"Control de jornada",
   dashboard:"Resumen financiero", accounts:"Cuentas", add:"Registrar", history:"Historial", runway:"Runway", pnl:"P&L",
   referrals:"Referidos",
   services:"Servicios", categories:"Categorías",
@@ -210,7 +211,7 @@ const SUPPORT_SECTION = "Admin Spicy: soporte"; // entrar como usuario (abre la 
 // es la landing personal, Notas es información de equipo que cualquiera puede
 // ver y crear (según el pedido), y Tiempo es el control de jornada de cada persona
 // ("Mi tiempo"); su vista de admin ("Control de jornada") está en ADMIN_ONLY_VIEWS.
-const ALWAYS_VISIBLE_SECTIONS = ["Inicio","Notas","Tiempo"];
+const ALWAYS_VISIBLE_SECTIONS = ["Inicio","Notas","Ideas","Tiempo"]; // Ideas y feedback lo ve y lo carga cualquier usuario con sesión
 
 const NAV_SECTIONS = [
   {
@@ -221,6 +222,11 @@ const NAV_SECTIONS = [
   {
     label: "Notas",
     views: ["notes"],
+    adminOnly: false,
+  },
+  {
+    label: "Ideas",
+    views: ["ideas"],
     adminOnly: false,
   },
   {
@@ -3261,7 +3267,7 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
 }
 
 // ── Dev Tasks View (Kanban, tareas de desarrollo de producto) ──────────────
-function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, currentUserId, assignees, comments, attachments, subtasks, tickets, onRefresh, openId, onOpenHandled }) {
+function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, currentUserId, assignees, comments, attachments, subtasks, tickets, onRefresh, openId, onOpenHandled, setView }) {
   const { canWriteOps: canCreate, canDeleteOps: canRemove } = useContext(RoleContext);
   const [showNew, setShowNew] = useState(false);
   const [detail,  setDetail]  = useState(null);
@@ -3352,6 +3358,7 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
           <label style={{ display:"flex",alignItems:"center",gap:5,fontSize:12,color:"#666" }}>
             <input type="checkbox" checked={filterUnestimated} onChange={e=>setFilterUnestimated(e.target.checked)}/> Sin estimar
           </label>
+          {setView&&<button className="spicy-btn-secondary" onClick={()=>setView("ideas")} title="Sugerencias y feedback del equipo para pasar al tablero">💡 Ideas y feedback</button>}
           {canCreate&&<button className="spicy-btn-primary" onClick={()=>setShowNew(true)}>+ Nueva tarea</button>}
         </div>
       </div>
@@ -5730,6 +5737,9 @@ export default function SpicyFinanzas() {
   const [onboarding,        setOnboarding]        = useState([]);
   const [onboardingHistory, setOnboardingHistory] = useState([]);
   const [followup,         setFollowup]         = useState([]);
+  const [ideas,            setIdeas]            = useState([]);
+  const [ideaVotes,        setIdeaVotes]        = useState([]);
+  const [ideaImages,       setIdeaImages]       = useState([]);
   const [devTasks,            setDevTasks]            = useState([]);
   const [devTaskStatusHistory,setDevTaskStatusHistory]= useState([]);
   const [entityAssignees, setEntityAssignees] = useState([]);
@@ -5773,7 +5783,7 @@ export default function SpicyFinanzas() {
     // cada acción chica (agregar un asignado, comentar, etc.) y si tira abajo
     // dataLoaded, el gate de "Cargando datos..." desmonta toda la vista actual
     // (y con ella, el modal de detalle abierto) en cada una de esas acciones.
-    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,ticketHistoryRes,tasksRes,usersRes,allowedRes,onboardingRes,onboardingHistoryRes,devTasksRes,devTaskHistoryRes,assigneesRes,commentsRes,attachmentsRes,notesRes,subtasksRes,followupRes]=await Promise.all([
+    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,ticketHistoryRes,tasksRes,usersRes,allowedRes,onboardingRes,onboardingHistoryRes,devTasksRes,devTaskHistoryRes,assigneesRes,commentsRes,attachmentsRes,notesRes,subtasksRes,followupRes,ideasRes,ideaVotesRes,ideaImagesRes]=await Promise.all([
       sb.from("user_roles").select("role").eq("user_id",session.user.id).single(),
       sb.from("transactions").select("*").order("date",{ascending:false}),
       sb.from("accounts").select("*").order("created_at"),
@@ -5796,6 +5806,9 @@ export default function SpicyFinanzas() {
       sb.from("notes").select("*").order("updated_at",{ascending:false}),
       sb.from("subtasks").select("*"),
       sb.from("client_followup").select("*"),
+      sb.from("ideas").select("*").order("created_at",{ascending:false}),
+      sb.from("idea_votes").select("*"),
+      sb.from("idea_images").select("*"),
     ]);
     setRole(roleRes.data?.role||"reader");
     setTxns(txRes.data||[]);
@@ -5820,6 +5833,9 @@ export default function SpicyFinanzas() {
     setNotes(notesRes.data||[]);
     setSubtasks(subtasksRes.data||[]);
     setFollowup(followupRes.data||[]);
+    setIdeas(ideasRes.data||[]);
+    setIdeaVotes(ideaVotesRes.data||[]);
+    setIdeaImages(ideaImagesRes.data||[]);
     setDataLoaded(true);
   }
 
@@ -6277,10 +6293,14 @@ export default function SpicyFinanzas() {
       {view==="opsdash"&&<OperationsSummaryView tickets={tickets} tasks={tasks} statusHistory={ticketStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
       {view==="tickets"&&<TicketsView tickets={tickets} statusHistory={ticketStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} devTasks={devTasks} setView={setView} onRefresh={loadAll} openId={pendingLink?.type==="ticket"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)}/>}
       {view==="tasks"&&<TasksView tasks={tasks} allUsers={allUsers} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} currentUserEmail={session.user.email} currentUserId={session.user.id} onRefresh={loadAll} openId={pendingLink?.type==="task"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)}/>}
+      {view==="ideas"&&<IdeasApp sb={sb} ideas={ideas} votes={ideaVotes} images={ideaImages} devTasks={devTasks} allUsers={allUsers} me={{ id:session.user.id, email:session.user.email }}
+        canTriage={canWriteOps(role)} canDelete={canDeleteOps(role)} canSeeDevs={canSeeSection("Devs")} onRefresh={loadAll}
+        onOpenDevTask={(id)=>{ setPendingLink({ type:"dev_task", id }); setView("devtasks"); }}
+        renderComments={(ideaId)=><CommentsThread entityType="idea" entityId={ideaId} comments={comments} currentUserId={session.user.id} currentUserEmail={session.user.email} onChange={loadAll} multiline placeholder="Sumá un comentario o más contexto…" emptyText="Todavía no hay comentarios." sendLabel="Comentar"/>}/>}
       {view==="seguimiento"&&<SeguimientoApp sb={sb} rows={followup} allUsers={allUsers} me={{ id:session.user.id, email:session.user.email }} isAdmin={isAdmin} canWrite={canWriteOps(role)} canSearchSpicy={canSeeSection("Admin Spicy")} onRefresh={loadAll}/>}
       {view==="onboarding"&&<OnboardingView onboarding={onboarding} history={onboardingHistory} onRefresh={loadAll} canSearchSpicy={canSeeSection("Admin Spicy")} comments={comments} currentUserId={session.user.id} currentUserEmail={session.user.email}/>}
       {view==="devdash"&&<DevsMetricsView tickets={tickets} ticketHistory={ticketStatusHistory} devTasks={devTasks} devTaskHistory={devTaskStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
-      {view==="devtasks"&&<DevTasksView devTasks={devTasks} statusHistory={devTaskStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} tickets={tickets} onRefresh={loadAll} openId={pendingLink?.type==="dev_task"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)}/>}
+      {view==="devtasks"&&<DevTasksView devTasks={devTasks} statusHistory={devTaskStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} tickets={tickets} onRefresh={loadAll} openId={pendingLink?.type==="dev_task"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)} setView={setView}/>}
       {view==="services"&&<ServicesView/>}
       {view==="categories"&&<CategoriesPanel catsIncome={catsIncome} catsExpense={catsExpense} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="usuarios"&&isAdmin&&<UserPermissionsPanel users={allUsers} allowedSections={allowedSections} onRefresh={loadAll}/>}
