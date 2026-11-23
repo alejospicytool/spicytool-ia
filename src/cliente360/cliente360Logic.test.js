@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nameTokens, nameScore, suggestRevCustomers, suggestDeals, suggestTicketClients, dealIdsOfCompany, ticketsOfCompany, ticketsOpen, totalMrr, subLine, subStatusInfo, stageName, refsOf, linkOf } from "./cliente360Logic.js";
+import { nameTokens, nameScore, suggestRevCustomers, suggestDeals, suggestTicketClients, dealIdsOfCompany, ticketsOfCompany, ticketsOpen, totalMrr, subLine, subStatusInfo, stageName, refsOf, linkOf, clientOptions, linkStatus, companyOfTicketName } from "./cliente360Logic.js";
 
 const co = { company_id: "c1", company_name: "Terra Pueblo Inmobiliaria", contact_name: "Marcos Gil", contact_email: "marcos@terra.com", contact_phone: "+54 9 351 555-0000" };
 
@@ -84,5 +84,41 @@ describe("pagos", () => {
     expect(subStatusInfo("rara")).toEqual({ label: "rara", tone: "muted" });
     expect(stageName([{ id: "won", name: "Ganado" }], "won")).toBe("Ganado");
     expect(stageName([], "x")).toBe("x");
+  });
+});
+
+describe("selector de cliente para tickets", () => {
+  const f = [
+    { company_id: "c1", company_name: "Terra Pueblo", contact_name: "Marcos Gil", contact_email: "marcos@terra.com" },
+    { company_id: "c2", company_name: "Casa Terra Sur", contact_name: "Ana", contact_email: "a@x.com" },
+    { company_id: "c3", company_name: "Álamo Propiedades", contact_name: "Luis", contact_email: "l@y.com" },
+    { company_id: "c4", company_name: "Terraza Norte", contact_name: "", contact_email: "", baja_en: "2026-11-01" },
+  ];
+  it("sin texto: los primeros por nombre, sin los dados de baja", () => {
+    expect(clientOptions(f, "").map((r) => r.company_id)).toEqual(["c3", "c2", "c1"]);
+  });
+  it("busca por empresa, dueño o email, sin tildes ni mayúsculas; los que empiezan igual primero", () => {
+    expect(clientOptions(f, "terra").map((r) => r.company_id)).toEqual(["c1", "c2"]);
+    expect(clientOptions(f, "alamo").map((r) => r.company_id)).toEqual(["c3"]);
+    expect(clientOptions(f, "MARCOS").map((r) => r.company_id)).toEqual(["c1"]);
+    expect(clientOptions(f, "l@y").map((r) => r.company_id)).toEqual(["c3"]);
+    expect(clientOptions(f, "zzz")).toEqual([]);
+  });
+  it("respeta el límite y tolera datos vacíos", () => {
+    expect(clientOptions(f, "", 2)).toHaveLength(2);
+    expect(clientOptions(undefined, "x")).toEqual([]);
+  });
+  it("estado del vínculo nombre → cuenta", () => {
+    const links = [{ kind: "ticket_client", ref: "Terra Pueblo", company_id: "c1" }, { kind: "crm_deal", ref: "Otro", company_id: "c9" }];
+    expect(linkStatus(links, "c1", "Terra Pueblo")).toBe("ok");
+    expect(linkStatus(links, "c2", "Terra Pueblo")).toBe("conflict");
+    expect(linkStatus(links, "c2", "Casa Terra Sur")).toBe("create");
+    expect(linkStatus(links, "c9", "Otro")).toBe("create"); // un vínculo de deal no cuenta como nombre de ticket
+  });
+  it("la cuenta de un nombre de ticket ya vinculado", () => {
+    const links = [{ kind: "ticket_client", ref: "Terra Pueblo", company_id: "c1" }];
+    expect(companyOfTicketName(links, " Terra Pueblo ")).toBe("c1");
+    expect(companyOfTicketName(links, "Otro")).toBeNull();
+    expect(companyOfTicketName(links, "")).toBeNull();
   });
 });

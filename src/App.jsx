@@ -14,6 +14,8 @@ import AdminApp from "./admin/AdminApp.jsx";
 import SeguimientoApp, { SeguimientoBanner } from "./seguimiento/SeguimientoApp.jsx";
 import IdeasApp from "./ideas/IdeasApp.jsx";
 import Cliente360 from "./cliente360/Cliente360.jsx";
+import ClientPicker from "./cliente360/ClientPicker.jsx";
+import { linkStatus, companyOfTicketName } from "./cliente360/cliente360Logic.js";
 import { resumen as seguimientoResumen } from "./seguimiento/seguimientoLogic.js";
 import { configureAdminApi, probeAdminApi, listCompanies } from "./admin/adminApi.js";
 import ErrorBoundary from "./ErrorBoundary.jsx";
@@ -2905,14 +2907,25 @@ function NoMineHint({ show, text, total, onAll }) {
   );
 }
 
-function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, currentUserId, assignees, comments, attachments, subtasks, devTasks, setView, onRefresh, openId, onOpenHandled }) {
+// Id local para filas nuevas (fuera de los componentes para no llamar a Date.now/Math.random al renderizar).
+const newLocalId = (prefix) => prefix+"_"+Date.now()+"_"+Math.random().toString(36).slice(2,6);
+
+// Cliente de un ticket ya creado: elegir de la cartera (queda vinculado a su ficha 360) o escribir un nombre a mano.
+function TicketClientField({ ticket, followup, links, onSave }) {
+  const [text, setText] = useState(ticket.client_name || "");
+  const [cid, setCid] = useState(() => companyOfTicketName(links, ticket.client_name));
+  return <ClientPicker value={text} companyId={cid} followup={followup} placeholder="Sin cliente: buscá uno o escribí un nombre"
+    onChange={(n,c)=>{ setText(n); setCid(c); }} onCommit={(n,c)=>{ if ((n.trim()||null)!==(ticket.client_name||null)) onSave(n.trim()||null, c); }}/>;
+}
+
+function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, currentUserId, assignees, comments, attachments, subtasks, devTasks, setView, onRefresh, openId, onOpenHandled, followup=[], clientLinks=[] }) {
   const { canWriteOps: canCreate, canDeleteOps: canRemove } = useContext(RoleContext);
   const [showNew, setShowNew] = useState(false);
   const [detail,  setDetail]  = useState(null);
   const [dragOverStatus, setDragOverStatus] = useState(null);
   const [filterCategory, setFilterCategory] = useState("");
   const [filterAssignee, setFilterAssignee] = useState(currentUserId || ""); // por defecto: mis tickets
-  const [form, setForm] = useState({ title:"", client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigneeIds:currentUserId?[currentUserId]:[], files:[] }); // quien crea el ticket queda como responsable (se puede sacar)
+  const [form, setForm] = useState({ title:"", client_name:"", client_company_id:null, category:"", priority:"Media", channel:"WhatsApp", message:"", assigneeIds:currentUserId?[currentUserId]:[], files:[] }); // quien crea el ticket queda como responsable (se puede sacar)
   const [saving, setSaving] = useState(false);
   const [statusError, setStatusError] = useState(null); // { id, msg }: el aviso es del ticket abierto
   const [pendingMove, setPendingMove] = useState(null); // { id, status }: movimiento frenado por falta de Fibonacci
@@ -2938,7 +2951,7 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
     e.preventDefault();
     if (!form.title.trim() || !form.category || !form.channel) return;
     setSaving(true);
-    const id = "tk_"+Date.now();
+    const id = newLocalId("tk");
     const status = "Inicio por OPS";
     await sb.from("tickets").insert({
       id,
@@ -2950,7 +2963,8 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
       message: form.message.trim() || null,
       status,
     });
-    await sb.from("ticket_status_history").insert({ id:"tsh_"+Date.now(), ticket_id:id, status, changed_by:currentUserEmail });
+    await ensureClientLink(form.client_company_id, form.client_name.trim());
+    await sb.from("ticket_status_history").insert({ id:newLocalId("tsh"), ticket_id:id, status, changed_by:currentUserEmail });
     if (form.assigneeIds.length) {
       await sb.from("entity_assignees").insert(form.assigneeIds.map(userId=>({ id:"ea_"+Date.now()+"_"+Math.random().toString(36).slice(2,6), entity_type:"ticket", entity_id:id, user_id:userId })));
     }
@@ -2960,10 +2974,20 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
       if (err) failed.push(`${f.name} (${err})`);
     }
     setSaving(false);
-    setForm({ title:"", client_name:"", category:"", priority:"Media", channel:"WhatsApp", message:"", assigneeIds:currentUserId?[currentUserId]:[], files:[] });
+    setForm({ title:"", client_name:"", client_company_id:null, category:"", priority:"Media", channel:"WhatsApp", message:"", assigneeIds:currentUserId?[currentUserId]:[], files:[] });
     setShowNew(false);
     onRefresh();
     if (failed.length) alert("El ticket se creó, pero no se pudieron subir estos archivos:\n- " + failed.join("\n- ") + "\nPodés adjuntarlos de nuevo desde el detalle del ticket.");
+  }
+
+  // Al elegir un cliente de la cartera, el nombre del ticket se vincula a su ficha 360 (si ese nombre ya es de otra cuenta, no se pisa).
+  async function ensureClientLink(companyId, name) {
+    if (!companyId || !name) return;
+    const st = linkStatus(clientLinks, companyId, name);
+    if (st === "ok") return;
+    if (st === "conflict") { alert('El ticket se guardó, pero el nombre "'+name+'" ya está vinculado a otra cuenta, así que no quedó unido a la ficha de este cliente.'); return; }
+    const { error } = await sb.from("client_links").insert({ id:newLocalId("lk"), company_id:companyId, kind:"ticket_client", ref:name, created_by:currentUserId });
+    if (error && error.code!=="23505") alert("El ticket se guardó, pero no se pudo vincular al cliente: "+error.message);
   }
 
   async function updateTicket(ticket, patch) {
@@ -3097,9 +3121,9 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
               </select>
             </label>
 
-            <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Cliente
-              <input className="spicy-input" placeholder="Nombre del cliente o empresa" value={form.client_name} onChange={e=>setForm(f=>({...f,client_name:e.target.value}))} style={{ width:"100%",marginTop:4 }}/>
-            </label>
+            <div style={{ fontSize:12,color:"#666",fontWeight:500 }}>Cliente
+              <ClientPicker value={form.client_name} companyId={form.client_company_id} followup={followup} onChange={(n,c)=>setForm(f=>({...f,client_name:n,client_company_id:c}))}/>
+            </div>
 
             <div style={{ display:"flex",gap:12 }}>
               <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Prioridad
@@ -3167,10 +3191,10 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
                     {TICKET_CATEGORIES.map(c=><option key={c.key} value={c.key}>{c.emoji} {c.key}</option>)}
                   </select>
                 </label>
-                <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Cliente
-                  <input key={detail.id} className="spicy-input" defaultValue={detail.client_name||""} placeholder="Sin cliente"
-                    onBlur={e=>updateTicket(detail,{client_name:e.target.value.trim()||null})} style={{ width:"100%",marginTop:4 }}/>
-                </label>
+                <div style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Cliente
+                  <TicketClientField key={detail.id} ticket={detail} followup={followup} links={clientLinks}
+                    onSave={async (name,cid)=>{ await updateTicket(detail,{client_name:name}); await ensureClientLink(cid, name); onRefresh(); }}/>
+                </div>
               </div>
 
               <div style={{ display:"flex",gap:12 }}>
@@ -5739,6 +5763,7 @@ export default function SpicyFinanzas() {
   const [onboarding,        setOnboarding]        = useState([]);
   const [onboardingHistory, setOnboardingHistory] = useState([]);
   const [followup,         setFollowup]         = useState([]);
+  const [clientLinks,      setClientLinks]      = useState([]);
   const [cliente360Id,     setCliente360Id]     = useState(null);   // ficha 360: id de la cuenta de Spicytool abierta
   const [ideas,            setIdeas]            = useState([]);
   const [ideaVotes,        setIdeaVotes]        = useState([]);
@@ -5786,7 +5811,7 @@ export default function SpicyFinanzas() {
     // cada acción chica (agregar un asignado, comentar, etc.) y si tira abajo
     // dataLoaded, el gate de "Cargando datos..." desmonta toda la vista actual
     // (y con ella, el modal de detalle abierto) en cada una de esas acciones.
-    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,ticketHistoryRes,tasksRes,usersRes,allowedRes,onboardingRes,onboardingHistoryRes,devTasksRes,devTaskHistoryRes,assigneesRes,commentsRes,attachmentsRes,notesRes,subtasksRes,followupRes,ideasRes,ideaVotesRes,ideaImagesRes]=await Promise.all([
+    const [roleRes,txRes,accRes,refRes,catRes,refClientsRes,paymentsRes,ticketsRes,ticketHistoryRes,tasksRes,usersRes,allowedRes,onboardingRes,onboardingHistoryRes,devTasksRes,devTaskHistoryRes,assigneesRes,commentsRes,attachmentsRes,notesRes,subtasksRes,followupRes,ideasRes,ideaVotesRes,ideaImagesRes,clientLinksRes]=await Promise.all([
       sb.from("user_roles").select("role").eq("user_id",session.user.id).single(),
       sb.from("transactions").select("*").order("date",{ascending:false}),
       sb.from("accounts").select("*").order("created_at"),
@@ -5812,6 +5837,7 @@ export default function SpicyFinanzas() {
       sb.from("ideas").select("*").order("created_at",{ascending:false}),
       sb.from("idea_votes").select("*"),
       sb.from("idea_images").select("*"),
+      sb.from("client_links").select("*"),
     ]);
     setRole(roleRes.data?.role||"reader");
     setTxns(txRes.data||[]);
@@ -5839,6 +5865,7 @@ export default function SpicyFinanzas() {
     setIdeas(ideasRes.data||[]);
     setIdeaVotes(ideaVotesRes.data||[]);
     setIdeaImages(ideaImagesRes.data||[]);
+    setClientLinks(clientLinksRes.data||[]);
     setDataLoaded(true);
   }
 
@@ -6294,7 +6321,7 @@ export default function SpicyFinanzas() {
       {view==="pnl"&&<PnLView txns={txns}/>}
       {view==="inicio"&&<InicioView myOpenTickets={myOpenTickets} myOpenDevTasks={myOpenDevTasks} myOpenTasks={myOpenTasks} ticketHistory={ticketStatusHistory} devTaskHistory={devTaskStatusHistory} comments={comments} currentUserEmail={session.user.email} canSeeOperaciones={canSeeSection("Operaciones")} canSeeDevs={canSeeSection("Devs")} setView={setView} followup={followup} meId={session.user.id}/>}
       {view==="opsdash"&&<OperationsSummaryView tickets={tickets} tasks={tasks} statusHistory={ticketStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
-      {view==="tickets"&&<TicketsView tickets={tickets} statusHistory={ticketStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} devTasks={devTasks} setView={setView} onRefresh={loadAll} openId={pendingLink?.type==="ticket"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)}/>}
+      {view==="tickets"&&<TicketsView tickets={tickets} statusHistory={ticketStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} devTasks={devTasks} setView={setView} onRefresh={loadAll} openId={pendingLink?.type==="ticket"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)} followup={followup} clientLinks={clientLinks}/>}
       {view==="tasks"&&<TasksView tasks={tasks} allUsers={allUsers} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} currentUserEmail={session.user.email} currentUserId={session.user.id} onRefresh={loadAll} openId={pendingLink?.type==="task"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)}/>}
       {view==="ideas"&&<IdeasApp sb={sb} ideas={ideas} votes={ideaVotes} images={ideaImages} devTasks={devTasks} allUsers={allUsers} me={{ id:session.user.id, email:session.user.email }}
         canTriage={canWriteOps(role)} canDelete={canDeleteOps(role)} canSeeDevs={canSeeSection("Devs")} onRefresh={loadAll}

@@ -93,3 +93,25 @@ export function subLine(sub) {
 
 // Nombre de la etapa de un deal según la configuración del CRM (data.stages).
 export const stageName = (stages, id) => ((stages || []).find((s) => s.id === id) || {}).name || id || "—";
+
+// ── Selector de cliente (al crear o editar un ticket) ───────────────────────────────────────────────────────────────────
+// Clientes de la cartera de Seguimiento que coinciden con lo escrito (empresa, dueño o email), sin los dados de baja. Sin texto: los primeros por nombre.
+export function clientOptions(followup, query, limit = 8) {
+  const q = fold(query).trim();
+  const rows = (followup || []).filter((r) => !r.baja_en);
+  const byName = (a, b) => String(a.company_name || "").localeCompare(String(b.company_name || ""), "es", { sensitivity: "base" });
+  if (!q) return [...rows].sort(byName).slice(0, limit);
+  const hit = (r) => [r.company_name, r.contact_name, r.contact_email].some((v) => fold(v).includes(q));
+  const starts = (r) => fold(r.company_name).startsWith(q);
+  return rows.filter(hit).sort((a, b) => Number(starts(b)) - Number(starts(a)) || byName(a, b)).slice(0, limit);
+}
+
+// Al elegir un cliente para un ticket, el nombre del ticket queda igual al de la cuenta y se asegura el vínculo nombre → cuenta.
+// "ok": ya estaba vinculado a esa cuenta · "create": falta crearlo · "conflict": ese nombre ya está vinculado a OTRA cuenta (no se pisa).
+export function linkStatus(links, companyId, name) {
+  const l = (links || []).find((x) => x.kind === "ticket_client" && x.ref === name);
+  if (!l) return "create";
+  return l.company_id === companyId ? "ok" : "conflict";
+}
+// La cuenta a la que está vinculado el nombre de cliente de un ticket (para mostrarlo ya vinculado al editar).
+export const companyOfTicketName = (links, name) => ((links || []).find((x) => x.kind === "ticket_client" && x.ref === String(name || "").trim()) || {}).company_id || null;
