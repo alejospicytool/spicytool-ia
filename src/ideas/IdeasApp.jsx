@@ -95,31 +95,64 @@ function QuickCapture({ sb, me, onCreated }) {
     } catch (err) { setMsg("No se pudo guardar la idea: " + (err.message || "error")); } finally { setBusy(false); }
   }
 
+  const field = { display: "flex", flexDirection: "column", gap: 4, fontSize: 13, fontWeight: 600, color: "#333" };
+  const hint = { fontSize: 12, fontWeight: 400, color: "#888" };
   return (
     <form onSubmit={submit} onPaste={onPaste} className="spicy-card" style={{ marginBottom: 16 }}>
       {!open ? (
-        <input className="spicy-input" aria-label="Nueva idea" placeholder="💡 ¿Qué se te ocurrió? Contanos tu idea o feedback…" value={f.title} onFocus={() => setOpen(true)} onChange={(e) => { setF({ ...f, title: e.target.value }); setOpen(true); }} style={{ width: "100%" }} />
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <input className="spicy-input" autoFocus aria-label="Título de la idea" placeholder="Título corto (ej: Exportar los contactos a Excel)" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} style={{ width: "100%", fontWeight: 600 }} />
-          <Err>{errors.title}</Err>
-          <textarea className="spicy-input" rows={3} aria-label="Explicación de la idea" placeholder="Explicá qué se quiere y por qué sirve. Si podés, un ejemplo de cómo se usaría." value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }} />
-          <Err>{errors.description}</Err>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {IDEA_TYPES.map((t) => (
-              <button type="button" key={t.key} aria-pressed={f.type === t.key} onClick={() => setF({ ...f, type: t.key })} style={{ padding: "5px 12px", borderRadius: 20, border: `1px solid ${f.type === t.key ? RED : "#E0E0E0"}`, background: f.type === t.key ? "#FEF0F0" : "white", color: f.type === t.key ? RED : "#555", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{t.emoji} {t.label}</button>
-            ))}
+        <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 30 }} aria-hidden="true">💡</div>
+          <div style={{ flex: 1, minWidth: 240 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#111" }}>¿Tenés una idea o un feedback?</div>
+            <div style={{ fontSize: 13, color: "#777", marginTop: 2 }}>Contanos qué se te ocurrió y para qué serviría. Podés sumar una captura de pantalla.</div>
           </div>
-          <label style={lbl}>Pedido por <span style={{ fontWeight: 400, color: "#aaa" }}>(opcional: un cliente, alguien del equipo…)</span>
-            <input className="spicy-input" value={f.requestedBy} onChange={(e) => setF({ ...f, requestedBy: e.target.value })} placeholder="Ej: Marcos de Inmobiliaria X" style={{ width: "100%", marginTop: 4 }} />
+          <button type="button" className="spicy-btn-primary" style={{ padding: "10px 18px", fontSize: 14 }} onClick={() => setOpen(true)}>+ Cargar una idea</button>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#111" }}>💡 Nueva idea o feedback</div>
+            <button type="button" aria-label="Cerrar" onClick={() => { setOpen(false); setFiles([]); setMsg(""); setErrors({}); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 22, color: "#bbb", lineHeight: 1 }}>×</button>
+          </div>
+
+          <label style={field}>
+            <span>1. ¿Cómo se llama la idea? <span style={{ color: RED }}>*</span></span>
+            <input className="spicy-input" autoFocus aria-label="Título de la idea" placeholder="Ej: Exportar los contactos a Excel" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} style={{ width: "100%" }} />
+            <span style={hint}>Una frase corta que se entienda sola.</span>
+            <Err>{errors.title}</Err>
           </label>
-          <Err>{errors.requestedBy}</Err>
-          <div onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={(e) => { e.preventDefault(); setDrag(false); addFiles([...e.dataTransfer.files]); }}
-            style={{ border: `2px dashed ${drag ? RED : "#DDD"}`, borderRadius: 10, padding: "12px 14px", background: drag ? "#FFF6F6" : "#FAFAFA", fontSize: 12, color: "#777", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <span>🖼️ Arrastrá imágenes acá, <b>pegá una captura (Ctrl/Cmd+V)</b> o</span>
-            <button type="button" className="spicy-btn-secondary" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => fileInput.current && fileInput.current.click()}>elegí archivos</button>
-            <input ref={fileInput} type="file" multiple accept="image/*,application/pdf" hidden onChange={(e) => { addFiles([...e.target.files]); e.target.value = ""; }} />
-            <span style={{ color: "#aaa" }}>hasta {IMAGES_MAX} (imágenes o PDF)</span>
+
+          <label style={field}>
+            <span>2. Contanos más <span style={{ fontWeight: 400, color: "#aaa" }}>(opcional)</span></span>
+            <textarea className="spicy-input" rows={4} aria-label="Explicación de la idea" placeholder="¿Qué se quiere lograr y para qué sirve? Si podés, un ejemplo de cómo se usaría." value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }} />
+            <Err>{errors.description}</Err>
+          </label>
+
+          <div style={field}>
+            <span>3. ¿Qué tipo de idea es?</span>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {IDEA_TYPES.map((t) => (
+                <button type="button" key={t.key} aria-pressed={f.type === t.key} onClick={() => setF({ ...f, type: t.key })} style={{ padding: "6px 13px", borderRadius: 20, border: `1px solid ${f.type === t.key ? RED : "#E0E0E0"}`, background: f.type === t.key ? "#FEF0F0" : "white", color: f.type === t.key ? RED : "#555", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{t.emoji} {t.label}</button>
+              ))}
+            </div>
+          </div>
+
+          <label style={field}>
+            <span>4. ¿Quién lo pidió? <span style={{ fontWeight: 400, color: "#aaa" }}>(opcional)</span></span>
+            <input className="spicy-input" value={f.requestedBy} onChange={(e) => setF({ ...f, requestedBy: e.target.value })} placeholder="Ej: Marcos de Inmobiliaria X, o alguien del equipo" style={{ width: "100%" }} />
+            <span style={hint}>Si lo pidió un cliente o alguien más, anotalo acá. Si es una idea tuya, dejalo vacío.</span>
+            <Err>{errors.requestedBy}</Err>
+          </label>
+
+          <div style={field}>
+            <span>5. Imágenes o capturas <span style={{ fontWeight: 400, color: "#aaa" }}>(opcional)</span></span>
+            <div onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={(e) => { e.preventDefault(); setDrag(false); addFiles([...e.dataTransfer.files]); }}
+              style={{ border: `2px dashed ${drag ? RED : "#DDD"}`, borderRadius: 10, padding: "14px 16px", background: drag ? "#FFF6F6" : "#FAFAFA", fontSize: 13, fontWeight: 400, color: "#666", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <span>🖼️ <b>Pegá una captura</b> con Ctrl/Cmd+V, arrastrala hasta acá, o</span>
+              <button type="button" className="spicy-btn-secondary" style={{ padding: "5px 12px", fontSize: 12 }} onClick={() => fileInput.current && fileInput.current.click()}>elegí archivos</button>
+              <input ref={fileInput} type="file" multiple accept="image/*,application/pdf" hidden onChange={(e) => { addFiles([...e.target.files]); e.target.value = ""; }} />
+              <span style={{ color: "#aaa", fontSize: 12 }}>Hasta {IMAGES_MAX} (imágenes o PDF)</span>
+            </div>
           </div>
           {files.length > 0 && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -132,9 +165,9 @@ function QuickCapture({ sb, me, onCreated }) {
             </div>
           )}
           <Err>{msg}</Err>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, borderTop: "1px solid #EEE", paddingTop: 12 }}>
             <button type="button" className="spicy-btn-secondary" disabled={busy} onClick={() => { setOpen(false); setFiles([]); setMsg(""); setErrors({}); }}>Cancelar</button>
-            <button type="submit" className="spicy-btn-primary" disabled={busy}>{busy ? "Enviando…" : "Enviar idea"}</button>
+            <button type="submit" className="spicy-btn-primary" disabled={busy} style={{ padding: "9px 20px" }}>{busy ? "Enviando…" : "Enviar idea"}</button>
           </div>
         </div>
       )}
