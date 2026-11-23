@@ -1,5 +1,5 @@
 -- Ficha 360 del cliente: vínculos confirmados por una persona entre una cuenta de Spicytool (company_id) y datos que viven en otros lados.
--- ESTADO: PENDIENTE DE APLICAR.
+-- ESTADO: YA APLICADO en el proyecto real (khuavhbraikzreyhptog) el 2026-11-23 (probado antes en una transacción que se deshizo, con usuarios reales).
 --
 -- kind:
 --   rev_customer  → ref = rev_customers.key (el cliente de Métricas/Stripe, p. ej. "stripe:cus_…")
