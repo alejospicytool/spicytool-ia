@@ -119,6 +119,20 @@ export const isMemberOf = (u, companyId) => !!companyId && ((u && Array.isArray(
 // Colaborador de esa company: pertenece por colaboración y no por tener la company como propia.
 export const isCollaboratorOf = (u, companyId) => !!companyId && collaboratesInOf(u).includes(companyId) && !(u && Array.isArray(u.companies) && u.companies.includes(companyId));
 
+// ── Conexiones de WhatsApp por Kapso (colección kapsoapps) ─────────────────────────────────────────────────────────
+// status en Mongo: "success" (conectada) y "pending_setup" (se creó pero falta conectar el número). Cualquier otro valor se muestra tal cual.
+export const KAPSO_STATUS = { success: { label: "Conectada", tone: "green" }, pending_setup: { label: "Pendiente de conexión", tone: "amber" } };
+export const kapsoStatusInfo = (status) => KAPSO_STATUS[status] || { label: status || "—", tone: "muted" };
+// Calidad del número según Meta: GREEN / YELLOW / RED (vacío si todavía no se conectó).
+export const QUALITY_TONE = { GREEN: "green", YELLOW: "amber", RED: "red" };
+// Las conexiones de un usuario: las que tienen su id como usuario o la que él tiene marcada (kapso.kapsoAppId).
+export const kapsoAppsOfUser = (apps, user) => {
+  const own = user && user.kapso && user.kapso.kapsoAppId;
+  return (apps || []).filter((a) => user && ((a.userId && a.userId === user._id) || (own && a._id === own)));
+};
+// Resumen para la lista de usuarios (lo justo para mostrar el estado sin traer todos los campos).
+export const kapsoSummary = (a) => ({ _id: a._id, alias: a.alias, status: a.status, connectionType: a.connectionType, displayPhoneNumber: a.displayPhoneNumber, isDefault: !!a.isDefault });
+
 // Proveedor de WhatsApp: users.activeWhatsAppProvider ("kapso" | "gupshup"; vacío si no tiene) y, como respaldo, el id cargado.
 export function whatsappProvider(user) {
   const k = user && user.kapso && user.kapso.kapsoAppId;

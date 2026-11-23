@@ -4,7 +4,7 @@
 import { useState } from "react";
 import { Kpi, fmtDate, fmtDateTime } from "../revenue/revenueUi.jsx";
 import { getUser, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, getPaymentMethodUrl, createSupportLink, getMyPermissions, adminMode } from "./adminApi.js";
-import { companyIdOf, isCollaboratorOf, userFullName, whatsappProvider, planOf, planLabel, sortByPosition } from "./adminLogic.js";
+import { companyIdOf, isCollaboratorOf, userFullName, whatsappProvider, planOf, planLabel, sortByPosition, kapsoAppsOfUser, kapsoStatusInfo, QUALITY_TONE } from "./adminLogic.js";
 import { Tabs, DataTable, StatusBadge, ConfirmDialog, AuditList, IdCell, ActGroup, PhoneLink } from "./adminUi.jsx";
 import { useAsync } from "./adminHooks.js";
 import { EditCompanyDialog, EditContactDialog, AssignPlanDialog, CardLinkDialog, SupportSessionDialog } from "./AdminDialogs.jsx";
@@ -16,10 +16,37 @@ const NO_ACT_TITLE = "Tu usuario puede ver Admin Spicy pero no hacer cambios. Pe
 // Mientras no se sabe qué permisos tiene (o si no puede hacer cambios) los botones de acciones quedan deshabilitados. La que manda es la API.
 const cantAct = (perms) => !(perms.data && perms.data.canAct);
 const num = (v) => (v == null ? "—" : Number(v).toLocaleString("es-AR"));
+const TONE = { green: "badge-green", amber: "badge-yellow", red: "badge-red", muted: "badge-muted" };
+const KapsoStatus = ({ status }) => { const i = kapsoStatusInfo(status); return <span className={"badge " + TONE[i.tone]}>{i.label}</span>; };
+
+// Conexiones de WhatsApp por Kapso de la company (colección kapsoapps). Las del usuario que se está mirando quedan marcadas.
+function KapsoAppsCard({ apps, users, user }) {
+  const mine = new Set(kapsoAppsOfUser(apps, user).map((a) => a._id));
+  const who = (id) => { const u = users.find((x) => x._id === id); return u ? userFullName(u) : id ? "Otro usuario" : "—"; };
+  return (
+    <Card title="Conexiones de WhatsApp (Kapso)" sub={apps.length}>
+      <DataTable rows={apps} empty="Esta company no tiene conexiones de WhatsApp por Kapso." columns={[
+        { key: "alias", label: "Conexión", render: (a) => <><b>{a.alias || "Sin nombre"}</b>{a.isDefault && <span className="badge badge-blue" style={{ marginLeft: 6 }}>Principal</span>}{mine.has(a._id) && <span className="badge badge-muted" style={{ marginLeft: 6 }}>De este usuario</span>}</> },
+        { key: "displayPhoneNumber", label: "Número", render: (a) => a.displayPhoneNumber ? <><PhoneLink phone={a.displayPhoneNumber} />{a.verifiedName && <div style={{ color: "var(--muted)", fontSize: 11 }}>{a.verifiedName}</div>}</> : <span style={{ color: "var(--muted)" }}>Sin número</span> },
+        { key: "status", label: "Estado", render: (a) => <><KapsoStatus status={a.status} />{a.status !== "success" && a.setupLinkExpiresAt && <div style={{ color: "var(--muted)", fontSize: 11 }}>{new Date(a.setupLinkExpiresAt) < new Date() ? "El link de conexión venció" : "Link de conexión vigente hasta " + fmtDate(a.setupLinkExpiresAt)}</div>}</> },
+        { key: "connectionType", label: "Tipo de conexión", render: (a) => <>{a.connectionType || "—"}{a.isCoexistence && <span className="badge badge-muted" style={{ marginLeft: 6 }} title="El número se usa a la vez en la app de WhatsApp Business y en Spicytool">Coexistencia</span>}</> },
+        { key: "qualityRating", label: "Calidad", render: (a) => a.qualityRating ? <span className={"badge " + (TONE[QUALITY_TONE[String(a.qualityRating).toUpperCase()]] || "badge-muted")}>{a.qualityRating}</span> : "—" },
+        { key: "messagingLimitTier", label: "Límite de mensajes", muted: true, render: (a) => a.messagingLimitTier || "—" },
+        { key: "incomingMessageMode", label: "Mensajes entrantes", muted: true, render: (a) => a.incomingMessageMode || "—" },
+        { key: "userId", label: "Usuario", render: (a) => who(a.userId) },
+        { key: "connectedAt", label: "Conectada", muted: true, render: (a) => (a.connectedAt ? fmtDate(a.connectedAt) : "—") },
+        { key: "lastTemplatesSyncAt", label: "Templates sincronizados", muted: true, render: (a) => (a.lastTemplatesSyncAt ? fmtDate(a.lastTemplatesSyncAt) : "—") },
+        { key: "businessAccountId", label: "WABA", muted: true, render: (a) => (a.businessAccountId ? <IdCell id={a.businessAccountId} /> : "—") },
+        { key: "phoneNumberId", label: "ID del número", muted: true, render: (a) => (a.phoneNumberId ? <IdCell id={a.phoneNumberId} /> : "—") },
+        ID_COL]} />
+    </Card>
+  );
+}
+
 const Card = ({ title, sub, children }) => <div className="card"><div className="card-title"><span>{title}{sub != null && <span className="card-sub">{sub}</span>}</span></div>{children}</div>;
 
 function Summary({ b, user }) {
-  const c = b.company, wa = whatsappProvider(user);
+  const c = b.company, wa = whatsappProvider(user), kapsoMine = kapsoAppsOfUser(b.kapsoApps, user);
   const fields = [
     ["Estado", <StatusBadge key="s" status={c.status} />], ["Vertical", c.vertical], ["Tamaño del equipo", c.teamSize], ["Créditos", `${num(c.credits)} ${c.currency || ""}`],
     ["Teléfono", <PhoneLink key="ph" phone={c.phoneNumber} />], ["Email del dueño", c.userEmail], ["Alta", fmtDate(c.creationDate)], ["Account ID", c.accountId], ["Conversaciones de WhatsApp activas", num(c.activeWhatsAppConversations)],
@@ -33,7 +60,8 @@ function Summary({ b, user }) {
       <Card title="Usuario seleccionado">
         <dl className="kv">
           {[["Nombre", userFullName(user)], ["Email", user.email], ["Teléfono", <PhoneLink key="ph" phone={user.phoneNumber} />], ["Plan", planLabel(planOf(user))], ["ID del usuario (Mongo)", <IdCell key="uid" id={user._id} />],
-            ["Proveedor de WhatsApp", wa ? `${wa.provider}${wa.appId ? " · " + wa.appId : ""}` : "Sin configurar"]].map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v || "—"}</dd></div>)}
+            ["Proveedor de WhatsApp", wa ? `${wa.provider}${wa.appId ? " · " + wa.appId : ""}` : "Sin configurar"],
+            ["Conexiones de WhatsApp (Kapso)", kapsoMine.length ? <div key="kp" style={{ display: "flex", flexDirection: "column", gap: 4 }}>{kapsoMine.map((a) => <span key={a._id}><KapsoStatus status={a.status} /> {a.alias || "Sin nombre"}{a.displayPhoneNumber ? " · " + a.displayPhoneNumber : ""}</span>)}</div> : "Ninguna"]].map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v || "—"}</dd></div>)}
         </dl>
       </Card>
       <Card title="Suscripción">
@@ -215,6 +243,7 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
         { key: "condition", label: "Condición" }, { key: "conversionCategory", label: "Categoría", render: (c) => <span className="badge badge-blue">{c.conversionCategory}</span> },
       ID_COL]} /></Card>}
       {tab === "whatsapp" && (<>
+        <KapsoAppsCard apps={b.kapsoApps || []} users={b.users} user={user} />
         <Card title="Conversaciones de WhatsApp" sub={b.whatsappConversions.length}><DataTable rows={b.whatsappConversions} empty="Sin conversiones de WhatsApp." columns={[
           { key: "date", label: "Fecha", render: (c) => fmtDate(c.date) }, { key: "behavior", label: "Comportamiento" }, { key: "checked", label: "Verificada", render: (c) => yesNo(c.checked) }, { key: "source", label: "Origen", muted: true }, { key: "trackId", label: "Track ID", muted: true },
         ID_COL]} /></Card>

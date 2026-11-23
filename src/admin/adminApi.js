@@ -2,7 +2,7 @@
 // la página vuelve todo al estado inicial. Las funciones tienen la forma de los endpoints que va a tener el backend
 // (ver PLAN.md), así que al conectar Mongo / Postgres solo se reemplaza este archivo; las pantallas no cambian.
 import { MOCK } from "./adminMock.js";
-import { matchesSearch, matchesFilters, isOwner, isPaused, matchesCompanySearch, sortCompaniesByName, sortUsersRecent, paginate, companyIdOf, isMemberOf, isCollaboratorOf, userFullName, planOf, isPaidPlan, PAID_PLANS, validateCompanyEdit, validateContactEdit, validateSupportReason, buildSupportRequest, SUPPORT_ACTIONS, diffFields, buildAuditEntry, sortByPosition } from "./adminLogic.js";
+import { matchesSearch, matchesFilters, isOwner, isPaused, matchesCompanySearch, sortCompaniesByName, sortUsersRecent, paginate, companyIdOf, isMemberOf, isCollaboratorOf, kapsoAppsOfUser, kapsoSummary, userFullName, planOf, isPaidPlan, PAID_PLANS, validateCompanyEdit, validateContactEdit, validateSupportReason, buildSupportRequest, SUPPORT_ACTIONS, diffFields, buildAuditEntry, sortByPosition } from "./adminLogic.js";
 
 // ── Modo real o de ejemplo ───────────────────────────────────────────────────────────────────────
 // Al abrir Admin Spicy se prueba el backend (/api/admin, en el servidor). Si responde, las LECTURAS salen de Mongo (solo lectura);
@@ -67,7 +67,7 @@ export async function listUsers({ search = "", page = 1, pageSize = 8, owners = 
     ...p,
     items: p.items.map((u) => {
       const co = byId("companies", companyIdOf(u));
-      return { ...copy(u), companyName: co ? co.name : "—", companyStatus: co ? co.status : null, isCollaborator: !!co && isCollaboratorOf(u, co._id), isOwner: isOwner(u, co) };
+      return { ...copy(u), kapsoApps: kapsoAppsOfUser(db.kapsoapps, u).map(kapsoSummary), companyName: co ? co.name : "—", companyStatus: co ? co.status : null, isCollaborator: !!co && isCollaboratorOf(u, co._id), isOwner: isOwner(u, co) };
     }),
   };
 }
@@ -116,6 +116,7 @@ export async function getCompanyBundle(companyId) {
     webforms: sortByPosition(own("webforms")),
     contactLists: sortByPosition(own("contactlists")),
     workflows: own("workflows"),
+    kapsoApps: own("kapsoapps"),
   };
 }
 

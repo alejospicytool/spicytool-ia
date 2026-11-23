@@ -6,6 +6,22 @@ const str = (v) => (v == null ? null : String(v));
 const dateOf = (id) => (id && /^[0-9a-f]{24}$/i.test(String(id)) ? new Date(parseInt(String(id).slice(0, 8), 16) * 1000).toISOString() : null);
 const iso = (v) => { if (v == null) return null; const d = new Date(v); return Number.isNaN(d.getTime()) ? null : d.toISOString(); };
 
+// Conexiones de WhatsApp por Kapso (colección kapsoapps): una por número conectado (o pendiente de conectar) de una company.
+// LISTA PERMITIDA: a propósito NO salen setupLinkUrl ni setupLinkId (el link de conexión permitiría conectar un número ajeno) ni kapsoCustomerId.
+export const KAPSOAPP_PROJECTION = {
+  alias: 1, status: 1, connectionType: 1, isCoexistence: 1, isDefault: 1, displayPhoneNumber: 1, verifiedName: 1, qualityRating: 1, messagingLimitTier: 1,
+  throughputLevel: 1, incomingMessageMode: 1, connectedAt: 1, createdAt: 1, updatedAt: 1, lastTemplatesSyncAt: 1, setupLinkExpiresAt: 1, businessAccountId: 1, phoneNumberId: 1, companyId: 1, userId: 1,
+};
+export function shapeKapsoApp(d) {
+  return {
+    _id: str(d._id), alias: d.alias || "", status: d.status || "", connectionType: d.connectionType || "", isCoexistence: !!d.isCoexistence, isDefault: !!d.isDefault,
+    displayPhoneNumber: d.displayPhoneNumber || null, verifiedName: d.verifiedName || null, qualityRating: d.qualityRating || null, messagingLimitTier: d.messagingLimitTier || null,
+    throughputLevel: d.throughputLevel || null, incomingMessageMode: d.incomingMessageMode || null,
+    connectedAt: iso(d.connectedAt), createdAt: iso(d.createdAt) || dateOf(d._id), updatedAt: iso(d.updatedAt), lastTemplatesSyncAt: iso(d.lastTemplatesSyncAt), setupLinkExpiresAt: iso(d.setupLinkExpiresAt),
+    businessAccountId: d.businessAccountId || null, phoneNumberId: d.phoneNumberId || null, companyId: str(d.companyId), userId: str(d.userId),
+  };
+}
+
 // Campos que se le piden a Mongo (projection). Es la misma lista que usan los shape*: pedir de más no está permitido.
 export const USER_PROJECTION = {
   email: 1, name: 1, surname: 1, phoneNumber: 1, companies: 1, companiesWhereICollaborate: 1, creationDate: 1, activeWhatsAppProvider: 1,
@@ -58,6 +74,7 @@ export function shapeCompany(d) {
 
 // ── Colecciones hijas de una company: solo los campos que muestra cada pestaña ───────────────────────
 export const CHILD = {
+  kapsoapps: { projection: KAPSOAPP_PROJECTION, shape: shapeKapsoApp },
   campaigns: { projection: { campaignName: 1, campaignId: 1, campaignStatus: 1, budgetPerDay: 1, investedPerDay: 1, accountId: 1 },
     shape: (d) => ({ _id: str(d._id), campaignName: d.campaignName || "", campaignId: d.campaignId || "", campaignStatus: d.campaignStatus && d.campaignStatus.status ? "ENABLED" : "PAUSED", budgetPerDay: d.budgetPerDay ?? null, investedPerDay: d.investedPerDay ?? null, accountId: d.accountId || "" }) },
   landings: { projection: { companyName: 1, businessDescription: 1, landingStatus: 1, createdWithIA: 1 },

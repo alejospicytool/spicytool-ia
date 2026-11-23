@@ -2,7 +2,7 @@
 // Al elegir un usuario se abre su detalle (company, campañas, créditos, etc.).
 import { useState } from "react";
 import { listUsers, listAudit } from "./adminApi.js";
-import { userFullName, planOf, planLabel, whatsappProvider } from "./adminLogic.js";
+import { userFullName, planOf, planLabel, whatsappProvider, kapsoStatusInfo } from "./adminLogic.js";
 import { DataTable, StatusBadge, Pager, AuditList, PhoneLink } from "./adminUi.jsx";
 import { useAsync } from "./adminHooks.js";
 import AdminCompanyDetail from "./AdminCompanyDetail.jsx";
@@ -40,7 +40,7 @@ export default function AdminUsersPage({ actor }) {
               { key: "companyName", label: "Company", render: (u) => <>{u.companyName}{u.isCollaborator && <span className="badge badge-muted" style={{ marginLeft: 6 }} title="Es colaborador de esta company: no es el dueño">Colaborador</span>}</> },
               { key: "companyStatus", label: "Estado", render: (u) => (u.companyStatus ? <StatusBadge status={u.companyStatus} /> : <span style={{ color: "var(--muted)" }}>Sin company</span>) },
               { key: "plan", label: "Plan", render: (u) => planLabel(planOf(u)) },
-              { key: "wa", label: "WhatsApp", muted: true, render: (u) => whatsappProvider(u)?.provider || "—" },
+              { key: "wa", label: "WhatsApp", muted: true, render: (u) => <>{whatsappProvider(u)?.provider || "—"}{(u.kapsoApps || []).map((a) => { const i = kapsoStatusInfo(a.status); return <div key={a._id} style={{ fontSize: 11 }} title={`${a.alias || "Sin nombre"} · ${i.label}${a.connectionType ? " · " + a.connectionType : ""}`}><span className={"badge " + ({ green: "badge-green", amber: "badge-yellow", muted: "badge-muted" }[i.tone] || "badge-muted")}>{i.label}</span> {a.displayPhoneNumber || a.alias || ""}</div>; })}</> },
             ]} />
             {r && <Pager page={r.page} pages={r.pages} total={r.total} label={r.total === 1 ? "usuario" : "usuarios"} onChange={setPage} />}
           </>

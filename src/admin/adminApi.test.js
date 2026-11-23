@@ -540,3 +540,27 @@ describe("colaboradores (users.companiesWhereICollaborate)", () => {
     expect((await listUsers({ activeOnly: true, pageSize: 50 })).items.some((u) => u._id === paula()._id)).toBe(co.status === "active");
   });
 });
+
+describe("conexiones de WhatsApp por Kapso (colección kapsoapps)", () => {
+  it("la company trae sus conexiones, con la pendiente de conexión incluida", async () => {
+    const k = MOCK.kapsoapps[0];
+    const b = await getCompanyBundle(k.companyId);
+    expect(b.kapsoApps.every((a) => a.companyId === k.companyId)).toBe(true);
+    expect(b.kapsoApps.map((a) => a.status).sort()).toEqual(["pending_setup", "success"]);
+  });
+  it("una company sin conexiones trae la lista vacía", async () => {
+    const sin = MOCK.companies.find((c) => !MOCK.kapsoapps.some((a) => a.companyId === c._id));
+    expect((await getCompanyBundle(sin._id)).kapsoApps).toEqual([]);
+  });
+  it("la lista de usuarios muestra en cada uno un resumen de SUS conexiones", async () => {
+    const k = MOCK.kapsoapps[0];
+    const u = (await listUsers({ pageSize: 50 })).items.find((x) => x._id === k.userId);
+    expect(u.kapsoApps.map((a) => a.status).sort()).toEqual(["pending_setup", "success"]);
+    expect(Object.keys(u.kapsoApps[0]).sort()).toEqual(["_id", "alias", "connectionType", "displayPhoneNumber", "isDefault", "status"]);
+    const sinKapso = (await listUsers({ pageSize: 50 })).items.find((x) => !MOCK.kapsoapps.some((a) => a.userId === x._id));
+    expect(sinKapso.kapsoApps).toEqual([]);
+  });
+  it("los datos de ejemplo no traen el link de conexión", () => {
+    expect(JSON.stringify(MOCK.kapsoapps)).not.toMatch(/setupLinkUrl|setupLinkId|kapsoCustomerId/);
+  });
+});

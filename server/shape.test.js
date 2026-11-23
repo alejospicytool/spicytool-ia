@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { shapeUser, idsOf, shapeCompany, shapeSupportSession, numbered, CHILD, USER_PROJECTION, COMPANY_PROJECTION, SUPPORT_PROJECTION } from "./shape.js";
+import { shapeUser, idsOf, shapeKapsoApp, KAPSOAPP_PROJECTION, shapeCompany, shapeSupportSession, numbered, CHILD, USER_PROJECTION, COMPANY_PROJECTION, SUPPORT_PROJECTION } from "./shape.js";
 
 // Documento "como lo guarda Mongo", con campos peligrosos mezclados: nada de eso puede salir.
 const rawUser = {
@@ -9,6 +9,23 @@ const rawUser = {
   stripe: { customerId: "cus_1", subscriptionId: "sub_1", paymentMethodId: "pm_1" },
   passwordHash: "$2b$10$SECRETO", brizy: { userToken: "TOKEN_BRIZY" }, confirmationCode: "123456",
 };
+
+describe("shapeKapsoApp (conexiones de WhatsApp por Kapso)", () => {
+  const raw = { _id: "6650000000000000000000k1", alias: "Línea principal", status: "success", connectionType: "coexistence", isCoexistence: true, isDefault: true, displayPhoneNumber: "+54 9 11 6000-1100", verifiedName: "Inmo Paz", qualityRating: "GREEN", messagingLimitTier: "TIER_1K",
+    connectedAt: new Date("2026-09-10T15:00:00Z"), createdAt: new Date("2026-09-10T14:00:00Z"), companyId: "c1", userId: "u1", businessAccountId: "waba_1", phoneNumberId: "pn_1",
+    setupLinkUrl: "https://kapso.test/setup/SECRETO_LINK", setupLinkId: "SECRETO_ID", kapsoCustomerId: "cust_SECRETO", __v: 3 };
+  it("devuelve los campos importantes con fechas ISO", () => {
+    expect(shapeKapsoApp(raw)).toMatchObject({ _id: "6650000000000000000000k1", alias: "Línea principal", status: "success", connectionType: "coexistence", isCoexistence: true, isDefault: true, displayPhoneNumber: "+54 9 11 6000-1100", verifiedName: "Inmo Paz", qualityRating: "GREEN", messagingLimitTier: "TIER_1K", connectedAt: "2026-09-10T15:00:00.000Z", companyId: "c1", userId: "u1" });
+  });
+  it("NUNCA expone el link de conexión ni el id de cliente de Kapso", () => {
+    const json = JSON.stringify(shapeKapsoApp(raw));
+    for (const secreto of ["SECRETO_LINK", "SECRETO_ID", "cust_SECRETO", "setupLinkUrl", "setupLinkId", "kapsoCustomerId"]) expect(json).not.toContain(secreto);
+    for (const campo of ["setupLinkUrl", "setupLinkId", "kapsoCustomerId"]) expect(Object.keys(KAPSOAPP_PROJECTION)).not.toContain(campo);
+  });
+  it("una conexión pendiente (sin número ni fechas de conexión) no rompe nada", () => {
+    expect(shapeKapsoApp({ _id: "6650000000000000000000k2", status: "pending_setup", companyId: "c1", userId: "u1" })).toMatchObject({ alias: "", status: "pending_setup", displayPhoneNumber: null, qualityRating: null, connectedAt: null, setupLinkExpiresAt: null, isDefault: false });
+  });
+});
 
 describe("shapeUser", () => {
   it("deja solo los campos permitidos: nunca passwordHash, tokens ni códigos", () => {

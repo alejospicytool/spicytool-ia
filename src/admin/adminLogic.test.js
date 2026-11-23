@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  PAID_PLANS, planOf, planLabel, isPaidPlan, validatePlanAssignment, newIdempotencyKey, formatPrice, explainWebhookError, WEBHOOK_ERRORS, validateSupportReason, buildSupportRequest, explainSupportError, SUPPORT_ERRORS, SUPPORT_ACTIONS, AUDIT_ACTIONS, expiryText, REASON_MIN, REASON_MAX, matchesSearch, escapeRegExp, sortUsersRecent, paginate, whatsappProvider, companyIdOf, isMemberOf, isCollaboratorOf,
+  PAID_PLANS, planOf, planLabel, isPaidPlan, validatePlanAssignment, newIdempotencyKey, formatPrice, explainWebhookError, WEBHOOK_ERRORS, validateSupportReason, buildSupportRequest, explainSupportError, SUPPORT_ERRORS, SUPPORT_ACTIONS, AUDIT_ACTIONS, expiryText, REASON_MIN, REASON_MAX, matchesSearch, escapeRegExp, sortUsersRecent, paginate, whatsappProvider, companyIdOf, isMemberOf, isCollaboratorOf, kapsoStatusInfo, kapsoAppsOfUser, kapsoSummary,
   validateCompanyEdit, validateContactEdit, diffFields, waLink, couponSummary, buildAuditEntry, userFullName, sortByPosition, isOwner, matchesFilters, isPaused, matchesCompanySearch, sortCompaniesByName,
 } from "./adminLogic.js";
 
@@ -177,6 +177,20 @@ describe("datos del usuario", () => {
     expect(isMemberOf(u, "c1")).toBe(true); expect(isMemberOf(u, "c9")).toBe(true); expect(isMemberOf(u, "c5")).toBe(false); expect(isMemberOf(u, null)).toBe(false);
     expect(isCollaboratorOf(u, "c9")).toBe(true); expect(isCollaboratorOf(u, "c1")).toBe(false);
     expect(isCollaboratorOf({ companies: ["c1"], collaboratesIn: ["c1"] }, "c1")).toBe(false);
+  });
+  it("estado de la conexión de Kapso: conectada, pendiente, y lo demás tal cual", () => {
+    expect(kapsoStatusInfo("success")).toEqual({ label: "Conectada", tone: "green" });
+    expect(kapsoStatusInfo("pending_setup")).toEqual({ label: "Pendiente de conexión", tone: "amber" });
+    expect(kapsoStatusInfo("rara")).toEqual({ label: "rara", tone: "muted" });
+    expect(kapsoStatusInfo("")).toEqual({ label: "—", tone: "muted" });
+  });
+  it("las conexiones de un usuario: por su id o por la que tiene marcada; resumen sin campos de más", () => {
+    const apps = [{ _id: "k1", userId: "u1", alias: "A", status: "success", connectionType: "x", displayPhoneNumber: "+1", isDefault: true, businessAccountId: "waba" }, { _id: "k2", userId: "u2" }, { _id: "k3", userId: "u3" }];
+    expect(kapsoAppsOfUser(apps, { _id: "u1" }).map((a) => a._id)).toEqual(["k1"]);
+    expect(kapsoAppsOfUser(apps, { _id: "u9", kapso: { kapsoAppId: "k3" } }).map((a) => a._id)).toEqual(["k3"]);
+    expect(kapsoAppsOfUser(apps, { _id: "u9" })).toEqual([]);
+    expect(kapsoAppsOfUser(undefined, { _id: "u1" })).toEqual([]);
+    expect(kapsoSummary(apps[0])).toEqual({ _id: "k1", alias: "A", status: "success", connectionType: "x", displayPhoneNumber: "+1", isDefault: true });
   });
   it("nombre completo con respaldo al email", () => {
     expect(userFullName({ name: "Ana", surname: "Paz", email: "a@x" })).toBe("Ana Paz");

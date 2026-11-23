@@ -12,7 +12,7 @@ const CATEGORIAS = [
   ["users", "subscription.subscriptionType"], ["users", "subscription.tier"], ["users", "subscription.legacySubscriptionType"],
   ["users", "activeWhatsAppProvider"], ["users", "role"], ["users", "isEnterprise"], ["users", "currency"],
   ["companies", "status"], ["companies", "currency"], ["companies", "vertical"],
-  ["kapsoapps", "status"], ["whatsappapps", "status"], ["supportadminusers", "role"], ["supportadminusers", "active"],
+  ["kapsoapps", "status"], ["kapsoapps", "connectionType"], ["kapsoapps", "qualityRating"], ["kapsoapps", "messagingLimitTier"], ["kapsoapps", "incomingMessageMode"], ["whatsappapps", "status"], ["supportadminusers", "role"], ["supportadminusers", "active"],
 ];
 const COLECCIONES_INDICES = ["users", "companies", "contacts", "campaigns", "landings", "workflows", "pipelines", "pipelinestages", "webforms", "contactlists", "kapsoapps", "whatsappapps", "supportsessions"];
 

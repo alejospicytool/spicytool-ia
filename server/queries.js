@@ -1,8 +1,8 @@
 // Consultas de SOLO LECTURA a Mongo para el backoffice. Nada acá escribe, actualiza ni borra.
 // Las pantallas esperan la misma forma que tenía el simulador (src/admin/adminApi.js); la forma la fija shape.js.
 import { ObjectId } from "mongodb";
-import { matchesSearch, matchesFilters, isOwner, isPaused, matchesCompanySearch, sortCompaniesByName, sortUsersRecent, paginate, companyIdOf, isMemberOf, isCollaboratorOf, collaboratesInOf } from "../src/admin/adminLogic.js";
-import { USER_PROJECTION, COMPANY_PROJECTION, CHILD, SUPPORT_PROJECTION, shapeUser, shapeCompany, shapeSupportSession, numbered } from "./shape.js";
+import { matchesSearch, matchesFilters, isOwner, isPaused, matchesCompanySearch, sortCompaniesByName, sortUsersRecent, paginate, companyIdOf, isMemberOf, isCollaboratorOf, collaboratesInOf, kapsoAppsOfUser, kapsoSummary } from "../src/admin/adminLogic.js";
+import { USER_PROJECTION, COMPANY_PROJECTION, KAPSOAPP_PROJECTION, shapeKapsoApp, CHILD, SUPPORT_PROJECTION, shapeUser, shapeCompany, shapeSupportSession, numbered } from "./shape.js";
 
 const MAX_MS = 8000;
 const SNAPSHOT_MS = 30_000;
@@ -23,12 +23,14 @@ export function makeQueries(db) {
     if (snap && Date.now() - snapAt < SNAPSHOT_MS) return snap;
     if (!loading) {
       loading = (async () => {
-        const [u, c] = await Promise.all([
+        const [u, c, k] = await Promise.all([
           col("users").find({}, { projection: USER_PROJECTION }).maxTimeMS(MAX_MS).toArray(),
           col("companies").find({}, { projection: COMPANY_PROJECTION }).maxTimeMS(MAX_MS).toArray(),
+          // Las conexiones de WhatsApp son un extra de la lista: si no se pueden leer, usuarios y companies siguen andando.
+          col("kapsoapps").find({}, { projection: KAPSOAPP_PROJECTION }).maxTimeMS(MAX_MS).toArray().catch(() => []),
         ]);
-        const users = u.map(shapeUser), companies = c.map(shapeCompany);
-        snap = { users, companies, companyById: new Map(companies.map((x) => [x._id, x])) };
+        const users = u.map(shapeUser), companies = c.map(shapeCompany), kapsoApps = k.map(shapeKapsoApp);
+        snap = { users, companies, kapsoApps, companyById: new Map(companies.map((x) => [x._id, x])) };
         snapAt = Date.now();
         return snap;
       })().finally(() => { loading = null; });
@@ -46,7 +48,7 @@ export function makeQueries(db) {
       const s = await snapshot();
       const rows = s.users.map((u) => ({ u, co: s.companyById.get(companyIdOf(u)) })).filter(({ u, co }) => matchesSearch(u, search) && matchesFilters(u, co, { owners, activeOnly }));
       const p = paginate(sortUsersRecent(rows.map((r) => r.u)), page, pageSize);
-      return { ...p, items: p.items.map((u) => { const co = s.companyById.get(companyIdOf(u)); return { ...u, companyName: co ? co.name : "—", companyStatus: co ? co.status : null, isCollaborator: !!co && isCollaboratorOf(u, co._id), otherCollabs: Math.max(0, collaboratesInOf(u).filter((x) => x !== (co && co._id)).length), isOwner: isOwner(u, co) }; }) };
+      return { ...p, items: p.items.map((u) => { const co = s.companyById.get(companyIdOf(u)); return { ...u, kapsoApps: kapsoAppsOfUser(s.kapsoApps, u).map(kapsoSummary), companyName: co ? co.name : "—", companyStatus: co ? co.status : null, isCollaborator: !!co && isCollaboratorOf(u, co._id), otherCollabs: Math.max(0, collaboratesInOf(u).filter((x) => x !== (co && co._id)).length), isOwner: isOwner(u, co) }; }) };
     },
 
     async listCompanies({ status = "active", search = "", page = 1, pageSize = 8 } = {}) {
@@ -79,19 +81,20 @@ export function makeQueries(db) {
       const d = await col("companies").findOne({ _id }, { projection: COMPANY_PROJECTION, maxTimeMS: MAX_MS });
       if (!d) return null;
       const byCompany = { companyId };
-      const [users, campaigns, landings, conversions, whatsappConversions, pipelines, templates, webforms, contactLists, workflows] = await Promise.all([
+      const [users, campaigns, landings, conversions, whatsappConversions, pipelines, templates, webforms, contactLists, workflows, kapsoApps] = await Promise.all([
         col("users").find({ $or: [{ companies: companyId }, { companiesWhereICollaborate: { $in: [companyId, ...(oid(companyId) ? [oid(companyId)] : [])] } }] }, { projection: USER_PROJECTION }).maxTimeMS(MAX_MS).toArray(),
         find("campaigns", byCompany), find("landings", byCompany), find("companyconversions", byCompany),
         find("whatsappconversions", byCompany, { sort: { _id: -1 }, limit: 100 }),
         find("pipelines", byCompany), find("whatsapptemplates", byCompany), find("webforms", byCompany, { sort: { created: 1 } }),
         find("contactlists", byCompany), find("workflows", byCompany),
+        find("kapsoapps", byCompany, { sort: { createdAt: 1 } }).catch(() => []),
       ]);
       const sh = (name, rows) => rows.map(CHILD[name].shape);
       return {
         company: shapeCompany(d), users: users.map(shapeUser),
         campaigns: sh("campaigns", campaigns), landings: sh("landings", landings), conversions: sh("companyconversions", conversions),
         whatsappConversions: sh("whatsappconversions", whatsappConversions), pipelines: sh("pipelines", pipelines), templates: sh("whatsapptemplates", templates),
-        webforms: numbered(sh("webforms", webforms)), contactLists: numbered(sh("contactlists", contactLists)), workflows: sh("workflows", workflows),
+        webforms: numbered(sh("webforms", webforms)), contactLists: numbered(sh("contactlists", contactLists)), workflows: sh("workflows", workflows), kapsoApps: sh("kapsoapps", kapsoApps),
       };
     },
 
