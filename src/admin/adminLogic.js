@@ -141,6 +141,28 @@ export const kapsoAppsOfUser = (apps, user) => {
 // Resumen para la lista de usuarios (lo justo para mostrar el estado sin traer todos los campos).
 export const kapsoSummary = (a) => ({ _id: a._id, alias: a.alias, status: a.status, connectionType: a.connectionType, displayPhoneNumber: a.displayPhoneNumber, isDefault: !!a.isDefault });
 
+// Lista de conexiones de WhatsApp (vista "Conexiones de WhatsApp"): cada conexión con su company y su usuario.
+// status: "pending" (pending_setup), "connected" (success) o "all". Las pendientes salen primero las MÁS ANTIGUAS (las que llevan más tiempo
+// trabadas); el resto, las más recientes primero. "counts" son los totales de cada pestaña con la búsqueda y el filtro de company ya aplicados.
+const fold = (t) => String(t ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+export function listKapsoRows({ apps = [], users = [], companies = [] } = {}, { status = "pending", search = "", activeOnly = true, page = 1, pageSize = 10, now = Date.now() } = {}) {
+  const userById = new Map(users.map((u) => [u._id, u])), companyById = new Map(companies.map((c) => [c._id, c]));
+  const q = fold(search).trim();
+  const rows = apps.map((a) => {
+    const u = userById.get(a.userId), co = companyById.get(a.companyId);
+    const created = a.createdAt ? new Date(a.createdAt).getTime() : NaN;
+    return { ...a, companyName: co ? co.name : "—", companyStatus: co ? co.status : null, userName: u ? userFullName(u) : "—", userEmail: u ? u.email : "", userPhone: u ? u.phoneNumber : "",
+      daysSinceCreated: Number.isFinite(created) ? Math.max(0, Math.floor((now - created) / 86400000)) : null };
+  }).filter((r) => (!activeOnly || (r.companyStatus && r.companyStatus !== "paused"))
+    && (!q || [r.alias, r.companyName, r.userName, r.userEmail, r.userPhone, r.displayPhoneNumber, r.verifiedName].some((v) => v && fold(v).includes(q))));
+  const pend = (r) => r.status === "pending_setup", ok = (r) => r.status === "success";
+  const counts = { pending: rows.filter(pend).length, connected: rows.filter(ok).length, all: rows.length };
+  const chosen = rows.filter((r) => (status === "all" ? true : status === "connected" ? ok(r) : pend(r)));
+  const t = (r) => (r.createdAt ? new Date(r.createdAt).getTime() : 0);
+  chosen.sort(status === "pending" ? (a, b) => t(a) - t(b) : (a, b) => t(b) - t(a));
+  return { ...paginate(chosen, page, pageSize), counts };
+}
+
 // Proveedor de WhatsApp: users.activeWhatsAppProvider ("kapso" | "gupshup"; vacío si no tiene) y, como respaldo, el id cargado.
 export function whatsappProvider(user) {
   const k = user && user.kapso && user.kapso.kapsoAppId;

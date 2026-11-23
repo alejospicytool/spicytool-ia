@@ -9,6 +9,7 @@ import { probeAdminApi, getMyPermissions } from "./adminApi.js";
 import AdminUsersPage from "./AdminUsersPage.jsx";
 import AdminCompaniesPage from "./AdminCompaniesPage.jsx";
 import AdminSupportPage from "./AdminSupportPage.jsx";
+import AdminWhatsappPage from "./AdminWhatsappPage.jsx";
 
 export default function AdminApp({ view, actor }) {
   const probe = useAsync(() => probeAdminApi(), "probe");
@@ -28,6 +29,7 @@ export default function AdminApp({ view, actor }) {
           </div>
           {view === "adm_users" && <AdminUsersPage actor={actor} />}
           {view === "adm_companies" && <AdminCompaniesPage actor={actor} />}
+          {view === "adm_whatsapp" && <AdminWhatsappPage actor={actor} />}
           {view === "adm_support" && <AdminSupportPage />}
         </>
       )}

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { resetMock, listUsers, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, listCoupons, getPaymentMethodUrl, listPrices, WebhookError, getUser, listCompanies, listCompanyUsers, getMyPermissions, createSupportLink, listSupportLog, SupportError, configureAdminApi, probeAdminApi } from "./adminApi.js";
+import { resetMock, listUsers, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, listCoupons, getPaymentMethodUrl, listPrices, WebhookError, getUser, listCompanies, listCompanyUsers, getMyPermissions, createSupportLink, listSupportLog, SupportError, configureAdminApi, probeAdminApi, listKapsoApps } from "./adminApi.js";
 import { MOCK } from "./adminMock.js";
 
 const ACTOR = "admin@ejemplo.test";
@@ -562,5 +562,22 @@ describe("conexiones de WhatsApp por Kapso (colección kapsoapps)", () => {
   });
   it("los datos de ejemplo no traen el link de conexión", () => {
     expect(JSON.stringify(MOCK.kapsoapps)).not.toMatch(/setupLinkUrl|setupLinkId|kapsoCustomerId/);
+  });
+});
+
+describe("vista de conexiones de WhatsApp", () => {
+  it("lista las pendientes de companies activas, con su company y su usuario", async () => {
+    const r = await listKapsoApps({ pageSize: 50 });
+    expect(r.items.length).toBeGreaterThan(0);
+    expect(r.items.every((a) => a.status === "pending_setup" && a.companyStatus === "active")).toBe(true);
+    expect(r.items[0]).toMatchObject({ companyName: expect.any(String), userName: expect.any(String), userEmail: expect.stringContaining("@") });
+    expect(r.counts.pending).toBe(r.total);
+  });
+  it("conectadas y todas suman lo mismo que las pestañas", async () => {
+    const all = await listKapsoApps({ status: "all", activeOnly: false, pageSize: 50 });
+    const c = await listKapsoApps({ status: "connected", activeOnly: false, pageSize: 50 });
+    const p = await listKapsoApps({ status: "pending", activeOnly: false, pageSize: 50 });
+    expect(c.total + p.total).toBe(all.total);
+    expect(all.total).toBe(MOCK.kapsoapps.length);
   });
 });

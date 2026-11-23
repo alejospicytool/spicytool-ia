@@ -47,6 +47,12 @@ export function createApp({ queries, authenticate, billing, companies, users, au
   app.get("/api/admin/companies/:id", route(async (req, res) => { if (needId(req, res)) orNotFound(res, await queries.getCompanyBundle(req.params.id)); }));
   app.get("/api/admin/companies/:id/users", route(async (req, res) => { if (needId(req, res)) orNotFound(res, await queries.listCompanyUsers(req.params.id)); }));
 
+  // Conexiones de WhatsApp (Kapso) de todas las companies: por defecto las pendientes de conexión, de companies activas.
+  app.get("/api/admin/kapso-apps", route(async (req, res) => res.json(await queries.listKapsoApps({
+    status: ["connected", "all"].includes(req.query.status) ? req.query.status : "pending", search: text(req.query.search),
+    activeOnly: req.query.activeOnly === undefined ? true : flag(req.query.activeOnly), page: int(req.query.page, 1, 1, 100000), pageSize: int(req.query.pageSize, 10, 1, 50),
+  }))));
+
   app.get("/api/admin/pipelines/:id/stages", route(async (req, res) => { if (needId(req, res)) res.json(await queries.getPipelineStages(req.params.id)); }));
 
   app.get("/api/admin/support-sessions", route(async (req, res) => res.json(await queries.listSupportSessions({

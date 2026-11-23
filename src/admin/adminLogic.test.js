@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  PAID_PLANS, planOf, planLabel, isPaidPlan, validatePlanAssignment, newIdempotencyKey, formatPrice, explainWebhookError, WEBHOOK_ERRORS, validateSupportReason, buildSupportRequest, explainSupportError, SUPPORT_ERRORS, SUPPORT_ACTIONS, AUDIT_ACTIONS, expiryText, REASON_MIN, REASON_MAX, matchesSearch, escapeRegExp, sortUsersRecent, paginate, whatsappProvider, companyIdOf, isMemberOf, isCollaboratorOf, kapsoStatusInfo, kapsoAppsOfUser, kapsoSummary, kapsoQualityInfo, messagingTierLabel, incomingModeLabel,
+  PAID_PLANS, planOf, planLabel, isPaidPlan, validatePlanAssignment, newIdempotencyKey, formatPrice, explainWebhookError, WEBHOOK_ERRORS, validateSupportReason, buildSupportRequest, explainSupportError, SUPPORT_ERRORS, SUPPORT_ACTIONS, AUDIT_ACTIONS, expiryText, REASON_MIN, REASON_MAX, matchesSearch, escapeRegExp, sortUsersRecent, paginate, whatsappProvider, companyIdOf, isMemberOf, isCollaboratorOf, kapsoStatusInfo, kapsoAppsOfUser, kapsoSummary, kapsoQualityInfo, messagingTierLabel, incomingModeLabel, listKapsoRows,
   validateCompanyEdit, validateContactEdit, diffFields, waLink, couponSummary, buildAuditEntry, userFullName, sortByPosition, isOwner, matchesFilters, isPaused, matchesCompanySearch, sortCompaniesByName,
 } from "./adminLogic.js";
 
@@ -197,6 +197,47 @@ describe("datos del usuario", () => {
     expect(incomingModeLabel("workflow_only")).toBe("Solo workflows");
     expect(incomingModeLabel("standard")).toBe("Estándar");
     expect(incomingModeLabel(undefined)).toBe("—");
+  });
+  describe("listKapsoRows (vista de conexiones)", () => {
+    const NOW = new Date("2026-11-23T12:00:00Z").getTime();
+    const users = [{ _id: "u1", email: "ana@x.test", name: "Ana", surname: "Paz", phoneNumber: "+54911" }, { _id: "u2", email: "luis@x.test", name: "Luis", surname: "Gómez", phoneNumber: "+54922" }];
+    const companies = [{ _id: "c1", name: "Inmo Paz", status: "active" }, { _id: "c2", name: "Casa Sur", status: "paused" }];
+    const app = (o) => ({ _id: "k" + Math.random(), alias: "L", status: "pending_setup", companyId: "c1", userId: "u1", createdAt: "2026-11-13T12:00:00Z", isDefault: false, ...o });
+    const apps = [app({ _id: "k1", createdAt: "2026-11-20T12:00:00Z" }), app({ _id: "k2", createdAt: "2026-10-01T12:00:00Z" }), app({ _id: "k3", status: "success", displayPhoneNumber: "+5491100" }), app({ _id: "k4", companyId: "c2", userId: "u2" }), app({ _id: "k5", companyId: "c9", userId: "u9" })];
+    const run = (o) => listKapsoRows({ apps, users, companies }, { now: NOW, ...o });
+    it("por defecto: pendientes de companies activas, las más antiguas primero", () => {
+      const r = run({});
+      expect(r.items.map((x) => x._id)).toEqual(["k2", "k1"]);
+      expect(r.counts).toEqual({ pending: 2, connected: 1, all: 3 });
+    });
+    it("agrega company, usuario y los días que lleva creada", () => {
+      expect(run({}).items[0]).toMatchObject({ companyName: "Inmo Paz", companyStatus: "active", userName: "Ana Paz", userEmail: "ana@x.test", userPhone: "+54911", daysSinceCreated: 53 });
+    });
+    it("con 'solo activas' apagado entran las companies pausadas (y las que no se encuentran se muestran sin datos)", () => {
+      const r = run({ activeOnly: false });
+      expect(r.counts.pending).toBe(4);
+      expect(r.items.find((x) => x._id === "k5")).toMatchObject({ companyName: "—", userName: "—", companyStatus: null });
+      expect(r.items.find((x) => x._id === "k4").companyStatus).toBe("paused");
+    });
+    it("conectadas y todas; la búsqueda ignora mayúsculas y tildes y mira company, usuario y números", () => {
+      expect(run({ status: "connected" }).items.map((x) => x._id)).toEqual(["k3"]);
+      expect(run({ status: "all" }).total).toBe(3);
+      expect(run({ search: "ANA" }).total).toBe(2);
+      expect(run({ search: "inmo paz", status: "all", activeOnly: false }).total).toBe(3);
+      expect(run({ search: "gomez", activeOnly: false }).items.map((x) => x._id)).toEqual(["k4"]);
+      expect(run({ search: "5491100", status: "all" }).items.map((x) => x._id)).toEqual(["k3"]);
+      expect(run({ search: "zzz" }).total).toBe(0);
+    });
+    it("pagina y los totales de las pestañas siguen la búsqueda, no la página", () => {
+      const r = run({ status: "all", pageSize: 2, page: 2 });
+      expect(r).toMatchObject({ page: 2, pages: 2, total: 3 });
+      expect(r.items).toHaveLength(1);
+      expect(r.counts.all).toBe(3);
+    });
+    it("no se rompe con datos incompletos", () => {
+      expect(listKapsoRows({}, {})).toMatchObject({ items: [], total: 0, counts: { pending: 0, connected: 0, all: 0 } });
+      expect(listKapsoRows({ apps: [{ _id: "x", status: "pending_setup" }] }, { activeOnly: false }).items[0].daysSinceCreated).toBeNull();
+    });
   });
   it("las conexiones de un usuario: por su id o por la que tiene marcada; resumen sin campos de más", () => {
     const apps = [{ _id: "k1", userId: "u1", alias: "A", status: "success", connectionType: "x", displayPhoneNumber: "+1", isDefault: true, businessAccountId: "waba" }, { _id: "k2", userId: "u2" }, { _id: "k3", userId: "u3" }];

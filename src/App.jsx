@@ -179,7 +179,7 @@ const NAV_ICONS = {
   devdash:"📈", devtasks:"🛠️",
   crm:"💼",
   metrics:"💹", metrics_mrr:"↗", metrics_churn:"↘", metrics_retention:"⟳", metrics_failed:"⚠️", metrics_customers:"👤", metrics_projection:"⇢", metrics_plans:"🏷️",
-  adm_users:"🛡️", adm_companies:"🏢", adm_support:"🎧",
+  adm_users:"🛡️", adm_companies:"🏢", adm_whatsapp:"💬", adm_support:"🎧",
 };
 const NAV_LABELS = {
   inicio:"Inicio", notes:"Notas", mytime:"Mi tiempo", timeadmin:"Control de jornada",
@@ -190,7 +190,7 @@ const NAV_LABELS = {
   devdash:"Resumen de devs", devtasks:"Tareas de devs",
   crm:"CRM comercial",
   metrics:"Overview", metrics_mrr:"MRR & ARR", metrics_churn:"Churn", metrics_retention:"Retención", metrics_failed:"Pagos fallidos", metrics_customers:"Clientes", metrics_projection:"Proyección", metrics_plans:"Planes",
-  adm_users:"Usuarios y companies", adm_companies:"Companies", adm_support:"Soporte",
+  adm_users:"Usuarios y companies", adm_companies:"Companies", adm_whatsapp:"Conexiones de WhatsApp", adm_support:"Soporte",
 };
 const ADMIN_ONLY_VIEWS = ["add","usuarios","timeadmin"];
 // La pantalla actual vive en la dirección (#/tickets): al recargar volvés a donde estabas y se puede compartir un link a una sección.
@@ -261,7 +261,7 @@ const NAV_SECTIONS = [
   },
   {
     label: "Admin Spicy",
-    views: ["adm_users","adm_companies","adm_support"],
+    views: ["adm_users","adm_companies","adm_whatsapp","adm_support"],
     adminOnly: false,
   },
   {

@@ -11,6 +11,7 @@ const queries = {
   listCompanyUsers: vi.fn(async () => []),
   getPipelineStages: vi.fn(async () => []),
   listSupportSessions: vi.fn(async (a) => ({ items: [], echo: a })),
+  listKapsoApps: vi.fn(async (a) => ({ items: [], echo: a })),
 };
 const ADMIN = { id: "u1", email: "nico@spicytool.test", level: "admin", canAct: true, support: true };
 const READER = { id: "u2", email: "soporte@spicytool.test", level: "read", canAct: false, support: false };
@@ -131,6 +132,12 @@ describe("API del backoffice (solo lectura)", () => {
     const r = await call(`/api/admin/users/${ID}/payment-method-url`, { method: "POST", body: {} });
     expect(r.status).toBe(200);
     expect(billing.paymentMethodUrl).toHaveBeenCalledWith(ADMIN, "admin", ID);
+  });
+  it("conexiones de WhatsApp: por defecto pendientes y de companies activas; acota página y tamaño; ignora estados raros", async () => {
+    expect((await (await call("/api/admin/kapso-apps")).json()).echo).toEqual({ status: "pending", search: "", activeOnly: true, page: 1, pageSize: 10 });
+    expect((await (await call("/api/admin/kapso-apps?status=connected&search=paz&activeOnly=0&page=3&pageSize=999")).json()).echo).toEqual({ status: "connected", search: "paz", activeOnly: false, page: 3, pageSize: 50 });
+    expect((await (await call("/api/admin/kapso-apps?status=cualquier-cosa")).json()).echo.status).toBe("pending");
+    expect((await call("/api/admin/kapso-apps", { token: null })).status).toBe(401);
   });
   it("entrar como usuario: POST con admin; pasa admin, token, id y el cuerpo, y la respuesta no se cachea", async () => {
     const body = { reason: "ticket 4821: no ve sus contactos", spicyEmail: "a@b.co", spicyPassword: "x" };
