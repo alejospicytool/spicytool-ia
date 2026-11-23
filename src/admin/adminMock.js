@@ -154,15 +154,15 @@ COMPANIES.forEach((co, ci) => {
 export const kapsoapps = [];
 users.filter((u) => u.activeWhatsAppProvider === "kapso" && u.companies[0]).forEach((u, i) => {
   kapsoapps.push({
-    _id: oid(20000 + i), companyId: u.companies[0], userId: u._id, alias: `Línea principal ${i + 1}`, status: "success", connectionType: i % 2 ? "coexistence" : "dedicated", isCoexistence: i % 2 === 1, isDefault: true,
-    displayPhoneNumber: `+54 9 11 6000-${String(1100 + i * 37).slice(-4)}`, verifiedName: `Empresa de ejemplo ${i + 1}`, qualityRating: i === 1 ? "YELLOW" : "GREEN", messagingLimitTier: i ? "TIER_1K" : "TIER_250",
-    throughputLevel: "STANDARD", incomingMessageMode: "webhook", businessAccountId: `waba_mock_${i + 1}`, phoneNumberId: `pn_mock_${i + 1}`,
+    _id: oid(20000 + i), companyId: u.companies[0], userId: u._id, alias: `Línea principal ${i + 1}`, status: "success", connectionType: "coexistence", isCoexistence: true, isDefault: true,
+    displayPhoneNumber: `+54 9 11 6000-${String(1100 + i * 37).slice(-4)}`, verifiedName: `Empresa de ejemplo ${i + 1}`, qualityRating: i === 1 ? "UNKNOWN" : "GREEN", messagingLimitTier: i ? null : "TIER_250",
+    throughputLevel: "STANDARD", incomingMessageMode: i ? "standard" : "workflow_only", businessAccountId: `waba_mock_${i + 1}`, phoneNumberId: `pn_mock_${i + 1}`,
     connectedAt: iso("2026-09-1" + (i + 1) + "T15:00:00Z"), createdAt: iso("2026-09-1" + (i + 1) + "T14:00:00Z"), updatedAt: iso("2026-11-10T10:00:00Z"), lastTemplatesSyncAt: iso("2026-11-10T09:00:00Z"), setupLinkExpiresAt: null,
   });
 });
 // Una company con una segunda conexión que todavía no terminó de conectarse.
 const firstKapso = kapsoapps[0];
-if (firstKapso) kapsoapps.push({ _id: oid(20100), companyId: firstKapso.companyId, userId: firstKapso.userId, alias: "Línea de ventas", status: "pending_setup", connectionType: "dedicated", isCoexistence: false, isDefault: false, displayPhoneNumber: null, verifiedName: null, qualityRating: null, messagingLimitTier: null, throughputLevel: null, incomingMessageMode: "webhook", businessAccountId: null, phoneNumberId: null, connectedAt: null, createdAt: iso("2026-11-12T12:00:00Z"), updatedAt: iso("2026-11-12T12:00:00Z"), lastTemplatesSyncAt: null, setupLinkExpiresAt: iso("2026-11-19T12:00:00Z") });
+if (firstKapso) kapsoapps.push({ _id: oid(20100), companyId: firstKapso.companyId, userId: firstKapso.userId, alias: "Línea de ventas", status: "pending_setup", connectionType: "coexistence", isCoexistence: true, isDefault: false, displayPhoneNumber: null, verifiedName: null, qualityRating: null, messagingLimitTier: null, throughputLevel: null, incomingMessageMode: "workflow_only", businessAccountId: null, phoneNumberId: null, connectedAt: null, createdAt: iso("2026-11-12T12:00:00Z"), updatedAt: iso("2026-11-12T12:00:00Z"), lastTemplatesSyncAt: null, setupLinkExpiresAt: iso("2026-11-19T12:00:00Z") });
 
 // Cupones de EJEMPLO (ids inventados; los reales están en server/coupons.js).
 export const coupons = [

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  PAID_PLANS, planOf, planLabel, isPaidPlan, validatePlanAssignment, newIdempotencyKey, formatPrice, explainWebhookError, WEBHOOK_ERRORS, validateSupportReason, buildSupportRequest, explainSupportError, SUPPORT_ERRORS, SUPPORT_ACTIONS, AUDIT_ACTIONS, expiryText, REASON_MIN, REASON_MAX, matchesSearch, escapeRegExp, sortUsersRecent, paginate, whatsappProvider, companyIdOf, isMemberOf, isCollaboratorOf, kapsoStatusInfo, kapsoAppsOfUser, kapsoSummary,
+  PAID_PLANS, planOf, planLabel, isPaidPlan, validatePlanAssignment, newIdempotencyKey, formatPrice, explainWebhookError, WEBHOOK_ERRORS, validateSupportReason, buildSupportRequest, explainSupportError, SUPPORT_ERRORS, SUPPORT_ACTIONS, AUDIT_ACTIONS, expiryText, REASON_MIN, REASON_MAX, matchesSearch, escapeRegExp, sortUsersRecent, paginate, whatsappProvider, companyIdOf, isMemberOf, isCollaboratorOf, kapsoStatusInfo, kapsoAppsOfUser, kapsoSummary, kapsoQualityInfo, messagingTierLabel, incomingModeLabel,
   validateCompanyEdit, validateContactEdit, diffFields, waLink, couponSummary, buildAuditEntry, userFullName, sortByPosition, isOwner, matchesFilters, isPaused, matchesCompanySearch, sortCompaniesByName,
 } from "./adminLogic.js";
 
@@ -183,6 +183,20 @@ describe("datos del usuario", () => {
     expect(kapsoStatusInfo("pending_setup")).toEqual({ label: "Pendiente de conexión", tone: "amber" });
     expect(kapsoStatusInfo("rara")).toEqual({ label: "rara", tone: "muted" });
     expect(kapsoStatusInfo("")).toEqual({ label: "—", tone: "muted" });
+  });
+  it("calidad, límite y modo de mensajes entrantes con los valores reales de la base", () => {
+    expect(kapsoQualityInfo("GREEN")).toEqual({ label: "Verde", tone: "green" });
+    expect(kapsoQualityInfo("UNKNOWN")).toEqual({ label: "Sin calificar", tone: "muted" });
+    expect(kapsoQualityInfo("red")).toEqual({ label: "Roja", tone: "red" });
+    expect(kapsoQualityInfo("OTRA")).toEqual({ label: "OTRA", tone: "muted" });
+    expect(kapsoQualityInfo(null)).toBeNull();
+    expect(messagingTierLabel("TIER_250")).toBe("250 por día");
+    expect(messagingTierLabel("TIER_1K")).toBe("1.000 por día");
+    expect(messagingTierLabel("TIER_RARO")).toBe("TIER_RARO");
+    expect(messagingTierLabel(null)).toBe("—");
+    expect(incomingModeLabel("workflow_only")).toBe("Solo workflows");
+    expect(incomingModeLabel("standard")).toBe("Estándar");
+    expect(incomingModeLabel(undefined)).toBe("—");
   });
   it("las conexiones de un usuario: por su id o por la que tiene marcada; resumen sin campos de más", () => {
     const apps = [{ _id: "k1", userId: "u1", alias: "A", status: "success", connectionType: "x", displayPhoneNumber: "+1", isDefault: true, businessAccountId: "waba" }, { _id: "k2", userId: "u2" }, { _id: "k3", userId: "u3" }];

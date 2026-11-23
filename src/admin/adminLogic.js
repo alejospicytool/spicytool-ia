@@ -123,8 +123,16 @@ export const isCollaboratorOf = (u, companyId) => !!companyId && collaboratesInO
 // status en Mongo: "success" (conectada) y "pending_setup" (se creó pero falta conectar el número). Cualquier otro valor se muestra tal cual.
 export const KAPSO_STATUS = { success: { label: "Conectada", tone: "green" }, pending_setup: { label: "Pendiente de conexión", tone: "amber" } };
 export const kapsoStatusInfo = (status) => KAPSO_STATUS[status] || { label: status || "—", tone: "muted" };
-// Calidad del número según Meta: GREEN / YELLOW / RED (vacío si todavía no se conectó).
-export const QUALITY_TONE = { GREEN: "green", YELLOW: "amber", RED: "red" };
+// Valores reales en la base (2026-11): connectionType solo "coexistence" (el número se usa a la vez en la app de WhatsApp Business y en Spicytool);
+// qualityRating "UNKNOWN" (Meta todavía no lo calificó), "GREEN" o vacío (sin conectar); messagingLimitTier "TIER_250", "TIER_1K" o vacío;
+// incomingMessageMode "workflow_only" o "standard".
+// Calidad del número según Meta: GREEN / YELLOW / RED; UNKNOWN = todavía sin calificar; vacío = no se conectó.
+export const QUALITY = { GREEN: { label: "Verde", tone: "green" }, YELLOW: { label: "Amarilla", tone: "amber" }, RED: { label: "Roja", tone: "red" }, UNKNOWN: { label: "Sin calificar", tone: "muted" } };
+export const kapsoQualityInfo = (q) => (q ? QUALITY[String(q).toUpperCase()] || { label: String(q), tone: "muted" } : null);
+// Tope de mensajes iniciados por la empresa cada 24 h según el nivel de Meta.
+const TIERS = { TIER_250: "250 por día", TIER_1K: "1.000 por día", TIER_10K: "10.000 por día", TIER_100K: "100.000 por día", TIER_UNLIMITED: "Sin límite" };
+export const messagingTierLabel = (t) => (t ? TIERS[t] || String(t) : "—");
+export const incomingModeLabel = (m) => ({ workflow_only: "Solo workflows", standard: "Estándar" }[m] || m || "—");
 // Las conexiones de un usuario: las que tienen su id como usuario o la que él tiene marcada (kapso.kapsoAppId).
 export const kapsoAppsOfUser = (apps, user) => {
   const own = user && user.kapso && user.kapso.kapsoAppId;

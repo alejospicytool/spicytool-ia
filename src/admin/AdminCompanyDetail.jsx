@@ -4,7 +4,7 @@
 import { useState } from "react";
 import { Kpi, fmtDate, fmtDateTime } from "../revenue/revenueUi.jsx";
 import { getUser, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, getPaymentMethodUrl, createSupportLink, getMyPermissions, adminMode } from "./adminApi.js";
-import { companyIdOf, isCollaboratorOf, userFullName, whatsappProvider, planOf, planLabel, sortByPosition, kapsoAppsOfUser, kapsoStatusInfo, QUALITY_TONE } from "./adminLogic.js";
+import { companyIdOf, isCollaboratorOf, userFullName, whatsappProvider, planOf, planLabel, sortByPosition, kapsoAppsOfUser, kapsoStatusInfo, kapsoQualityInfo, messagingTierLabel, incomingModeLabel } from "./adminLogic.js";
 import { Tabs, DataTable, StatusBadge, ConfirmDialog, AuditList, IdCell, ActGroup, PhoneLink } from "./adminUi.jsx";
 import { useAsync } from "./adminHooks.js";
 import { EditCompanyDialog, EditContactDialog, AssignPlanDialog, CardLinkDialog, SupportSessionDialog } from "./AdminDialogs.jsx";
@@ -26,13 +26,12 @@ function KapsoAppsCard({ apps, users, user }) {
   return (
     <Card title="Conexiones de WhatsApp (Kapso)" sub={apps.length}>
       <DataTable rows={apps} empty="Esta company no tiene conexiones de WhatsApp por Kapso." columns={[
-        { key: "alias", label: "Conexión", render: (a) => <><b>{a.alias || "Sin nombre"}</b>{a.isDefault && <span className="badge badge-blue" style={{ marginLeft: 6 }}>Principal</span>}{mine.has(a._id) && <span className="badge badge-muted" style={{ marginLeft: 6 }}>De este usuario</span>}</> },
+        { key: "alias", label: "Conexión", render: (a) => <><b>{a.alias || "Sin nombre"}</b>{a.isDefault && <span className="badge badge-blue" style={{ marginLeft: 6 }}>Principal</span>}{mine.has(a._id) && <span className="badge badge-muted" style={{ marginLeft: 6 }}>De este usuario</span>}{a.connectionType && a.connectionType !== "coexistence" && <span className="badge badge-muted" style={{ marginLeft: 6 }} title="Tipo de conexión (lo habitual es coexistencia)">{a.connectionType}</span>}</> },
         { key: "displayPhoneNumber", label: "Número", render: (a) => a.displayPhoneNumber ? <><PhoneLink phone={a.displayPhoneNumber} />{a.verifiedName && <div style={{ color: "var(--muted)", fontSize: 11 }}>{a.verifiedName}</div>}</> : <span style={{ color: "var(--muted)" }}>Sin número</span> },
         { key: "status", label: "Estado", render: (a) => <><KapsoStatus status={a.status} />{a.status !== "success" && a.setupLinkExpiresAt && <div style={{ color: "var(--muted)", fontSize: 11 }}>{new Date(a.setupLinkExpiresAt) < new Date() ? "El link de conexión venció" : "Link de conexión vigente hasta " + fmtDate(a.setupLinkExpiresAt)}</div>}</> },
-        { key: "connectionType", label: "Tipo de conexión", render: (a) => <>{a.connectionType || "—"}{a.isCoexistence && <span className="badge badge-muted" style={{ marginLeft: 6 }} title="El número se usa a la vez en la app de WhatsApp Business y en Spicytool">Coexistencia</span>}</> },
-        { key: "qualityRating", label: "Calidad", render: (a) => a.qualityRating ? <span className={"badge " + (TONE[QUALITY_TONE[String(a.qualityRating).toUpperCase()]] || "badge-muted")}>{a.qualityRating}</span> : "—" },
-        { key: "messagingLimitTier", label: "Límite de mensajes", muted: true, render: (a) => a.messagingLimitTier || "—" },
-        { key: "incomingMessageMode", label: "Mensajes entrantes", muted: true, render: (a) => a.incomingMessageMode || "—" },
+        { key: "qualityRating", label: "Calidad del número", render: (a) => { const q = kapsoQualityInfo(a.qualityRating); return q ? <span className={"badge " + TONE[q.tone]}>{q.label}</span> : "—"; } },
+        { key: "messagingLimitTier", label: "Límite de envío (24 h)", muted: true, render: (a) => messagingTierLabel(a.messagingLimitTier) },
+        { key: "incomingMessageMode", label: "Mensajes entrantes", muted: true, render: (a) => incomingModeLabel(a.incomingMessageMode) },
         { key: "userId", label: "Usuario", render: (a) => who(a.userId) },
         { key: "connectedAt", label: "Conectada", muted: true, render: (a) => (a.connectedAt ? fmtDate(a.connectedAt) : "—") },
         { key: "lastTemplatesSyncAt", label: "Templates sincronizados", muted: true, render: (a) => (a.lastTemplatesSyncAt ? fmtDate(a.lastTemplatesSyncAt) : "—") },
