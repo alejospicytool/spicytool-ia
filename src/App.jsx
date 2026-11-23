@@ -13,6 +13,7 @@ import RevenueApp from "./revenue/RevenueApp.jsx";
 import AdminApp from "./admin/AdminApp.jsx";
 import SeguimientoApp, { SeguimientoBanner } from "./seguimiento/SeguimientoApp.jsx";
 import IdeasApp from "./ideas/IdeasApp.jsx";
+import Cliente360 from "./cliente360/Cliente360.jsx";
 import { resumen as seguimientoResumen } from "./seguimiento/seguimientoLogic.js";
 import { configureAdminApi, probeAdminApi, listCompanies } from "./admin/adminApi.js";
 import ErrorBoundary from "./ErrorBoundary.jsx";
@@ -5338,7 +5339,7 @@ function SpicyCompanyLink({ record, canSearch, canEdit, onSave }) {
   );
 }
 
-function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, comments, currentUserId, currentUserEmail }) {
+function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, comments, currentUserId, currentUserEmail, onOpenCliente360 }) {
   const { canWriteOps: canCreate, canDeleteOps: canRemove } = useContext(RoleContext);
   const todayISO = new Date().toISOString().split("T")[0];
   const emptyForm = () => ({ client_name:"", fecha_registro:todayISO, responsable:"", fuente_de_leads:[], bloqueado:false });
@@ -5655,6 +5656,7 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
 
               {detail.deal_id && <div style={{ fontSize:11,color:"#533AB7",background:"#F1EEFB",border:"1px solid #DDD5F6",borderRadius:6,padding:"5px 9px" }}>Creado automáticamente desde el CRM al ganar el deal. El estado de pago se actualiza solo cuando cambia allá.</div>}
               <SpicyCompanyLink record={detail} canSearch={!!canSearchSpicy} canEdit={canCreate} onSave={(patch)=>updateRecord(detail, patch)}/>
+              {detail.spicy_company_id && onOpenCliente360 && <div><button className="spicy-btn-secondary" onClick={()=>{ const id = detail.spicy_company_id; setDetail(null); onOpenCliente360(id); }}>Ver la ficha 360 del cliente →</button></div>}
 
               <div style={{ borderTop:"1px solid #EEE",paddingTop:12 }}>
                 <div style={{ fontSize:13,fontWeight:700,color:"#111" }}>Seguimiento y notas</div>
@@ -5737,6 +5739,7 @@ export default function SpicyFinanzas() {
   const [onboarding,        setOnboarding]        = useState([]);
   const [onboardingHistory, setOnboardingHistory] = useState([]);
   const [followup,         setFollowup]         = useState([]);
+  const [cliente360Id,     setCliente360Id]     = useState(null);   // ficha 360: id de la cuenta de Spicytool abierta
   const [ideas,            setIdeas]            = useState([]);
   const [ideaVotes,        setIdeaVotes]        = useState([]);
   const [ideaImages,       setIdeaImages]       = useState([]);
@@ -6297,8 +6300,8 @@ export default function SpicyFinanzas() {
         canTriage={canWriteOps(role)} canDelete={canDeleteOps(role)} canSeeDevs={canSeeSection("Devs")} onRefresh={loadAll}
         onOpenDevTask={(id)=>{ setPendingLink({ type:"dev_task", id }); setView("devtasks"); }}
         renderComments={(ideaId)=><CommentsThread entityType="idea" entityId={ideaId} comments={comments} currentUserId={session.user.id} currentUserEmail={session.user.email} onChange={loadAll} multiline placeholder="Sumá un comentario o más contexto…" emptyText="Todavía no hay comentarios." sendLabel="Comentar"/>}/>}
-      {view==="seguimiento"&&<SeguimientoApp sb={sb} rows={followup} allUsers={allUsers} me={{ id:session.user.id, email:session.user.email }} isAdmin={isAdmin} canWrite={canWriteOps(role)} canSearchSpicy={canSeeSection("Admin Spicy")} onRefresh={loadAll}/>}
-      {view==="onboarding"&&<OnboardingView onboarding={onboarding} history={onboardingHistory} onRefresh={loadAll} canSearchSpicy={canSeeSection("Admin Spicy")} comments={comments} currentUserId={session.user.id} currentUserEmail={session.user.email}/>}
+      {view==="seguimiento"&&<SeguimientoApp sb={sb} rows={followup} allUsers={allUsers} me={{ id:session.user.id, email:session.user.email }} isAdmin={isAdmin} canWrite={canWriteOps(role)} canSearchSpicy={canSeeSection("Admin Spicy")} onRefresh={loadAll} onOpenCliente360={setCliente360Id}/>}
+      {view==="onboarding"&&<OnboardingView onboarding={onboarding} history={onboardingHistory} onRefresh={loadAll} canSearchSpicy={canSeeSection("Admin Spicy")} comments={comments} currentUserId={session.user.id} currentUserEmail={session.user.email} onOpenCliente360={setCliente360Id}/>}
       {view==="devdash"&&<DevsMetricsView tickets={tickets} ticketHistory={ticketStatusHistory} devTasks={devTasks} devTaskHistory={devTaskStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
       {view==="devtasks"&&<DevTasksView devTasks={devTasks} statusHistory={devTaskStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} tickets={tickets} onRefresh={loadAll} openId={pendingLink?.type==="dev_task"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)} setView={setView}/>}
       {view==="services"&&<ServicesView/>}
@@ -6362,6 +6365,9 @@ export default function SpicyFinanzas() {
       )}
 
       </div>{/* end spicy-main */}
+    {cliente360Id&&<Cliente360 sb={sb} companyId={cliente360Id} followup={followup} onboarding={onboarding} tickets={tickets} allUsers={allUsers} me={{ id:session.user.id, email:session.user.email }}
+      canWrite={canWriteOps(role)} canSearchSpicy={canSeeSection("Admin Spicy")} canSeeMetrics={canSeeSection("Métricas")} onClose={()=>setCliente360Id(null)} onRefresh={loadAll}
+      onGoSeguimiento={()=>{ setCliente360Id(null); setView("seguimiento"); }} onGoOnboarding={()=>{ setCliente360Id(null); setView("onboarding"); }}/>}
     <ConfirmHost/>
     </div>
     </RoleContext.Provider>

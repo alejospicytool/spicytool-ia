@@ -59,7 +59,7 @@ export function SeguimientoBanner({ rows, userId, onOpen }) {
 }
 
 // ── Registrar un toque ──────────────────────────────────────────────────────────────────────────────────────────────
-function ToqueDialog({ sb, row, today, me, onClose, onSaved }) {
+export function ToqueDialog({ sb, row, today, me, onClose, onSaved }) {
   const [canal, setCanal] = useState("whatsapp");
   const [resultado, setResultado] = useState("");
   const [nota, setNota] = useState("");
@@ -399,7 +399,7 @@ function AgregarDialog({ sb, existingIds, me, responsables, defaultResponsable, 
 }
 
 // ── Pantalla principal ──────────────────────────────────────────────────────────────────────────────────────────────────
-export default function SeguimientoApp({ sb, rows, allUsers, me, isAdmin, canWrite, canSearchSpicy, onRefresh }) {
+export default function SeguimientoApp({ sb, rows, allUsers, me, isAdmin, canWrite, canSearchSpicy, onRefresh, onOpenCliente360 }) {
   const today = baDateISO();
   const responsables = useMemo(() => allUsers.filter((u) => ["admin", "dev", "editor"].includes(u.role)), [allUsers]);
   const nameOfUser = (id) => userName(allUsers.find((u) => u.user_id === id)) || "Sin asignar";
@@ -536,7 +536,7 @@ export default function SeguimientoApp({ sb, rows, allUsers, me, isAdmin, canWri
                   const e = estadoToque(r, today), p = proximoToque(r), ult = r.ultimo_toque ? diasDesde(r.ultimo_toque, today) : null;
                   const wa = whatsappLink(r.contact_phone);
                   return (
-                    <tr key={r.company_id} onClick={() => setFicha(r.company_id)} style={{ cursor: "pointer" }}>
+                    <tr key={r.company_id} onClick={() => (onOpenCliente360 ? onOpenCliente360(r.company_id) : setFicha(r.company_id))} style={{ cursor: "pointer" }} title="Abrir la ficha 360 del cliente">
                       <td style={td}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Dot semaforo={r.semaforo} /><span style={{ fontSize: 13, fontWeight: 600, color: "#111" }}>{r.company_name}</span></div>
                         <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
@@ -562,6 +562,7 @@ export default function SeguimientoApp({ sb, rows, allUsers, me, isAdmin, canWri
                       </td>
                       <td style={{ ...td, whiteSpace: "nowrap" }} onClick={(ev) => ev.stopPropagation()}>
                         {canWrite && !r.baja_en && <button className="spicy-btn-secondary" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => setToque(r.company_id)}>Registrar contacto</button>}
+                        {onOpenCliente360 && <button className="spicy-btn-secondary" style={{ padding: "4px 10px", fontSize: 12, marginLeft: 6 }} title="Editar frecuencia, semáforo, responsable, historial y baja" onClick={() => setFicha(r.company_id)}>Editar</button>}
                       </td>
                     </tr>
                   );
