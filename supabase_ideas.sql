@@ -1,6 +1,6 @@
 -- Ideas y feedback: sugerencias, feedback de clientes y cosas nuevas para sumar. Las puede cargar, ver, comentar y votar CUALQUIER usuario con sesión
 -- (no depende de la sección Devs); ordenarlas (estado, descartar, "Enviar a Devs") solo admin, dev y editor (can_write_ops).
--- ESTADO: PENDIENTE DE APLICAR.
+-- ESTADO: YA APLICADO en el proyecto real (khuavhbraikzreyhptog) el 2026-11-23 (probado antes en una transacción que se deshizo, con usuarios reales).
 --
 -- ideas:       una fila por idea. status: nueva | evaluacion | enviada | descartada. "Hecha" no se guarda: se calcula cuando la tarea de dev vinculada llega a Done.
 --              dev_task_id: la tarea que se creó en Devs al "Enviar a Devs" (si esa tarea se borra queda en null).
