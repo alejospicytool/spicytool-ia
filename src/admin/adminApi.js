@@ -72,6 +72,24 @@ export async function listUsers({ search = "", page = 1, pageSize = 8, owners = 
   };
 }
 
+// POST /admin/users/:id/kapso-app  { appId }: cambia QUÉ conexión de WhatsApp (Kapso) usa el usuario (solo users.kapso.kapsoAppId).
+// Mismas reglas que el servidor: la conexión tiene que estar conectada y ser de una company del usuario; queda auditado con el valor anterior.
+export async function setUserKapsoApp(userId, appId, actor) {
+  if (real()) return http(`/users/${encodeURIComponent(userId)}/kapso-app`, {}, { method: "POST", body: { appId } });
+  needActor(actor);
+  const u = byId("users", userId) || fail("No se encontró el usuario.");
+  const app = byId("kapsoapps", appId) || fail("No se encontró esa conexión de WhatsApp.");
+  if (String(u.activeWhatsAppProvider || "").toLowerCase() === "gupshup") fail("Este usuario usa Gupshup, no Kapso: cambiar la conexión de Kapso no tendría efecto.");
+  const current = u.kapso && u.kapso.kapsoAppId;
+  if (!current) fail("Este usuario todavía no tiene una conexión de Kapso asignada. Eso lo tiene que configurar un desarrollador.");
+  if (!isMemberOf(u, app.companyId)) fail("Esa conexión es de otra company: solo se puede elegir entre las de las companies del usuario.");
+  if (app.status !== "success") fail("Esa conexión todavía no está conectada (le falta terminar de conectar el número): no se puede asignar.");
+  if (current === appId) return { _id: userId, kapsoAppId: current, changed: false };
+  u.kapso = { ...u.kapso, kapsoAppId: appId };
+  log(actor, "kapso_app_change", { targetType: "user", targetId: userId, targetLabel: userFullName(u), companyId: companyIdOf(u), detail: { from: current, to: appId } });
+  return { _id: userId, kapsoAppId: appId, previousKapsoAppId: current, changed: true };
+}
+
 // GET /admin/kapso-apps?status=pending|connected|all&search=&activeOnly=&page=&pageSize=
 export async function listKapsoApps({ status = "pending", search = "", activeOnly = true, page = 1, pageSize = 10 } = {}) {
   if (real()) return http("/kapso-apps", { status, search, activeOnly: activeOnly ? "1" : "0", page, pageSize });

@@ -3,7 +3,7 @@
 // (editar, pausar/activar, cambiar plan, link de tarjeta), todas con confirmación o formulario y con auditoría.
 import { useState } from "react";
 import { Kpi, fmtDate, fmtDateTime } from "../revenue/revenueUi.jsx";
-import { getUser, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, getPaymentMethodUrl, createSupportLink, getMyPermissions, adminMode } from "./adminApi.js";
+import { getUser, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, getPaymentMethodUrl, createSupportLink, getMyPermissions, adminMode, setUserKapsoApp } from "./adminApi.js";
 import { companyIdOf, isCollaboratorOf, userFullName, whatsappProvider, planOf, planLabel, sortByPosition, kapsoAppsOfUser, kapsoStatusInfo, kapsoQualityInfo, messagingTierLabel, incomingModeLabel } from "./adminLogic.js";
 import { Tabs, DataTable, StatusBadge, ConfirmDialog, AuditList, IdCell, ActGroup, PhoneLink } from "./adminUi.jsx";
 import { useAsync } from "./adminHooks.js";
@@ -20,13 +20,28 @@ const TONE = { green: "badge-green", amber: "badge-yellow", red: "badge-red", mu
 const KapsoStatus = ({ status }) => { const i = kapsoStatusInfo(status); return <span className={"badge " + TONE[i.tone]}>{i.label}</span>; };
 
 // Conexiones de WhatsApp por Kapso de la company (colección kapsoapps). Las del usuario que se está mirando quedan marcadas.
-function KapsoAppsCard({ apps, users, user }) {
+function KapsoAppsCard({ apps, users, user, canChange, onChange }) {
   const mine = new Set(kapsoAppsOfUser(apps, user).map((a) => a._id));
+  const inUse = user.kapso && user.kapso.kapsoAppId, options = apps.filter((a) => a.status === "success");
+  const [pick, setPick] = useState(inUse || "");
+  const gupshup = String(user.activeWhatsAppProvider || "").toLowerCase() === "gupshup";
   const who = (id) => { const u = users.find((x) => x._id === id); return u ? userFullName(u) : id ? "Otro usuario" : "—"; };
   return (
     <Card title="Conexiones de WhatsApp (Kapso)" sub={apps.length}>
+      {inUse && !gupshup && (
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", margin: "0 0 14px", padding: "10px 12px", background: "var(--surface2)", borderRadius: 8 }}>
+          <span style={{ fontSize: 13 }}>Conexión que usa <b>{userFullName(user)}</b>:</span>
+          <select className="inp" aria-label="Conexión de WhatsApp que usa este usuario" style={{ maxWidth: 320 }} value={pick} disabled={!canChange || options.length < 2} onChange={(e) => setPick(e.target.value)}>
+            {!options.some((a) => a._id === inUse) && <option value={inUse}>Una conexión de otra company o sin datos</option>}
+            {options.map((a) => <option key={a._id} value={a._id}>{[a.alias || "Sin nombre", a.displayPhoneNumber].filter(Boolean).join(" · ")}</option>)}
+          </select>
+          <button className="btn-primary" disabled={!canChange || pick === inUse || !pick} onClick={() => onChange(pick)}>Usar esta conexión</button>
+          {options.length < 2 && <span style={{ fontSize: 11, color: "var(--muted)" }}>La company tiene una sola conexión conectada: no hay otra para elegir.</span>}
+          {!canChange && options.length >= 2 && <span style={{ fontSize: 11, color: "var(--muted)" }}>Tu usuario no puede hacer cambios.</span>}
+        </div>
+      )}
       <DataTable rows={apps} empty="Esta company no tiene conexiones de WhatsApp por Kapso." columns={[
-        { key: "alias", label: "Conexión", render: (a) => <><b>{a.alias || "Sin nombre"}</b>{a.isDefault && <span className="badge badge-blue" style={{ marginLeft: 6 }}>Principal</span>}{mine.has(a._id) && <span className="badge badge-muted" style={{ marginLeft: 6 }}>De este usuario</span>}{a.connectionType && a.connectionType !== "coexistence" && <span className="badge badge-muted" style={{ marginLeft: 6 }} title="Tipo de conexión (lo habitual es coexistencia)">{a.connectionType}</span>}</> },
+        { key: "alias", label: "Conexión", render: (a) => <><b>{a.alias || "Sin nombre"}</b>{a.isDefault && <span className="badge badge-blue" style={{ marginLeft: 6 }}>Principal</span>}{a._id === inUse && <span className="badge badge-green" style={{ marginLeft: 6 }} title="Es la conexión que tiene asignada este usuario">En uso</span>}{mine.has(a._id) && a._id !== inUse && <span className="badge badge-muted" style={{ marginLeft: 6 }}>Creada por este usuario</span>}{a.connectionType && a.connectionType !== "coexistence" && <span className="badge badge-muted" style={{ marginLeft: 6 }} title="Tipo de conexión (lo habitual es coexistencia)">{a.connectionType}</span>}</> },
         { key: "displayPhoneNumber", label: "Número", render: (a) => a.displayPhoneNumber ? <><PhoneLink phone={a.displayPhoneNumber} />{a.verifiedName && <div style={{ color: "var(--muted)", fontSize: 11 }}>{a.verifiedName}</div>}</> : <span style={{ color: "var(--muted)" }}>Sin número</span> },
         { key: "status", label: "Estado", render: (a) => <><KapsoStatus status={a.status} />{a.status !== "success" && a.setupLinkExpiresAt && <div style={{ color: "var(--muted)", fontSize: 11 }}>{new Date(a.setupLinkExpiresAt) < new Date() ? "El link de conexión venció" : "Link de conexión vigente hasta " + fmtDate(a.setupLinkExpiresAt)}</div>}</> },
         { key: "qualityRating", label: "Calidad del número", render: (a) => { const q = kapsoQualityInfo(a.qualityRating); return q ? <span className={"badge " + TONE[q.tone]}>{q.label}</span> : "—"; } },
@@ -45,7 +60,7 @@ function KapsoAppsCard({ apps, users, user }) {
 const Card = ({ title, sub, children }) => <div className="card"><div className="card-title"><span>{title}{sub != null && <span className="card-sub">{sub}</span>}</span></div>{children}</div>;
 
 function Summary({ b, user }) {
-  const c = b.company, wa = whatsappProvider(user), kapsoMine = kapsoAppsOfUser(b.kapsoApps, user);
+  const c = b.company, wa = whatsappProvider(user), kapsoMine = kapsoAppsOfUser(b.kapsoApps, user), kapsoInUse = (b.kapsoApps || []).find((a) => user.kapso && a._id === user.kapso.kapsoAppId);
   const fields = [
     ["Estado", <StatusBadge key="s" status={c.status} />], ["Vertical", c.vertical], ["Tamaño del equipo", c.teamSize], ["Créditos", `${num(c.credits)} ${c.currency || ""}`],
     ["Teléfono", <PhoneLink key="ph" phone={c.phoneNumber} />], ["Email del dueño", c.userEmail], ["Alta", fmtDate(c.creationDate)], ["Account ID", c.accountId], ["Conversaciones de WhatsApp activas", num(c.activeWhatsAppConversations)],
@@ -60,7 +75,7 @@ function Summary({ b, user }) {
         <dl className="kv">
           {[["Nombre", userFullName(user)], ["Email", user.email], ["Teléfono", <PhoneLink key="ph" phone={user.phoneNumber} />], ["Plan", planLabel(planOf(user))], ["ID del usuario (Mongo)", <IdCell key="uid" id={user._id} />],
             ["Proveedor de WhatsApp", wa ? `${wa.provider}${wa.appId ? " · " + wa.appId : ""}` : "Sin configurar"],
-            ["Conexiones de WhatsApp (Kapso)", kapsoMine.length ? <div key="kp" style={{ display: "flex", flexDirection: "column", gap: 4 }}>{kapsoMine.map((a) => <span key={a._id}><KapsoStatus status={a.status} /> {a.alias || "Sin nombre"}{a.displayPhoneNumber ? " · " + a.displayPhoneNumber : ""}</span>)}</div> : "Ninguna"]].map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v || "—"}</dd></div>)}
+            ["Conexión de WhatsApp en uso", kapsoInUse ? <span key="kp"><KapsoStatus status={kapsoInUse.status} /> {kapsoInUse.alias || "Sin nombre"}{kapsoInUse.displayPhoneNumber ? " · " + kapsoInUse.displayPhoneNumber : ""}{kapsoMine.length > 1 || (b.kapsoApps || []).length > 1 ? <span style={{ color: "var(--muted)" }}> (la company tiene {(b.kapsoApps || []).length} conexiones)</span> : null}</span> : kapsoMine.length ? <span key="kp2">Sin una asignada · creó {kapsoMine.length}</span> : "Ninguna"]].map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v || "—"}</dd></div>)}
         </dl>
       </Card>
       <Card title="Suscripción">
@@ -190,6 +205,11 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
   const { user, bundle: b } = res.data;
   if (!b) return <NoCompanyView user={user} actor={actor} onBack={onBack} refresh={refresh} dialog={dialog} setDialog={setDialog} acts={acts} />;
   const co = b.company, paused = co.status === "paused";
+  const changeKapso = (appId) => {
+    const apps = b.kapsoApps || [], to = apps.find((a) => a._id === appId), from = apps.find((a) => a._id === (user.kapso && user.kapso.kapsoAppId));
+    const nm = (a) => (a ? [a.alias || "Sin nombre", a.displayPhoneNumber].filter(Boolean).join(" · ") : "otra conexión");
+    ask({ title: "Cambiar la conexión de WhatsApp", label: "Cambiar conexión", danger: true, text: <>Vas a cambiar la conexión de WhatsApp (Kapso) que tiene asignada <b>{userFullName(user)}</b>: de <b>{nm(from)}</b> a <b>{nm(to)}</b>. Es un cambio en la base real de Spicytool. Queda registrado con tu nombre y la conexión anterior, y podés volver a cambiarla cuando quieras.</>, action: () => setUserKapsoApp(user._id, appId, actor) });
+  };
   // Colaborador: pertenece a la company de otra persona (el owner). El plan y el cobro son del owner, no de este usuario.
   const collab = isCollaboratorOf(user, co._id), collabTitle = "Este usuario es colaborador: el plan y el cobro son del owner de la company, no suyos.";
   const billActs = collab ? { disabled: true, title: collabTitle } : acts;
@@ -242,7 +262,7 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
         { key: "condition", label: "Condición" }, { key: "conversionCategory", label: "Categoría", render: (c) => <span className="badge badge-blue">{c.conversionCategory}</span> },
       ID_COL]} /></Card>}
       {tab === "whatsapp" && (<>
-        <KapsoAppsCard apps={b.kapsoApps || []} users={b.users} user={user} />
+        <KapsoAppsCard key={user.kapso && user.kapso.kapsoAppId} apps={b.kapsoApps || []} users={b.users} user={user} canChange={!cant} onChange={changeKapso} />
         <Card title="Conversaciones de WhatsApp" sub={b.whatsappConversions.length}><DataTable rows={b.whatsappConversions} empty="Sin conversiones de WhatsApp." columns={[
           { key: "date", label: "Fecha", render: (c) => fmtDate(c.date) }, { key: "behavior", label: "Comportamiento" }, { key: "checked", label: "Verificada", render: (c) => yesNo(c.checked) }, { key: "source", label: "Origen", muted: true }, { key: "trackId", label: "Track ID", muted: true },
         ID_COL]} /></Card>

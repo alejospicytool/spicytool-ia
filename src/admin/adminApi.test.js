@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { resetMock, listUsers, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, listCoupons, getPaymentMethodUrl, listPrices, WebhookError, getUser, listCompanies, listCompanyUsers, getMyPermissions, createSupportLink, listSupportLog, SupportError, configureAdminApi, probeAdminApi, listKapsoApps } from "./adminApi.js";
+import { resetMock, listUsers, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, listCoupons, getPaymentMethodUrl, listPrices, WebhookError, getUser, listCompanies, listCompanyUsers, getMyPermissions, createSupportLink, listSupportLog, SupportError, configureAdminApi, probeAdminApi, listKapsoApps, setUserKapsoApp } from "./adminApi.js";
 import { MOCK } from "./adminMock.js";
 
 const ACTOR = "admin@ejemplo.test";
@@ -546,7 +546,7 @@ describe("conexiones de WhatsApp por Kapso (colección kapsoapps)", () => {
     const k = MOCK.kapsoapps[0];
     const b = await getCompanyBundle(k.companyId);
     expect(b.kapsoApps.every((a) => a.companyId === k.companyId)).toBe(true);
-    expect(b.kapsoApps.map((a) => a.status).sort()).toEqual(["pending_setup", "success"]);
+    expect(b.kapsoApps.map((a) => a.status).sort()).toEqual(["pending_setup", "success", "success"]);
   });
   it("una company sin conexiones trae la lista vacía", async () => {
     const sin = MOCK.companies.find((c) => !MOCK.kapsoapps.some((a) => a.companyId === c._id));
@@ -555,7 +555,7 @@ describe("conexiones de WhatsApp por Kapso (colección kapsoapps)", () => {
   it("la lista de usuarios muestra en cada uno un resumen de SUS conexiones", async () => {
     const k = MOCK.kapsoapps[0];
     const u = (await listUsers({ pageSize: 50 })).items.find((x) => x._id === k.userId);
-    expect(u.kapsoApps.map((a) => a.status).sort()).toEqual(["pending_setup", "success"]);
+    expect(u.kapsoApps.map((a) => a.status).sort()).toEqual(["pending_setup", "success", "success"]);
     expect(Object.keys(u.kapsoApps[0]).sort()).toEqual(["_id", "alias", "connectionType", "displayPhoneNumber", "isDefault", "status"]);
     const sinKapso = (await listUsers({ pageSize: 50 })).items.find((x) => !MOCK.kapsoapps.some((a) => a.userId === x._id));
     expect(sinKapso.kapsoApps).toEqual([]);
@@ -579,5 +579,37 @@ describe("vista de conexiones de WhatsApp", () => {
     const p = await listKapsoApps({ status: "pending", activeOnly: false, pageSize: 50 });
     expect(c.total + p.total).toBe(all.total);
     expect(all.total).toBe(MOCK.kapsoapps.length);
+  });
+});
+
+describe("cambiar la conexión de WhatsApp que usa un usuario", () => {
+  const err = async (p) => { try { await p; } catch (e) { return e; } throw new Error("tenía que fallar"); };
+  const owner = () => MOCK.users.find((u) => u.kapso && u.activeWhatsAppProvider === "kapso");
+  const appsOf = (u) => MOCK.kapsoapps.filter((a) => a.companyId === u.companies[0]);
+  it("cada usuario de Kapso apunta (por _id) a una conexión que existe", () => {
+    for (const u of MOCK.users.filter((x) => x.activeWhatsAppProvider === "kapso")) expect(MOCK.kapsoapps.some((a) => a._id === u.kapso.kapsoAppId)).toBe(true);
+  });
+  it("cambia a otra conexión conectada de la company, la deja en el usuario y audita con el valor anterior", async () => {
+    const u = owner(), actual = u.kapso.kapsoAppId, otra = appsOf(u).find((a) => a.status === "success" && a._id !== actual);
+    const r = await setUserKapsoApp(u._id, otra._id, ACTOR);
+    expect(r).toMatchObject({ changed: true, kapsoAppId: otra._id, previousKapsoAppId: actual });
+    expect((await getUser(u._id)).kapso.kapsoAppId).toBe(otra._id);
+    const a = (await listAudit({ limit: 5 })).find((x) => x.action === "kapso_app_change");
+    expect(a).toMatchObject({ actor: ACTOR, targetId: u._id, detail: { from: actual, to: otra._id } });
+  });
+  it("elegir la misma no cambia nada", async () => {
+    const u = owner();
+    expect((await setUserKapsoApp(u._id, u.kapso.kapsoAppId, ACTOR)).changed).toBe(false);
+  });
+  it("rechaza una conexión pendiente, una de otra company y a usuarios sin conexión asignada", async () => {
+    const u = owner();
+    const pendiente = appsOf(u).find((a) => a.status === "pending_setup");
+    expect((await err(setUserKapsoApp(u._id, pendiente._id, ACTOR))).message).toMatch(/no está conectada/);
+    const ajena = MOCK.kapsoapps.find((a) => a.companyId !== u.companies[0]);
+    if (ajena) expect((await err(setUserKapsoApp(u._id, ajena._id, ACTOR))).message).toMatch(/otra company/);
+    const sin = MOCK.users.find((x) => !x.kapso);
+    expect((await err(setUserKapsoApp(sin._id, appsOf(u)[0]._id, ACTOR))).message).toMatch(/todavía no tiene una conexión/);
+    expect((await err(setUserKapsoApp("nope", appsOf(u)[0]._id, ACTOR))).message).toMatch(/No se encontró el usuario/);
+    await expect(setUserKapsoApp(u._id, appsOf(u)[0]._id, "")).rejects.toThrow(/quién/);
   });
 });

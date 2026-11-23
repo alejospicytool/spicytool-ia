@@ -159,9 +159,12 @@ users.filter((u) => u.activeWhatsAppProvider === "kapso" && u.companies[0]).forE
     throughputLevel: "STANDARD", incomingMessageMode: i ? "standard" : "workflow_only", businessAccountId: `waba_mock_${i + 1}`, phoneNumberId: `pn_mock_${i + 1}`,
     connectedAt: iso("2026-09-1" + (i + 1) + "T15:00:00Z"), createdAt: iso("2026-09-1" + (i + 1) + "T14:00:00Z"), updatedAt: iso("2026-11-10T10:00:00Z"), lastTemplatesSyncAt: iso("2026-11-10T09:00:00Z"), setupLinkExpiresAt: null,
   });
+  u.kapso = { kapsoAppId: oid(20000 + i) }; // en Mongo: users.kapso.kapsoAppId = _id de la conexión (kapsoapps) que usa el usuario
 });
 // Una company con una segunda conexión que todavía no terminó de conectarse.
 const firstKapso = kapsoapps[0];
+// (segunda conexión ya conectada en la misma company: sirve para probar el cambio de "qué conexión usa" un usuario)
+if (firstKapso) kapsoapps.push({ _id: oid(20101), companyId: firstKapso.companyId, userId: firstKapso.userId, alias: "Línea de soporte", status: "success", connectionType: "coexistence", isCoexistence: true, isDefault: false, displayPhoneNumber: "+54 9 11 6000-9999", verifiedName: "Empresa de ejemplo 1", qualityRating: "UNKNOWN", messagingLimitTier: null, throughputLevel: "STANDARD", incomingMessageMode: "workflow_only", businessAccountId: "waba_mock_1", phoneNumberId: "pn_mock_1b", connectedAt: iso("2026-10-05T15:00:00Z"), createdAt: iso("2026-10-05T14:00:00Z"), updatedAt: iso("2026-11-10T10:00:00Z"), lastTemplatesSyncAt: iso("2026-11-10T09:00:00Z"), setupLinkExpiresAt: null });
 if (firstKapso) kapsoapps.push({ _id: oid(20100), companyId: firstKapso.companyId, userId: firstKapso.userId, alias: "Línea de ventas", status: "pending_setup", connectionType: "coexistence", isCoexistence: true, isDefault: false, displayPhoneNumber: null, verifiedName: null, qualityRating: null, messagingLimitTier: null, throughputLevel: null, incomingMessageMode: "workflow_only", businessAccountId: null, phoneNumberId: null, connectedAt: null, createdAt: iso("2026-11-12T12:00:00Z"), updatedAt: iso("2026-11-12T12:00:00Z"), lastTemplatesSyncAt: null, setupLinkExpiresAt: iso("2026-11-19T12:00:00Z") });
 
 // Cupones de EJEMPLO (ids inventados; los reales están en server/coupons.js).

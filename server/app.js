@@ -8,7 +8,7 @@ const int = (v, def, min, max) => { const n = Math.floor(Number(v)); return Numb
 const text = (v) => String(v ?? "").slice(0, 100);
 const flag = (v) => v === "1" || v === "true";
 
-export function createApp({ queries, authenticate, billing, companies, users, audit, support = null, prices = [], log = console.error }) {
+export function createApp({ queries, authenticate, billing, companies, users, audit, kapso = null, support = null, prices = [], log = console.error }) {
   const app = express();
   app.disable("x-powered-by");
   app.use((req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
@@ -97,6 +97,13 @@ export function createApp({ queries, authenticate, billing, companies, users, au
   app.post("/api/admin/users/:id", route(async (req, res) => {
     if (!needId(req, res)) return;
     const r = await users.editContact(req.admin, req.token, req.params.id, req.body);
+    res.status(r.status).json(r.body);
+  }));
+
+  // Cambiar qué conexión de WhatsApp (Kapso) usa un usuario: escribe solo users.kapso.kapsoAppId, con auditoría previa (server/kapso.js).
+  app.post("/api/admin/users/:id/kapso-app", route(async (req, res) => {
+    if (!needId(req, res)) return;
+    const r = kapso ? await kapso.setUserApp(req.admin, req.token, req.params.id, req.body && req.body.appId) : { status: 503, body: { code: "KAPSO_NO_CONFIGURADO", message: "El servidor todavía no tiene configurado este cambio." } };
     res.status(r.status).json(r.body);
   }));
 

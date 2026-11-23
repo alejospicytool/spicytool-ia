@@ -25,6 +25,7 @@ const companies = {
   setStatus: vi.fn(async () => ({ status: 200, body: { _id: "x", status: "paused" } })),
   edit: vi.fn(async () => ({ status: 200, body: { _id: "x", changed: true } })),
 };
+const kapso = { setUserApp: vi.fn(async () => ({ status: 200, body: { _id: "x", kapsoAppId: "6650000000000000000000b2", changed: true } })) };
 const users = { editContact: vi.fn(async () => ({ status: 200, body: { _id: "x", changed: true } })) };
 const audit = { list: vi.fn(async (token, a) => [{ id: "1", echo: { token, ...a } }]) };
 const support = {
@@ -35,7 +36,7 @@ const prices = [{ id: "price_1", plan: "SpicyPro", amount: 40000 }];
 
 let server, base;
 beforeAll(async () => {
-  const app = createApp({ queries, authenticate, billing, companies, users, audit, support, prices, log: () => {} });
+  const app = createApp({ queries, authenticate, billing, companies, users, audit, kapso, support, prices, log: () => {} });
   await new Promise((r) => { server = app.listen(0, "127.0.0.1", r); });
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -138,6 +139,19 @@ describe("API del backoffice (solo lectura)", () => {
     expect((await (await call("/api/admin/kapso-apps?status=connected&search=paz&activeOnly=0&page=3&pageSize=999")).json()).echo).toEqual({ status: "connected", search: "paz", activeOnly: false, page: 3, pageSize: 50 });
     expect((await (await call("/api/admin/kapso-apps?status=cualquier-cosa")).json()).echo.status).toBe("pending");
     expect((await call("/api/admin/kapso-apps", { token: null })).status).toBe(401);
+  });
+  it("cambiar la conexión de WhatsApp: POST con admin; pasa admin, token, usuario y appId; errores tal cual", async () => {
+    const r = await call(`/api/admin/users/${ID}/kapso-app`, { method: "POST", body: { appId: "6650000000000000000000b2" } });
+    expect(r.status).toBe(200);
+    expect(kapso.setUserApp).toHaveBeenCalledWith(ADMIN, "admin", ID, "6650000000000000000000b2");
+    kapso.setUserApp.mockResolvedValueOnce({ status: 422, body: { code: "CONEXION_AJENA", message: "Esa conexión es de otra company" } });
+    const e = await call(`/api/admin/users/${ID}/kapso-app`, { method: "POST", body: { appId: "x" } });
+    expect(e.status).toBe(422);
+    expect((await e.json()).code).toBe("CONEXION_AJENA");
+    expect((await call("/api/admin/users/xyz/kapso-app", { method: "POST", body: {} })).status).toBe(400);
+    kapso.setUserApp.mockClear();
+    expect((await call(`/api/admin/users/${ID}/kapso-app`, { method: "POST", body: { appId: "1" }, token: "reader" })).status).toBe(403);
+    expect(kapso.setUserApp).not.toHaveBeenCalled();
   });
   it("entrar como usuario: POST con admin; pasa admin, token, id y el cuerpo, y la respuesta no se cachea", async () => {
     const body = { reason: "ticket 4821: no ve sus contactos", spicyEmail: "a@b.co", spicyPassword: "x" };

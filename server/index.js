@@ -10,6 +10,7 @@ import { makeCompanyAdmin } from "./companies.js";
 import { makeUserAdmin } from "./users.js";
 import { makeWebhookClient } from "./webhooks.js";
 import { makeSupport } from "./support.js";
+import { makeKapsoAdmin } from "./kapso.js";
 import { STANDARD_PRICES } from "./prices.js";
 import { COUPONS } from "./coupons.js";
 
@@ -41,6 +42,7 @@ if (process.env.MONGODB_WRITE_URI) {
 }
 const companies = makeCompanyAdmin({ db: writeDb, audit, invalidate: queries.invalidate });
 const users = makeUserAdmin({ db: writeDb, audit, invalidate: queries.invalidate });
+const kapso = makeKapsoAdmin({ db: writeDb, audit, invalidate: queries.invalidate });
 console.log(`Escrituras en Mongo: ${process.env.MONGODB_WRITE_URI ? "usuario de escritura aparte" : "misma conexión que la lectura"}`);
 
 const port = Number(process.env.PORT || 3100);
@@ -48,4 +50,4 @@ const port = Number(process.env.PORT || 3100);
 const support = makeSupport({ getUser: queries.getUser, audit, apiBase: process.env.SPICY_API_BASE || undefined });
 console.log(`Soporte (entrar como usuario): activo · API ${process.env.SPICY_API_BASE || "https://api.spicytool.net/api"}`);
 
-createApp({ queries, authenticate: makeAuthenticator(), billing, companies, users, audit, support, prices: STANDARD_PRICES }).listen(port, "127.0.0.1", () => console.log(`Backoffice API escuchando en 127.0.0.1:${port}`));
+createApp({ queries, authenticate: makeAuthenticator(), billing, companies, users, audit, kapso, support, prices: STANDARD_PRICES }).listen(port, "127.0.0.1", () => console.log(`Backoffice API escuchando en 127.0.0.1:${port}`));

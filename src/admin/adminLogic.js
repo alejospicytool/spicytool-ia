@@ -212,6 +212,8 @@ export function validateContactEdit(f, { currentPhone } = {}) {
 export const AUDIT_ACTIONS = {
   company_edit: "Editó la company",
   contact_edit: "Editó la ficha de contacto",
+  kapso_app_change: "Cambió la conexión de WhatsApp (Kapso) de un usuario",
+  kapso_app_change_failed: "Intentó cambiar la conexión de WhatsApp de un usuario (no se guardó)",
   company_pause: "Pausó la company",
   company_activate: "Activó la company",
   company_status_failed: "Intentó cambiar el estado de la company (no se guardó)",
