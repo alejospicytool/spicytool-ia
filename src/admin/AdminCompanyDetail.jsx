@@ -23,7 +23,7 @@ const TONE = { green: "badge-green", amber: "badge-yellow", red: "badge-red", mu
 const KapsoStatus = ({ status }) => { const i = kapsoStatusInfo(status); return <span className={"badge " + TONE[i.tone]}>{i.label}</span>; };
 
 // Conexiones de WhatsApp por Kapso de la company (colección kapsoapps). Las del usuario que se está mirando quedan marcadas.
-function KapsoAppsCard({ apps, users, user, actor, canChange, onChange }) {
+function KapsoAppsCard({ apps, users, user, canChange, onChange }) {
   const mine = new Set(kapsoAppsOfUser(apps, user).map((a) => a._id));
   const inUse = user.kapso && user.kapso.kapsoAppId, options = apps.filter((a) => a.status === "success");
   const [pick, setPick] = useState(inUse || "");
@@ -46,7 +46,7 @@ function KapsoAppsCard({ apps, users, user, actor, canChange, onChange }) {
       <DataTable rows={apps} empty="Esta company no tiene conexiones de WhatsApp por Kapso." columns={[
         { key: "alias", label: "Conexión", render: (a) => <><b>{a.alias || "Sin nombre"}</b>{a.isDefault && <span className="badge badge-blue" style={{ marginLeft: 6 }}>Principal</span>}{a._id === inUse && <span className="badge badge-green" style={{ marginLeft: 6 }} title="Es la conexión que tiene asignada este usuario">En uso</span>}{mine.has(a._id) && a._id !== inUse && <span className="badge badge-muted" style={{ marginLeft: 6 }}>Creada por este usuario</span>}{a.connectionType && a.connectionType !== "coexistence" && <span className="badge badge-muted" style={{ marginLeft: 6 }} title="Tipo de conexión (lo habitual es coexistencia)">{a.connectionType}</span>}</> },
         { key: "displayPhoneNumber", label: "Número", render: (a) => a.displayPhoneNumber ? <><PhoneLink phone={a.displayPhoneNumber} />{a.verifiedName && <div style={{ color: "var(--muted)", fontSize: 11 }}>{a.verifiedName}</div>}</> : <span style={{ color: "var(--muted)" }}>Sin número</span> },
-        { key: "status", label: "Estado", render: (a) => <><KapsoStatus status={a.status} />{a.status !== "success" && a.setupLinkExpiresAt && <div style={{ color: "var(--muted)", fontSize: 11 }}>{new Date(a.setupLinkExpiresAt) < new Date() ? "El link de conexión venció" : "Link de conexión vigente hasta " + fmtDate(a.setupLinkExpiresAt)}</div>}<div style={{ marginTop: 4 }}><KapsoSetupLinkButton app={a} actor={actor} canAct={canChange} /></div></> },
+        { key: "status", label: "Estado", render: (a) => <><KapsoStatus status={a.status} />{a.status !== "success" && a.setupLinkExpiresAt && <div style={{ color: "var(--muted)", fontSize: 11 }}>{new Date(a.setupLinkExpiresAt) < new Date() ? "El link de conexión venció" : "Link de conexión vigente hasta " + fmtDate(a.setupLinkExpiresAt)}</div>}<div style={{ marginTop: 4 }}><KapsoSetupLinkButton app={a} canAct={canChange} /></div></> },
         { key: "qualityRating", label: "Calidad del número", render: (a) => { const q = kapsoQualityInfo(a.qualityRating); return q ? <span className={"badge " + TONE[q.tone]}>{q.label}</span> : "—"; } },
         { key: "messagingLimitTier", label: "Límite de envío (24 h)", muted: true, render: (a) => messagingTierLabel(a.messagingLimitTier) },
         { key: "incomingMessageMode", label: "Mensajes entrantes", muted: true, render: (a) => incomingModeLabel(a.incomingMessageMode) },
@@ -182,9 +182,9 @@ function NoCompanyView({ user, actor, onBack, refresh, dialog, setDialog, acts, 
           {[["Plan", planLabel(planOf(user))], ["Precio (Stripe)", user.stripe?.priceId], ["Suscripción en Stripe", user.stripe?.subscriptionId || user.subscription?.subscriptionId], ["Cliente en Stripe", user.stripe?.customerId]].map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v || "—"}</dd></div>)}
         </dl>
       </Card>
-      {dialog === "contact" && <EditContactDialog user={user} onClose={() => setDialog(null)} onSubmit={submitted((v) => updateUserContact(user._id, v, actor))} />}
-      {dialog === "plan" && <AssignPlanDialog user={user} onClose={() => setDialog(null)} onDone={refresh} onSubmit={(v) => assignPlan(user._id, v, actor)} />}
-      {dialog === "card" && <CardLinkDialog user={user} onClose={() => { setDialog(null); refresh(); }} onSubmit={() => getPaymentMethodUrl(user._id, actor)} />}
+      {dialog === "contact" && <EditContactDialog user={user} onClose={() => setDialog(null)} onSubmit={submitted((v) => updateUserContact(user._id, v))} />}
+      {dialog === "plan" && <AssignPlanDialog user={user} onClose={() => setDialog(null)} onDone={refresh} onSubmit={(v) => assignPlan(user._id, v)} />}
+      {dialog === "card" && <CardLinkDialog user={user} onClose={() => { setDialog(null); refresh(); }} onSubmit={() => getPaymentMethodUrl(user._id)} />}
     </div>
   );
 }
@@ -192,7 +192,7 @@ function NoCompanyView({ user, actor, onBack, refresh, dialog, setDialog, acts, 
 export default function AdminCompanyDetail({ userId, actor, crmSb = null, onBack, onChanged }) {
   const [version, setVersion] = useState(0), [tab, setTab] = useState("resumen"), [dialog, setDialog] = useState(null), [confirm, setConfirm] = useState(null);
   const [confirmBusy, setConfirmBusy] = useState(false), [confirmError, setConfirmError] = useState("");
-  const perms = useAsync(() => getMyPermissions(actor), "perms:" + actor), cant = cantAct(perms);
+  const perms = useAsync(() => getMyPermissions(), "perms:" + actor), cant = cantAct(perms);
   const acts = { disabled: cant, title: cant ? NO_ACT_TITLE : undefined };
   const res = useAsync(async () => { const user = await getUser(userId); if (!user) throw new Error("No se encontró el usuario."); const cid = companyIdOf(user); return { user, bundle: cid ? await getCompanyBundle(cid) : null }; }, `detail:${userId}:${version}`);
 
@@ -215,7 +215,7 @@ export default function AdminCompanyDetail({ userId, actor, crmSb = null, onBack
   const changeKapso = (appId) => {
     const apps = b.kapsoApps || [], to = apps.find((a) => a._id === appId), from = apps.find((a) => a._id === (user.kapso && user.kapso.kapsoAppId));
     const nm = (a) => (a ? [a.alias || "Sin nombre", a.displayPhoneNumber].filter(Boolean).join(" · ") : "otra conexión");
-    ask({ title: "Cambiar la conexión de WhatsApp", label: "Cambiar conexión", danger: true, text: <>Vas a cambiar la conexión de WhatsApp (Kapso) que tiene asignada <b>{userFullName(user)}</b>: de <b>{nm(from)}</b> a <b>{nm(to)}</b>. Es un cambio en la base real de Spicytool. Queda registrado con tu nombre y la conexión anterior, y podés volver a cambiarla cuando quieras.</>, action: () => setUserKapsoApp(user._id, appId, actor) });
+    ask({ title: "Cambiar la conexión de WhatsApp", label: "Cambiar conexión", danger: true, text: <>Vas a cambiar la conexión de WhatsApp (Kapso) que tiene asignada <b>{userFullName(user)}</b>: de <b>{nm(from)}</b> a <b>{nm(to)}</b>. Es un cambio en la base real de Spicytool. Queda registrado con tu nombre y la conexión anterior, y podés volver a cambiarla cuando quieras.</>, action: () => setUserKapsoApp(user._id, appId) });
   };
   // Colaborador: pertenece a la company de otra persona (el owner). El plan y el cobro son del owner, no de este usuario.
   const collab = isCollaboratorOf(user, co._id), collabTitle = "Este usuario es colaborador: el plan y el cobro son del owner de la company, no suyos.";
@@ -248,8 +248,8 @@ export default function AdminCompanyDetail({ userId, actor, crmSb = null, onBack
           <ActGroup label="Cuenta">
             <button className="btn-access" disabled={!perms.data || !perms.data.support} title={perms.data && !perms.data.support ? (perms.data.disabledReason || "Tu usuario no tiene permiso de soporte. Pedile a un admin que te habilite.") : "Generar un link para entrar a la cuenta de este usuario"} onClick={() => setDialog("support")}>Entrar como usuario</button>
             {paused
-              ? <button className="btn-primary" {...acts} onClick={() => ask({ title: "Activar company", label: "Activar", text: <>Vas a <b>activar</b> la company <b>{co.name}</b>. Sus usuarios vuelven a poder usar la cuenta.</>, action: () => setCompanyStatus(co._id, "active", actor) })}>Activar company</button>
-              : <button className="btn-warn" {...acts} onClick={() => ask({ title: "Pausar company", label: "Pausar", danger: true, text: <>Vas a <b>pausar</b> la company <b>{co.name}</b>. Sus usuarios dejan de poder usar la cuenta hasta que la actives de nuevo. No cancela la suscripción ni los cobros.</>, action: () => setCompanyStatus(co._id, "paused", actor) })}>Pausar company</button>}
+              ? <button className="btn-primary" {...acts} onClick={() => ask({ title: "Activar company", label: "Activar", text: <>Vas a <b>activar</b> la company <b>{co.name}</b>. Sus usuarios vuelven a poder usar la cuenta.</>, action: () => setCompanyStatus(co._id, "active") })}>Activar company</button>
+              : <button className="btn-warn" {...acts} onClick={() => ask({ title: "Pausar company", label: "Pausar", danger: true, text: <>Vas a <b>pausar</b> la company <b>{co.name}</b>. Sus usuarios dejan de poder usar la cuenta hasta que la actives de nuevo. No cancela la suscripción ni los cobros.</>, action: () => setCompanyStatus(co._id, "paused") })}>Pausar company</button>}
           </ActGroup>
           {crmSb && canSendToCrm(user) && <ActGroup label="Comercial"><SendToCrmButton sb={crmSb} user={user} companyName={co.name} actor={actor} className="btn-secondary" onSent={crmDone} /></ActGroup>}
         </div>
@@ -271,7 +271,7 @@ export default function AdminCompanyDetail({ userId, actor, crmSb = null, onBack
         { key: "condition", label: "Condición" }, { key: "conversionCategory", label: "Categoría", render: (c) => <span className="badge badge-blue">{c.conversionCategory}</span> },
       ID_COL]} /></Card>}
       {tab === "whatsapp" && (<>
-        <KapsoAppsCard key={user.kapso && user.kapso.kapsoAppId} apps={b.kapsoApps || []} users={b.users} user={user} actor={actor} canChange={!cant} onChange={changeKapso} />
+        <KapsoAppsCard key={user.kapso && user.kapso.kapsoAppId} apps={b.kapsoApps || []} users={b.users} user={user} canChange={!cant} onChange={changeKapso} />
         <Card title="Conversaciones de WhatsApp" sub={b.whatsappConversions.length}><DataTable rows={b.whatsappConversions} empty="Sin conversiones de WhatsApp." columns={[
           { key: "date", label: "Fecha", render: (c) => fmtDate(c.date) }, { key: "behavior", label: "Comportamiento" }, { key: "checked", label: "Verificada", render: (c) => yesNo(c.checked) }, { key: "source", label: "Origen", muted: true }, { key: "trackId", label: "Track ID", muted: true },
         ID_COL]} /></Card>
@@ -292,11 +292,11 @@ export default function AdminCompanyDetail({ userId, actor, crmSb = null, onBack
       {tab === "creditos" && <CreditsTab companyId={co._id} version={version} />}
       {tab === "auditoria" && <AuditTab companyId={co._id} version={version} />}
 
-      {dialog === "company" && <EditCompanyDialog company={co} onClose={() => setDialog(null)} onSubmit={submitted((v) => updateCompany(co._id, v, actor))} />}
-      {dialog === "contact" && <EditContactDialog user={user} onClose={() => setDialog(null)} onSubmit={submitted((v) => updateUserContact(user._id, v, actor))} />}
-      {dialog === "plan" && <AssignPlanDialog user={user} onClose={() => setDialog(null)} onDone={refresh} onSubmit={(v) => assignPlan(user._id, v, actor)} />}
-      {dialog === "support" && <SupportSessionDialog user={user} onClose={() => setDialog(null)} onDone={refresh} needsCredentials={adminMode() === "real"} onSubmit={(reason, creds) => createSupportLink(user._id, reason, actor, new Date(), creds)} />}
-      {dialog === "card" && <CardLinkDialog user={user} onClose={() => { setDialog(null); refresh(); }} onSubmit={() => getPaymentMethodUrl(user._id, actor)} />}
+      {dialog === "company" && <EditCompanyDialog company={co} onClose={() => setDialog(null)} onSubmit={submitted((v) => updateCompany(co._id, v))} />}
+      {dialog === "contact" && <EditContactDialog user={user} onClose={() => setDialog(null)} onSubmit={submitted((v) => updateUserContact(user._id, v))} />}
+      {dialog === "plan" && <AssignPlanDialog user={user} onClose={() => setDialog(null)} onDone={refresh} onSubmit={(v) => assignPlan(user._id, v)} />}
+      {dialog === "support" && <SupportSessionDialog user={user} onClose={() => setDialog(null)} onDone={refresh} needsCredentials={adminMode() === "real"} onSubmit={(reason, creds) => createSupportLink(user._id, reason, creds)} />}
+      {dialog === "card" && <CardLinkDialog user={user} onClose={() => { setDialog(null); refresh(); }} onSubmit={() => getPaymentMethodUrl(user._id)} />}
       {confirm && <ConfirmDialog title={confirm.title} confirmLabel={confirm.label} danger={confirm.danger} busy={confirmBusy} error={confirmError} onConfirm={runConfirmed} onCancel={() => setConfirm(null)}>{confirm.text}</ConfirmDialog>}
     </div>
   );

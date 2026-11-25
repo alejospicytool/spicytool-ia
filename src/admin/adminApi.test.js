@@ -1,632 +1,101 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { resetMock, listUsers, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, listCoupons, getPaymentMethodUrl, listPrices, WebhookError, getUser, listCompanies, listCompanyUsers, getMyPermissions, createSupportLink, listSupportLog, SupportError, configureAdminApi, probeAdminApi, listKapsoApps, setUserKapsoApp, getKapsoSetupLink } from "./adminApi.js";
-import { MOCK } from "./adminMock.js";
+import { configureAdminApi, probeAdminApi, adminMode, listUsers, listCompanies, getUser, getCredits, getMyPermissions, createSupportLink, assignPlan, setCompanyStatus, getKapsoSetupLink, WebhookError, SupportError } from "./adminApi.js";
 
-const ACTOR = "admin@ejemplo.test";
-beforeEach(() => resetMock());
+// El servidor es lo que decide y valida; acá se comprueba que los pedidos se armen bien y que los errores se traduzcan.
+const json = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
+let fetchMock;
+beforeEach(() => { fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock); configureAdminApi(async () => "jwt-123"); });
+afterEach(() => vi.unstubAllGlobals());
+const lastCall = () => { const [url, init] = fetchMock.mock.calls.at(-1); return { url, init }; };
 
-describe("datos de ejemplo", () => {
-  it("cada usuario apunta a una company que existe y cada company tiene saldo de créditos", () => {
-    const ids = new Set(MOCK.companies.map((c) => c._id));
-    // quien tiene company apunta a una que existe; también hay usuarios sin company (en la base real son la mayoría)
-    expect(MOCK.users.filter((u) => u.companies.length).every((u) => ids.has(u.companies[0]))).toBe(true);
-    expect(MOCK.users.some((u) => u.companies.length === 0)).toBe(true);
-    expect(MOCK.companies.every((c) => MOCK.credit_balances.some((b) => b.company_id === c._id))).toBe(true);
-  });
-  it("hay companies activas y pausadas, y los dos proveedores de WhatsApp", () => {
-    expect(new Set(MOCK.companies.map((c) => c.status))).toEqual(new Set(["active", "paused"]));
-    expect(MOCK.users.some((u) => u.kapso)).toBe(true);
-    expect(MOCK.users.some((u) => u.gupshup)).toBe(true);
-  });
-  it("los ids son únicos", () => {
-    const all = ["users", "companies", "contacts", "campaigns", "landings", "companyconversions", "whatsappconversions", "workflows", "pipelines", "pipelinestages", "whatsapptemplates", "webforms", "contactlists"].flatMap((k) => MOCK[k].map((x) => x._id));
-    expect(new Set(all).size).toBe(all.length);
-  });
-  it("no hay emails reales: todo termina en .test", () => {
-    const emails = [...MOCK.users.map((u) => u.email), ...MOCK.companies.map((c) => c.userEmail), ...MOCK.contacts.map((c) => c.email)];
-    expect(emails.every((e) => e.endsWith(".test"))).toBe(true);
-  });
-});
-
-describe("listUsers", () => {
-  it("pagina, ordena de más nuevo a más viejo y trae el nombre de la company", async () => {
-    const r = await listUsers({ page: 1, pageSize: 5 });
-    expect(r.items).toHaveLength(5);
-    expect(r.total).toBe(MOCK.users.length);
-    expect(r.items[0]._id > r.items[1]._id).toBe(true);
-    expect(r.items[0].companyName).toBeTruthy();
-  });
-  it("busca por apellido sin acentos exactos pero respetando letras", async () => {
-    const r = await listUsers({ search: "rossi" });
-    expect(r.items.map((u) => u.surname)).toEqual(["Rossi"]);
-  });
-  it("sin resultados da una página vacía", async () => {
-    const r = await listUsers({ search: "zzzzzz" });
-    expect(r).toMatchObject({ items: [], total: 0, pages: 1 });
-  });
-});
-
-describe("listUsers: filtros", () => {
-  const all = async (opts) => (await listUsers({ pageSize: 100, ...opts })).items;
-  it("cada company tiene un owner, y es un usuario de esa misma company", () => {
-    for (const c of MOCK.companies) {
-      const owners = MOCK.users.filter((u) => u.email === c.userEmail);
-      expect(owners).toHaveLength(1);
-      expect(owners[0].companies[0]).toBe(c._id);
-    }
-  });
-  it("solo owners: uno por company", async () => {
-    const r = await all({ owners: true });
-    expect(r).toHaveLength(MOCK.companies.length);
-    expect(r.every((u) => u.isOwner)).toBe(true);
-    expect((await all({})).filter((u) => u.isOwner)).toHaveLength(MOCK.companies.length);
-  });
-  it("company activa: excluye usuarios de companies pausadas", async () => {
-    const paused = new Set(MOCK.companies.filter((c) => c.status === "paused").map((c) => c._id));
-    const r = await all({ activeOnly: true });
-    // los usuarios sin company no cuentan como "company activa"
-    // (un colaborador cuenta por la company en la que colabora)
-    expect(r.length).toBe(MOCK.users.filter((u) => { const c = u.companies[0] || (u.collaboratesIn || [])[0]; return c && !paused.has(c); }).length);
-    expect(r.every((u) => u.companyStatus === "active")).toBe(true);
-  });
-  it("los usuarios sin company aparecen en la lista, sin nombre de company ni owner, y no entran en el filtro de company activa", async () => {
-    const sin = (await all({})).filter((u) => u.companies.length === 0 && !(u.collaboratesIn || []).length);
-    expect(sin.length).toBeGreaterThan(0);
-    expect(sin.every((u) => u.companyName === "—" && u.companyStatus === null && u.isOwner === false)).toBe(true);
-    expect((await all({ activeOnly: true })).some((u) => u.companies.length === 0 && !(u.collaboratesIn || []).length)).toBe(false);
-    expect((await all({ owners: true })).some((u) => u.companies.length === 0)).toBe(false);
-  });
-  it("owners + activa + búsqueda se combinan, y el total sale del filtro", async () => {
-    const r = await listUsers({ owners: true, activeOnly: true, pageSize: 2 });
-    expect(r.total).toBe(MOCK.companies.filter((c) => c.status === "active").length);
-    expect(r.items).toHaveLength(2);
-    const s = await all({ owners: true, search: "rossi" });
-    expect(s.map((u) => u.surname)).toEqual(["Rossi"]);
-    expect(await all({ owners: true, search: "Gómez" })).toHaveLength(0); // Martín Gómez no es owner
-  });
-  it("pausar una company la saca del filtro de activas", async () => {
-    const co = MOCK.companies[0];
-    const antes = (await all({ activeOnly: true })).length;
-    await setCompanyStatus(co._id, "paused", ACTOR);
-    expect((await all({ activeOnly: true })).length).toBe(antes - MOCK.users.filter((u) => u.companies[0] === co._id).length);
-  });
-});
-
-describe("listCompanies / listCompanyUsers", () => {
-  it("separa activas y pausadas, con los totales de cada lista", async () => {
-    const a = await listCompanies({ status: "active", pageSize: 50 }), p = await listCompanies({ status: "paused", pageSize: 50 });
-    const nPaused = MOCK.companies.filter((c) => c.status === "paused").length;
-    expect(p.items).toHaveLength(nPaused);
-    expect(a.items).toHaveLength(MOCK.companies.length - nPaused);
-    expect(a.counts).toEqual({ active: a.items.length, paused: nPaused });
-    expect(a.items.every((c) => c.status !== "paused")).toBe(true);
-    expect(p.items.every((c) => c.status === "paused")).toBe(true);
-    const ids = [...a.items, ...p.items].map((c) => c._id);
-    expect(new Set(ids).size).toBe(MOCK.companies.length); // ninguna en las dos listas ni en ninguna
-  });
-  it("ordena por nombre y cuenta usuarios", async () => {
-    const a = await listCompanies({ status: "active", pageSize: 50 });
-    const names = a.items.map((c) => c.name);
-    expect(names).toEqual([...names].sort((x, y) => x.localeCompare(y, "es", { sensitivity: "base" })));
-    for (const c of a.items) expect(c.userCount).toBe(MOCK.users.filter((u) => u.companies[0] === c._id || (u.collaboratesIn || []).includes(c._id)).length);
-  });
-  it("busca por nombre o por email del owner, y los totales siguen la búsqueda", async () => {
-    const r = await listCompanies({ search: "demo", pageSize: 50 });
-    expect(r.items.map((c) => c.name)).toEqual(["Propiedades Demo Sur"]);
-    expect(r.counts).toEqual({ active: 1, paused: 0 });
-    const byOwner = await listCompanies({ search: "valentina.silva", status: "paused" });
-    expect(byOwner.items.map((c) => c.name)).toEqual(["Estudio Ficticio & Asociados"]);
-    expect((await listCompanies({ search: "zzz" })).items).toEqual([]);
-  });
-  it("pagina", async () => {
-    const r = await listCompanies({ status: "active", pageSize: 3 });
-    expect(r).toMatchObject({ total: 4, pages: 2, page: 1 });
-    expect(r.items).toHaveLength(3);
-  });
-  it("pausar una company la pasa de lista", async () => {
-    const co = MOCK.companies.find((c) => c.status === "active");
-    await setCompanyStatus(co._id, "paused", ACTOR);
-    expect((await listCompanies({ status: "paused", pageSize: 50 })).items.some((c) => c._id === co._id)).toBe(true);
-    expect((await listCompanies({ status: "active", pageSize: 50 })).items.some((c) => c._id === co._id)).toBe(false);
-  });
-  it("usuarios de la company: el owner primero, y error si no existe", async () => {
-    const co = MOCK.companies[3];
-    const u = await listCompanyUsers(co._id);
-    expect(u).toHaveLength(MOCK.users.filter((x) => x.companies[0] === co._id).length);
-    expect(u[0].isOwner).toBe(true);
-    expect(u.slice(1).every((x) => !x.isOwner)).toBe(true);
-    await expect(listCompanyUsers("nope")).rejects.toThrow(/No se encontró/);
-  });
-});
-
-describe("webhooks de back office (simulados)", () => {
-  const user = (name) => MOCK.users.find((x) => x.name === name);
-  const START = "price_1MockStartStd0001", PROMO = "price_1MockStartPromo01", PRO = "price_1MockProStd000001";
-  const subOf = async (name) => (await getUser(user(name)._id)).subscription;
-  const err = async (p) => { try { await p; } catch (e) { return e; } throw new Error("tenía que fallar"); };
-
-  it("solo ofrece precios activos y mensuales", async () => {
-    const r = await listPrices();
-    expect(r.length).toBeGreaterThan(0);
-    expect(r.every((p) => p.active && p.interval === "month")).toBe(true);
-    expect(r.some((p) => p.id === "price_1MockProOld0000001" || p.id === "price_1MockProAnnual0001")).toBe(false);
-  });
-  it("asignar plan con tarjeta ok: cambia plan, suscripción y precio, y audita", async () => {
-    const lucia = user("Lucía");
-    const r = await assignPlan(lucia._id, { plan: "SpicyStart", stripePriceId: PROMO, idempotencyKey: "k1" }, ACTOR);
-    expect(r).toMatchObject({ userEmail: lucia.email, plan: "SpicyStart", previousPlan: "SpicyPro", stripePriceId: PROMO, oldSubscriptionCancelled: true, billingFailures: [] });
-    expect(r.stripeSubscriptionId).toMatch(/^sub_/);
-    expect(await subOf("Lucía")).toEqual({ subscriptionType: "SpicyStart", subscriptionId: r.stripeSubscriptionId });
-    expect((await getUser(lucia._id)).stripe).toMatchObject({ subscriptionId: r.stripeSubscriptionId, priceId: PROMO });
-    const [a] = await listAudit();
-    expect(a).toMatchObject({ actor: ACTOR, action: "plan_assign", targetId: lucia._id });
-    expect(a.detail).toMatchObject({ plan: "SpicyStart", previousPlan: "SpicyPro", stripePriceId: PROMO });
-  });
-  it("mismo plan con otro precio cobra el nuevo; con el mismo precio es YA_SUSCRIPTO", async () => {
-    const id = user("Lucía")._id;
-    await assignPlan(id, { plan: "SpicyStart", stripePriceId: PROMO }, ACTOR);
-    await assignPlan(id, { plan: "SpicyStart", stripePriceId: START }, ACTOR);
-    expect((await getUser(user("Lucía")._id)).stripe.priceId).toBe(START);
-    const e = await err(assignPlan(id, { plan: "SpicyStart", stripePriceId: START }, ACTOR));
-    expect(e).toBeInstanceOf(WebhookError);
-    expect([e.status, e.code]).toEqual([409, "YA_SUSCRIPTO"]);
-  });
-  it("tarjeta rechazada: 402, link para cambiarla, no cambia nada y queda auditado el intento", async () => {
-    const before = await subOf("Sofía");
-    const e = await err(assignPlan(user("Sofía")._id, { plan: "SpicyPro", stripePriceId: PRO }, ACTOR));
-    expect([e.status, e.code]).toEqual([402, "PAGO_RECHAZADO"]);
-    expect(e.extra.decline_code).toBe("insufficient_funds");
-    expect(e.extra.paymentMethodUpdateUrl).toMatch(/^https:\/\/billing\.stripe\.com\//);
-    expect(await subOf("Sofía")).toEqual(before);
-    const [a] = await listAudit();
-    expect(a).toMatchObject({ action: "plan_assign_failed" });
-    expect(a.detail.code).toBe("PAGO_RECHAZADO");
-  });
-  it("sin tarjeta guardada: 402 SIN_MEDIO_DE_PAGO con el link, y no se cobra", async () => {
-    const before = await subOf("Valentina");
-    const e = await err(assignPlan(user("Valentina")._id, { plan: "SpicyOne", stripePriceId: "price_1MockOneStd00001" }, ACTOR));
-    expect([e.status, e.code]).toEqual([402, "SIN_MEDIO_DE_PAGO"]);
-    expect(e.extra.paymentMethodUpdateUrl).toBeTruthy();
-    expect(await subOf("Valentina")).toEqual(before);
-  });
-  it("validaciones del webhook: plan, precio requerido, precio inválido (archivado, anual o inexistente)", async () => {
-    const id = user("Lucía")._id, before = await subOf("Lucía");
-    const code = async (body) => (await err(assignPlan(id, body, ACTOR))).code;
-    expect(await code({ plan: "Freemium", stripePriceId: START })).toBe("PLAN_INVALIDO");
-    expect(await code({ plan: "tier3", stripePriceId: START })).toBe("PLAN_INVALIDO");
-    expect(await code({ plan: "SpicyStart" })).toBe("PRECIO_REQUERIDO");
-    expect(await code({ plan: "SpicyStart", stripePriceId: "price_1MockProOld0000001" })).toBe("PRECIO_INVALIDO");
-    expect(await code({ plan: "SpicyStart", stripePriceId: "price_1MockProAnnual0001" })).toBe("PRECIO_INVALIDO");
-    expect(await code({ plan: "SpicyStart", stripePriceId: "price_noexiste" })).toBe("PRECIO_INVALIDO");
-    expect(await subOf("Lucía")).toEqual(before);
-    expect((await listAudit()).every((a) => a.action === "plan_assign_failed")).toBe(true);
-  });
-  it("usuario inexistente: 404", async () => {
-    const e = await err(assignPlan("nope", { plan: "SpicyStart", stripePriceId: START }, ACTOR));
-    expect([e.status, e.code]).toEqual([404, "USUARIO_NO_ENCONTRADO"]);
-  });
-  it("idempotencia: repetir la misma clave devuelve el primer resultado y no cobra dos veces", async () => {
-    const id = user("Lucía")._id;
-    const a = await assignPlan(id, { plan: "SpicyStart", stripePriceId: START, idempotencyKey: "ticket-1" }, ACTOR);
-    const b = await assignPlan(id, { plan: "SpicyStart", stripePriceId: START, idempotencyKey: "ticket-1" }, ACTOR);
-    expect(b).toEqual(a);
-    expect((await listAudit()).filter((x) => x.action === "plan_assign")).toHaveLength(1);
-  });
-  it("sin clave, repetir la misma operación es YA_SUSCRIPTO (tampoco cobra dos veces)", async () => {
-    const id = user("Lucía")._id;
-    await assignPlan(id, { plan: "SpicyStart", stripePriceId: START }, ACTOR);
-    expect((await err(assignPlan(id, { plan: "SpicyStart", stripePriceId: START }, ACTOR))).code).toBe("YA_SUSCRIPTO");
-  });
-  it("un cobro fallido no se guarda como resultado: reintentar con la misma clave vuelve a intentar", async () => {
-    const id = user("Sofía")._id;
-    for (let i = 0; i < 2; i++) expect((await err(assignPlan(id, { plan: "SpicyPro", stripePriceId: PRO, idempotencyKey: "k-fail" }, ACTOR))).code).toBe("PAGO_RECHAZADO");
-    expect((await listAudit()).filter((x) => x.action === "plan_assign_failed")).toHaveLength(2);
-  });
-  it("link de tarjeta: devuelve cliente y link único, no toca la suscripción y audita", async () => {
-    const lucia = user("Lucía"), before = await subOf("Lucía");
-    const a = await getPaymentMethodUrl(lucia._id, ACTOR), b = await getPaymentMethodUrl(lucia._id, ACTOR);
-    expect(a).toMatchObject({ userEmail: lucia.email, stripeCustomerId: lucia.stripe.customerId });
-    expect(a.paymentMethodUpdateUrl).toMatch(/^https:\/\/billing\.stripe\.com\/p\/session\//);
-    expect(b.paymentMethodUpdateUrl).not.toBe(a.paymentMethodUpdateUrl);
-    expect(await subOf("Lucía")).toEqual(before);
-    expect((await listAudit()).filter((x) => x.action === "card_link_created")).toHaveLength(2);
-    expect(JSON.stringify(await listAudit())).not.toContain("billing.stripe.com");
-  });
-  it("link de tarjeta: usuario inexistente es 404 y sin actor no se genera", async () => {
-    expect((await err(getPaymentMethodUrl("nope", ACTOR))).status).toBe(404);
-    await expect(getPaymentMethodUrl(user("Lucía")._id, "")).rejects.toThrow(/quién/);
-  });
-  it("hay usuarios para probar cada caso: con tarjeta, rechazada, sin tarjeta, freemium y free trial", () => {
-    expect(new Set(MOCK.users.map((u) => u.stripe.paymentMethod))).toEqual(new Set(["ok", "declined", "none"]));
-    expect(new Set(MOCK.users.map((u) => u.subscription.subscriptionType))).toEqual(new Set(["SpicyPro", "SpicyStart", "Freemium", "SpicyProMax", "FreeTrial"]));
-    expect(MOCK.users.some((u) => "tier" in u.subscription)).toBe(false);
-  });
-});
-
-describe("soporte: entrar como usuario (simulado)", () => {
-  const DENIED = "sin.permiso@ejemplo.test";
-  const REASON = "ticket 4821: el cliente no ve sus contactos";
-  const lucia = () => MOCK.users.find((x) => x.name === "Lucía");
-  const err = async (p) => { try { await p; } catch (e) { return e; } throw new Error("tenía que fallar"); };
-
-  it("permisos: tienen todos menos el actor sin permiso, sin distinguir mayúsculas", async () => {
-    expect(await getMyPermissions(ACTOR)).toEqual({ support: true, canAct: true, level: "admin" });
-    expect(await getMyPermissions(DENIED)).toEqual({ support: false, canAct: true, level: "admin" });
-    expect(await getMyPermissions("  SIN.PERMISO@Ejemplo.test ")).toEqual({ support: false, canAct: true, level: "admin" });
-    await expect(getMyPermissions("")).rejects.toThrow(/quién/);
-  });
-  it("un usuario sin company no puede entrar como usuario: SIN_COMPANY, sin link y sin auditar un link generado", async () => {
-    const sinCompany = MOCK.users.find((x) => x.companies.length === 0);
-    const e = await err(createSupportLink(sinCompany._id, REASON, ACTOR));
-    expect(e).toBeInstanceOf(SupportError);
-    expect(e).toMatchObject({ status: 422, code: "SIN_COMPANY" });
-    expect((await listAudit()).filter((a) => a.action === "support_link_created")).toHaveLength(0);
-  });
-  it("genera el link, que vence a los 15 min, y audita quién, a quién, a qué company y por qué", async () => {
-    const now = new Date("2026-11-11T10:00:00Z");
-    const r = await createSupportLink(lucia()._id, "  ticket 4821:  el cliente no ve sus contactos ", ACTOR, now);
-    expect(r.url).toMatch(/^https:\/\/app\.example\.test\/support-session\?token=/);
-    expect(r.expiresAt).toBe("2026-11-11T10:15:00.000Z");
-    const [a] = await listAudit();
-    expect(a).toMatchObject({ actor: ACTOR, action: "support_link_created", targetType: "user", targetId: lucia()._id, companyId: lucia().companies[0] });
-    expect(a.detail).toMatchObject({ targetEmail: lucia().email, companyName: "Inmobiliaria Ejemplo Norte", reason: REASON });
-  });
-  it("el link NUNCA queda en la auditoría ni en el registro de soporte", async () => {
-    const r = await createSupportLink(lucia()._id, REASON, ACTOR);
-    const token = r.url.split("token=")[1];
-    expect(JSON.stringify(await listAudit())).not.toContain(token);
-    expect(JSON.stringify(await listSupportLog())).not.toContain(token);
-    expect(JSON.stringify(await listAudit())).not.toContain("support-session");
-  });
-  it("cada pedido da un link distinto", async () => {
-    const a = await createSupportLink(lucia()._id, REASON, ACTOR), b = await createSupportLink(lucia()._id, REASON, ACTOR);
-    expect(a.url).not.toBe(b.url);
-  });
-  it("sin permiso: 403, no hay link y el intento queda registrado", async () => {
-    const e = await err(createSupportLink(lucia()._id, REASON, DENIED));
-    expect(e).toBeInstanceOf(SupportError);
-    expect([e.status, e.code]).toEqual([403, "SIN_PERMISO_SOPORTE"]);
-    const [a] = await listAudit();
-    expect(a).toMatchObject({ actor: DENIED, action: "support_link_denied", targetId: lucia()._id });
-    expect(a.detail.reason).toBe(REASON);
-  });
-  it("sin permiso responde 403 aunque el usuario no exista (no revela qué usuarios hay)", async () => {
-    expect((await err(createSupportLink("nope", REASON, DENIED))).code).toBe("SIN_PERMISO_SOPORTE");
-  });
-  it("usuario inexistente: 404", async () => {
-    const e = await err(createSupportLink("nope", REASON, ACTOR));
-    expect([e.status, e.code]).toEqual([404, "USUARIO_NO_ENCONTRADO"]);
-  });
-  it("motivo inválido: 422, sin link y sin registrar una sesión", async () => {
-    for (const bad of ["", "corto", "aaaaaaaaaaaa", undefined]) {
-      const e = await err(createSupportLink(lucia()._id, bad, ACTOR));
-      expect([e.status, e.code]).toEqual([422, "MOTIVO_INVALIDO"]);
-    }
-    expect(await listAudit()).toHaveLength(0);
-  });
-  it("sin actor no se genera nada", async () => {
-    await expect(createSupportLink(lucia()._id, REASON, "")).rejects.toThrow(/quién/);
-    expect(await listAudit()).toHaveLength(0);
-  });
-  it("también se puede entrar a un usuario de una company pausada", async () => {
-    const paused = MOCK.users.find((u) => MOCK.companies.find((c) => c._id === u.companies[0]).status === "paused");
-    expect((await createSupportLink(paused._id, REASON, ACTOR)).url).toBeTruthy();
-  });
-  it("el registro de soporte tiene solo sesiones e intentos, más nuevo primero", async () => {
-    await setCompanyStatus(MOCK.companies[0]._id, "paused", ACTOR); // otra acción: no debe aparecer
-    await createSupportLink(lucia()._id, "ticket 1: primer caso de prueba", ACTOR);
-    await err(createSupportLink(lucia()._id, "ticket 2: segundo caso de prueba", DENIED));
-    await createSupportLink(MOCK.users[3]._id, "ticket 3: tercer caso de prueba", ACTOR);
-    const r = await listSupportLog();
-    expect(r.total).toBe(3);
-    expect(r.items.map((a) => a.action)).toEqual(["support_link_created", "support_link_denied", "support_link_created"]);
-    expect(r.items[0].detail.reason).toMatch(/tercer/);
-  });
-  it("el registro se busca por admin, usuario, email, company o motivo, y pagina", async () => {
-    for (let i = 0; i < 12; i++) await createSupportLink(lucia()._id, `ticket ${100 + i}: caso de prueba número ${i}`, ACTOR);
-    await err(createSupportLink(MOCK.users[3]._id, "ticket 999: revisar facturación", DENIED));
-    expect((await listSupportLog({ pageSize: 10 })).pages).toBe(2);
-    expect((await listSupportLog({ search: "facturación" })).total).toBe(1);
-    expect((await listSupportLog({ search: DENIED })).total).toBe(1);
-    expect((await listSupportLog({ search: lucia().email })).total).toBe(12);
-    expect((await listSupportLog({ search: "Inmobiliaria Ejemplo Norte" })).total).toBe(12);
-    expect((await listSupportLog({ search: "zzzz" })).total).toBe(0);
-  });
-  it("listAudit puede filtrar por acciones", async () => {
-    await setCompanyStatus(MOCK.companies[0]._id, "paused", ACTOR);
-    await createSupportLink(lucia()._id, REASON, ACTOR);
-    expect((await listAudit({ actions: ["company_pause"] })).map((a) => a.action)).toEqual(["company_pause"]);
-    expect(await listAudit()).toHaveLength(2);
-  });
-});
-
-describe("detalle de la company", () => {
-  it("trae los usuarios de la company (users.companies = companyId)", async () => {
-    const co = MOCK.companies[3];
-    const b = await getCompanyBundle(co._id);
-    expect(b.users.length).toBe(MOCK.users.filter((u) => u.companies.includes(co._id)).length);
-    expect(b.users.length).toBeGreaterThan(1);
-  });
-  it("solo trae datos de esa company", async () => {
-    const co = MOCK.companies[0];
-    const b = await getCompanyBundle(co._id);
-    expect(b.contacts).toBeUndefined(); // la pestaña de contactos se quitó: ni se piden ni se devuelven
-    for (const k of ["campaigns", "landings", "conversions", "whatsappConversions", "pipelines", "templates", "webforms", "contactLists", "workflows"]) {
-      expect(b[k].length).toBeGreaterThan(0);
-      expect(b[k].every((x) => x.companyId === co._id)).toBe(true);
-    }
-  });
-  it("una company inexistente da error claro", async () => {
-    await expect(getCompanyBundle("nope")).rejects.toThrow(/No se encontró/);
-  });
-  it("los stages vienen ordenados por posición", async () => {
-    const p = MOCK.pipelines[0];
-    const st = await getPipelineStages(p._id);
-    expect(st.map((s) => s.position)).toEqual([1, 2, 3, 4]);
-    expect(st.every((s) => s.pipelineId === p._id)).toBe(true);
-  });
-  it("créditos: saldo y transacciones, las más recientes primero", async () => {
-    const c = await getCredits(MOCK.companies[0]._id);
-    expect(c.balance).toMatchObject({ monthly_credits: expect.any(Number), total_credits: expect.any(Number), available_credits: expect.any(Number) });
-    expect(c.transactions.length).toBeGreaterThan(1);
-    expect(c.transactions[0].created_at >= c.transactions[1].created_at).toBe(true);
-    expect(await getCredits("nope")).toEqual({ balance: null, transactions: [] });
-  });
-});
-
-describe("acciones: cambian los datos y dejan auditoría", () => {
-  it("editar company", async () => {
-    const co = MOCK.companies[0];
-    await updateCompany(co._id, { name: "Nuevo nombre", phoneNumber: co.phoneNumber, credits: 999 }, ACTOR);
-    const b = await getCompanyBundle(co._id);
-    expect(b.company).toMatchObject({ name: "Nuevo nombre", credits: 999 });
-    const [a] = await listAudit();
-    expect(a).toMatchObject({ actor: ACTOR, action: "company_edit", targetType: "company", targetId: co._id, companyId: co._id });
-    expect(a.detail.changes.map((c) => c.key).sort()).toEqual(["credits", "name"]);
-  });
-  it("editar company con créditos vacío NO toca los créditos (no escribe un 0)", async () => {
-    const co = MOCK.companies[0];
-    const antes = co.credits;
-    await updateCompany(co._id, { name: "Otro nombre", phoneNumber: co.phoneNumber, credits: null }, ACTOR);
-    const b = await getCompanyBundle(co._id);
-    expect(b.company.credits).toBe(antes);
-    const [a] = await listAudit();
-    expect(a.detail.changes.map((c) => c.key)).toEqual(["name"]);
-  });
-  it("editar company con datos inválidos no cambia nada ni audita", async () => {
-    const co = MOCK.companies[0];
-    await expect(updateCompany(co._id, { name: "", phoneNumber: "", credits: 1 }, ACTOR)).rejects.toThrow(/nombre/);
-    await expect(updateCompany(co._id, { name: "x", phoneNumber: "", credits: -5 }, ACTOR)).rejects.toThrow(/créditos/i);
-    expect((await getCompanyBundle(co._id)).company.name).toBe(co.name);
-    expect(await listAudit()).toHaveLength(0);
-  });
-  it("editar ficha de contacto: nombre, apellido y teléfono; el email NO se cambia", async () => {
-    const u1 = MOCK.users[0];
-    await updateUserContact(u1._id, { name: "Otro", surname: "Nombre", email: u1.email.toUpperCase(), phoneNumber: "+54 11 4444-0000" }, ACTOR);
-    expect(await getUser(u1._id)).toMatchObject({ name: "Otro", surname: "Nombre", phoneNumber: "+54 11 4444-0000", email: u1.email });
-    const [a] = await listAudit();
-    expect(a).toMatchObject({ action: "contact_edit", targetId: u1._id });
-    expect(a.detail.changes.map((c) => c.key).sort()).toEqual(["name", "phoneNumber", "surname"]);
-  });
-  it("cambiar el email de un usuario se rechaza (es el login y vincula company, campañas y landings) y no cambia nada", async () => {
-    const [u1, u2] = MOCK.users;
-    for (const email of ["otro.nombre@ejemplo.test", u2.email]) {
-      await expect(updateUserContact(u1._id, { name: "A", surname: "B", email, phoneNumber: "" }, ACTOR)).rejects.toThrow(/email no se puede cambiar/i);
-    }
-    expect(await getUser(u1._id)).toMatchObject({ name: u1.name, email: u1.email });
-    expect(await listAudit()).toHaveLength(0);
-  });
-  it("pausar y activar", async () => {
-    const co = MOCK.companies[0];
-    await setCompanyStatus(co._id, "paused", ACTOR);
-    expect((await getCompanyBundle(co._id)).company.status).toBe("paused");
-    await setCompanyStatus(co._id, "active", ACTOR);
-    expect((await getCompanyBundle(co._id)).company.status).toBe("active");
-    const acts = (await listAudit()).map((a) => a.action);
-    expect(acts).toEqual(["company_activate", "company_pause"]);
-    await expect(setCompanyStatus(co._id, "borrada", ACTOR)).rejects.toThrow(/inválido/);
-  });
-  it("sin actor no se puede modificar nada", async () => {
-    const co = MOCK.companies[0];
-    await expect(setCompanyStatus(co._id, "paused", "")).rejects.toThrow(/quién/);
-    await expect(assignPlan(MOCK.users[0]._id, { plan: "SpicyStart", stripePriceId: "price_1MockStartStd0001" }, undefined)).rejects.toThrow(/quién/);
-    expect((await getCompanyBundle(co._id)).company.status).toBe(co.status);
-    expect((await getUser(MOCK.users[0]._id)).subscription).toEqual(MOCK.users[0].subscription);
-    expect(await listAudit()).toHaveLength(0);
-  });
-  it("la auditoría se puede filtrar por company", async () => {
-    await setCompanyStatus(MOCK.companies[0]._id, "paused", ACTOR);
-    await setCompanyStatus(MOCK.companies[1]._id, "paused", ACTOR);
-    expect(await listAudit({ companyId: MOCK.companies[1]._id })).toHaveLength(1);
-    expect(await listAudit()).toHaveLength(2);
-  });
-  it("resetMock vuelve al estado inicial", async () => {
-    await setCompanyStatus(MOCK.companies[0]._id, "paused", ACTOR);
-    resetMock();
-    expect((await getCompanyBundle(MOCK.companies[0]._id)).company.status).toBe(MOCK.companies[0].status);
-    expect(await listAudit()).toHaveLength(0);
-  });
-});
-
-describe("cupones al asignar plan (simulado)", () => {
-  const START = "price_1MockStartStd0001";
-  it("lista de cupones de ejemplo", async () => {
-    const c = await listCoupons();
-    expect(c.length).toBeGreaterThan(0);
-    expect(c.every((x) => x.id && x.label && x.code)).toBe(true);
-  });
-  it("con cupón: se asigna el plan y la auditoría guarda cuál", async () => {
-    const [c] = await listCoupons();
-    const u = MOCK.users.find((x) => x.name === "Lucía");
-    await assignPlan(u._id, { plan: "SpicyStart", stripePriceId: START, couponId: c.id }, ACTOR);
-    const [a] = await listAudit();
-    expect(a).toMatchObject({ action: "plan_assign", detail: { couponId: c.id, couponLabel: c.label } });
-  });
-  it("un cupón que no está en la lista se rechaza y NO cambia el plan", async () => {
-    const u = MOCK.users.find((x) => x.name === "Lucía");
-    const antes = (await getUser(u._id)).subscription;
-    await expect(assignPlan(u._id, { plan: "SpicyStart", stripePriceId: START, couponId: "promo_inventado" }, ACTOR)).rejects.toMatchObject({ code: "CUPON_INVALIDO" });
-    expect((await getUser(u._id)).subscription).toEqual(antes);
-  });
-  it("sin cupón no aparece nada de cupón en la auditoría", async () => {
-    const u = MOCK.users.find((x) => x.name === "Lucía");
-    await assignPlan(u._id, { plan: "SpicyStart", stripePriceId: START }, ACTOR);
-    expect((await listAudit())[0].detail.couponId).toBeUndefined();
-  });
-});
-
-// Modo real: se habla con el servidor del backoffice (fetch falso: no sale nada a la red ni se abre ninguna sesión de soporte de verdad).
-describe("entrar como usuario con el servidor real", () => {
-  const calls = [];
-  const fakeFetch = (routes) => vi.fn(async (url, opts = {}) => {
-    calls.push({ url: String(url), method: opts.method || "GET", headers: opts.headers, body: opts.body ? JSON.parse(opts.body) : null });
-    const r = routes(String(url), opts);
-    return { ok: r.status < 400, status: r.status, json: async () => r.body };
-  });
-  beforeEach(() => { calls.length = 0; configureAdminApi(async () => "token-del-admin"); });
-  afterEach(async () => { vi.unstubAllGlobals(); configureAdminApi(null); await probeAdminApi(); });
-
-  it("manda al servidor el motivo y la cuenta de Spicytool, con el token del admin, y devuelve el link", async () => {
-    vi.stubGlobal("fetch", fakeFetch((url) => (url.endsWith("/health") ? { status: 200, body: { ok: true, mode: "real" } } : { status: 201, body: { url: "https://app.test/s?c=1", expiresAt: "2026-11-20T15:00:00Z" } })));
+describe("conexión con el servidor", () => {
+  it("probe: 'real' si responde bien y 'down' si no (nunca se inventan datos)", async () => {
+    fetchMock.mockResolvedValueOnce(json(200, { ok: true, mode: "real" }));
     expect(await probeAdminApi()).toBe("real");
-    const r = await createSupportLink("6650000000000000000000a1", "  ticket 4821:  el cliente no ve sus contactos ", ACTOR, new Date(), { email: "nico@spicytool.net", password: "clave-123" });
-    expect(r).toEqual({ url: "https://app.test/s?c=1", expiresAt: "2026-11-20T15:00:00Z" });
-    const c = calls.find((x) => x.url.includes("support-link"));
-    expect(c).toMatchObject({ method: "POST", url: "/api/admin/users/6650000000000000000000a1/support-link", headers: { Authorization: "Bearer token-del-admin" } });
-    expect(c.body).toEqual({ reason: "ticket 4821: el cliente no ve sus contactos", spicyEmail: "nico@spicytool.net", spicyPassword: "clave-123" });
+    expect(adminMode()).toBe("real");
+    fetchMock.mockResolvedValueOnce(json(200, { ok: true, mode: "otro" }));
+    expect(await probeAdminApi()).toBe("down");
+    fetchMock.mockRejectedValueOnce(new Error("sin red"));
+    expect(await probeAdminApi()).toBe("down");
+    configureAdminApi(async () => null);
+    expect(await probeAdminApi()).toBe("down");
   });
-  it("un motivo inválido ni siquiera sale del navegador", async () => {
-    vi.stubGlobal("fetch", fakeFetch(() => ({ status: 200, body: { ok: true, mode: "real" } })));
-    await probeAdminApi();
-    calls.length = 0;
-    const e = await createSupportLink("6650000000000000000000a1", "ok", ACTOR, new Date(), { email: "a@b.co", password: "x" }).catch((x) => x);
+  it("todo pedido va con el token de la sesión; sin sesión falla antes de pedir nada", async () => {
+    fetchMock.mockResolvedValue(json(200, {}));
+    await listUsers();
+    expect(lastCall().init.headers.Authorization).toBe("Bearer jwt-123");
+    fetchMock.mockClear();
+    configureAdminApi(async () => null);
+    await expect(listUsers()).rejects.toThrow("No hay sesión.");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("armado de los pedidos", () => {
+  it("las listas mandan los filtros y omiten los vacíos o apagados", async () => {
+    fetchMock.mockResolvedValue(json(200, { items: [] }));
+    await listUsers({ search: "ana", page: 2, pageSize: 8, owners: true, activeOnly: false, plan: "Freemium" });
+    expect(lastCall().url).toBe("/api/admin/users?search=ana&page=2&pageSize=8&owners=true&plan=Freemium");
+    await listCompanies({ status: "paused", plan: "" });
+    expect(lastCall().url).toBe("/api/admin/companies?status=paused&page=1&pageSize=8");
+  });
+  it("las escrituras son POST con su cuerpo; la clave de idempotencia y el cupón viajan solo si hay", async () => {
+    fetchMock.mockResolvedValue(json(200, {}));
+    await setCompanyStatus("c1", "paused");
+    expect(lastCall()).toMatchObject({ url: "/api/admin/companies/c1/status", init: { method: "POST", body: JSON.stringify({ status: "paused" }) } });
+    await assignPlan("u1", { plan: "SpicyPro", stripePriceId: "price_1", idempotencyKey: "k1" });
+    expect(JSON.parse(lastCall().init.body)).toEqual({ plan: "SpicyPro", stripePriceId: "price_1", idempotencyKey: "k1" });
+    await assignPlan("u1", { plan: "SpicyPro", stripePriceId: "price_1", idempotencyKey: "k1", couponId: "cup" });
+    expect(JSON.parse(lastCall().init.body).couponId).toBe("cup");
+    await getKapsoSetupLink("a1");
+    expect(lastCall()).toMatchObject({ url: "/api/admin/kapso-apps/a1/setup-link", init: { method: "POST" } });
+  });
+  it("los ids se codifican en la dirección", async () => {
+    fetchMock.mockResolvedValue(json(200, {}));
+    await setCompanyStatus("a/b", "active");
+    expect(lastCall().url).toBe("/api/admin/companies/a%2Fb/status");
+  });
+});
+
+describe("errores y permisos", () => {
+  it("un error con código llega como WebhookError (status, code y datos extra)", async () => {
+    fetchMock.mockResolvedValue(json(402, { code: "PAGO_RECHAZADO", message: "rechazada", decline_code: "insufficient_funds", paymentMethodUpdateUrl: "https://x" }));
+    const e = await assignPlan("u1", { plan: "SpicyPro", stripePriceId: "price_1", idempotencyKey: "k" }).catch((x) => x);
+    expect(e).toBeInstanceOf(WebhookError);
+    expect(e).toMatchObject({ status: 402, code: "PAGO_RECHAZADO", extra: { decline_code: "insufficient_funds", paymentMethodUpdateUrl: "https://x" } });
+  });
+  it("un error común llega como Error con el mensaje y el status del servidor", async () => {
+    fetchMock.mockResolvedValue(json(500, { error: "Error del servidor" }));
+    await expect(listUsers()).rejects.toMatchObject({ message: "Error del servidor", status: 500 });
+  });
+  it("getUser devuelve null si no existe y propaga el resto de los errores", async () => {
+    fetchMock.mockResolvedValueOnce(json(404, { error: "No encontrado" }));
+    expect(await getUser("x")).toBeNull();
+    fetchMock.mockResolvedValueOnce(json(500, { error: "boom" }));
+    await expect(getUser("x")).rejects.toThrow("boom");
+  });
+  it("getMyPermissions refleja lo que dice el servidor", async () => {
+    fetchMock.mockResolvedValue(json(200, { email: "a@b.co", level: "read", canAct: false, support: false }));
+    expect(await getMyPermissions()).toMatchObject({ canAct: false, support: false, level: "read" });
+    fetchMock.mockResolvedValue(json(200, { level: "actions", canAct: true, support: true }));
+    expect(await getMyPermissions()).toMatchObject({ canAct: true, support: true });
+  });
+  it("los créditos todavía no están conectados: se avisa en vez de inventar un saldo", async () => {
+    expect(await getCredits("c1")).toEqual({ balance: null, transactions: [], unavailable: true });
+  });
+});
+
+describe("entrar como usuario", () => {
+  it("sin motivo válido ni siquiera se llama al servidor", async () => {
+    const e = await createSupportLink("u1", "x", { email: "a@b.co", password: "p" }).catch((x) => x);
+    expect(e).toBeInstanceOf(SupportError);
     expect(e.code).toBe("MOTIVO_INVALIDO");
-    expect(calls).toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
-  it("los errores del servidor llegan con su código para mostrar el mensaje claro", async () => {
-    vi.stubGlobal("fetch", fakeFetch((url) => (url.endsWith("/health") ? { status: 200, body: { ok: true, mode: "real" } } : { status: 401, body: { code: "SPICY_LOGIN_INVALIDO", message: "x" } })));
-    await probeAdminApi();
-    const e = await createSupportLink("6650000000000000000000a1", "ticket 4821: el cliente no ve sus contactos", ACTOR, new Date(), { email: "a@b.co", password: "mala" }).catch((x) => x);
-    expect(e.code).toBe("SPICY_LOGIN_INVALIDO");
-  });
-  it("el permiso de soporte lo dice el servidor", async () => {
-    vi.stubGlobal("fetch", fakeFetch((url) => (url.endsWith("/health") ? { status: 200, body: { ok: true, mode: "real" } } : { status: 200, body: { email: "x", level: "admin", canAct: true, support: true } })));
-    await probeAdminApi();
-    expect(await getMyPermissions(ACTOR)).toMatchObject({ support: true, canAct: true, level: "admin" });
-    vi.stubGlobal("fetch", fakeFetch((url) => (url.endsWith("/health") ? { status: 200, body: { ok: true, mode: "real" } } : { status: 200, body: { email: "x", level: "actions", canAct: true, support: false } })));
-    await probeAdminApi();
-    expect((await getMyPermissions(ACTOR)).support).toBe(false);
-  });
-});
-
-describe("colaboradores (users.companiesWhereICollaborate)", () => {
-  const paula = () => MOCK.users.find((u) => u.name === "Paula");
-  it("un colaborador sin company propia aparece con la company en la que colabora, marcado como colaborador y no como owner", async () => {
-    const r = (await listUsers({ search: "paula", pageSize: 50 })).items.find((u) => u._id === paula()._id);
-    const co = MOCK.companies.find((c) => c._id === paula().collaboratesIn[0]);
-    expect(r).toMatchObject({ companyName: co.name, companyStatus: co.status, isCollaborator: true, isOwner: false });
-  });
-  it("un colaborador cuenta como usuario de la company y figura como colaborador (el owner sigue primero)", async () => {
-    const cid = paula().collaboratesIn[0];
-    const list = await listCompanyUsers(cid);
-    const p = list.find((u) => u._id === paula()._id);
-    expect(p).toMatchObject({ isCollaborator: true, isOwner: false });
-    expect(list[0].isOwner).toBe(true);
-    expect((await getCompanyBundle(cid)).users.some((u) => u._id === paula()._id)).toBe(true);
-  });
-  it("el filtro 'solo owners' no los incluye y 'company activa' sí, si su company está activa", async () => {
-    expect((await listUsers({ owners: true, pageSize: 50 })).items.some((u) => u._id === paula()._id)).toBe(false);
-    const co = MOCK.companies.find((c) => c._id === paula().collaboratesIn[0]);
-    expect((await listUsers({ activeOnly: true, pageSize: 50 })).items.some((u) => u._id === paula()._id)).toBe(co.status === "active");
-  });
-});
-
-describe("conexiones de WhatsApp por Kapso (colección kapsoapps)", () => {
-  it("la company trae sus conexiones, con la pendiente de conexión incluida", async () => {
-    const k = MOCK.kapsoapps[0];
-    const b = await getCompanyBundle(k.companyId);
-    expect(b.kapsoApps.every((a) => a.companyId === k.companyId)).toBe(true);
-    expect(b.kapsoApps.map((a) => a.status).sort()).toEqual(["pending_setup", "success", "success"]);
-  });
-  it("una company sin conexiones trae la lista vacía", async () => {
-    const sin = MOCK.companies.find((c) => !MOCK.kapsoapps.some((a) => a.companyId === c._id));
-    expect((await getCompanyBundle(sin._id)).kapsoApps).toEqual([]);
-  });
-  it("la lista de usuarios muestra en cada uno un resumen de SUS conexiones", async () => {
-    const k = MOCK.kapsoapps[0];
-    const u = (await listUsers({ pageSize: 50 })).items.find((x) => x._id === k.userId);
-    expect(u.kapsoApps.map((a) => a.status).sort()).toEqual(["pending_setup", "success", "success"]);
-    expect(Object.keys(u.kapsoApps[0]).sort()).toEqual(["_id", "alias", "connectionType", "displayPhoneNumber", "isDefault", "status"]);
-    const sinKapso = (await listUsers({ pageSize: 50 })).items.find((x) => !MOCK.kapsoapps.some((a) => a.userId === x._id));
-    expect(sinKapso.kapsoApps).toEqual([]);
-  });
-  it("los datos de ejemplo no traen el link de conexión", () => {
-    expect(JSON.stringify(MOCK.kapsoapps)).not.toMatch(/setupLinkUrl|setupLinkId|kapsoCustomerId/);
-  });
-});
-
-describe("vista de conexiones de WhatsApp", () => {
-  it("lista las pendientes de companies activas, con su company y su usuario", async () => {
-    const r = await listKapsoApps({ pageSize: 50 });
-    expect(r.items.length).toBeGreaterThan(0);
-    expect(r.items.every((a) => a.status === "pending_setup" && a.companyStatus === "active")).toBe(true);
-    expect(r.items[0]).toMatchObject({ companyName: expect.any(String), userName: expect.any(String), userEmail: expect.stringContaining("@") });
-    expect(r.counts.pending).toBe(r.total);
-  });
-  it("conectadas y todas suman lo mismo que las pestañas", async () => {
-    const all = await listKapsoApps({ status: "all", activeOnly: false, pageSize: 50 });
-    const c = await listKapsoApps({ status: "connected", activeOnly: false, pageSize: 50 });
-    const p = await listKapsoApps({ status: "pending", activeOnly: false, pageSize: 50 });
-    expect(c.total + p.total).toBe(all.total);
-    expect(all.total).toBe(MOCK.kapsoapps.length);
-  });
-});
-
-describe("cambiar la conexión de WhatsApp que usa un usuario", () => {
-  const err = async (p) => { try { await p; } catch (e) { return e; } throw new Error("tenía que fallar"); };
-  const owner = () => MOCK.users.find((u) => u.kapso && u.activeWhatsAppProvider === "kapso");
-  const appsOf = (u) => MOCK.kapsoapps.filter((a) => a.companyId === u.companies[0]);
-  it("cada usuario de Kapso apunta (por _id) a una conexión que existe", () => {
-    for (const u of MOCK.users.filter((x) => x.activeWhatsAppProvider === "kapso")) expect(MOCK.kapsoapps.some((a) => a._id === u.kapso.kapsoAppId)).toBe(true);
-  });
-  it("cambia a otra conexión conectada de la company, la deja en el usuario y audita con el valor anterior", async () => {
-    const u = owner(), actual = u.kapso.kapsoAppId, otra = appsOf(u).find((a) => a.status === "success" && a._id !== actual);
-    const r = await setUserKapsoApp(u._id, otra._id, ACTOR);
-    expect(r).toMatchObject({ changed: true, kapsoAppId: otra._id, previousKapsoAppId: actual });
-    expect((await getUser(u._id)).kapso.kapsoAppId).toBe(otra._id);
-    const a = (await listAudit({ limit: 5 })).find((x) => x.action === "kapso_app_change");
-    expect(a).toMatchObject({ actor: ACTOR, targetId: u._id, detail: { from: actual, to: otra._id } });
-  });
-  it("elegir la misma no cambia nada", async () => {
-    const u = owner();
-    expect((await setUserKapsoApp(u._id, u.kapso.kapsoAppId, ACTOR)).changed).toBe(false);
-  });
-  it("rechaza una conexión pendiente, una de otra company y a usuarios sin conexión asignada", async () => {
-    const u = owner();
-    const pendiente = appsOf(u).find((a) => a.status === "pending_setup");
-    expect((await err(setUserKapsoApp(u._id, pendiente._id, ACTOR))).message).toMatch(/no está conectada/);
-    const ajena = MOCK.kapsoapps.find((a) => a.companyId !== u.companies[0]);
-    if (ajena) expect((await err(setUserKapsoApp(u._id, ajena._id, ACTOR))).message).toMatch(/otra company/);
-    const sin = MOCK.users.find((x) => !x.kapso);
-    expect((await err(setUserKapsoApp(sin._id, appsOf(u)[0]._id, ACTOR))).message).toMatch(/todavía no tiene una conexión/);
-    expect((await err(setUserKapsoApp("nope", appsOf(u)[0]._id, ACTOR))).message).toMatch(/No se encontró el usuario/);
-    await expect(setUserKapsoApp(u._id, appsOf(u)[0]._id, "")).rejects.toThrow(/quién/);
-  });
-});
-
-describe("link de conexión de WhatsApp (simulador)", () => {
-  it("de una conexión pendiente devuelve un link y queda auditado sin el link adentro", async () => {
-    const pend = MOCK.kapsoapps.find((a) => a.status === "pending_setup" && !(a.setupLinkExpiresAt && new Date(a.setupLinkExpiresAt) <= new Date()));
-    const r = await getKapsoSetupLink(pend._id, ACTOR);
-    expect(r.url).toMatch(/^https:\/\//);
-    const entry = (await listAudit({ limit: 5 })).find((e) => e.action === "kapso_setup_link_view");
-    expect(entry).toMatchObject({ actor: ACTOR, targetId: pend._id });
-    expect(JSON.stringify(entry)).not.toContain(r.url);
-  });
-  it("una conexión ya conectada o inexistente da error con código", async () => {
-    const ok = MOCK.kapsoapps.find((a) => a.status === "success");
-    await expect(getKapsoSetupLink(ok._id, ACTOR)).rejects.toMatchObject({ code: "CONEXION_YA_CONECTADA" });
-    await expect(getKapsoSetupLink("nada", ACTOR)).rejects.toMatchObject({ code: "CONEXION_NO_ENCONTRADA" });
-    await expect(getKapsoSetupLink(ok._id, "")).rejects.toThrow();
+  it("manda el motivo y las credenciales de quien lo pide solo en ese pedido", async () => {
+    fetchMock.mockResolvedValue(json(201, { url: "https://x", expiresAt: "2026-12-01T00:00:00Z" }));
+    const r = await createSupportLink("u1", "ticket 4821: no ve sus contactos", { email: "a@b.co", password: "p" });
+    expect(r.url).toBe("https://x");
+    expect(JSON.parse(lastCall().init.body)).toEqual({ reason: "ticket 4821: no ve sus contactos", spicyEmail: "a@b.co", spicyPassword: "p" });
   });
 });

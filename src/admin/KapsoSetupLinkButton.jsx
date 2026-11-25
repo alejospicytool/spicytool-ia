@@ -8,13 +8,13 @@ import { KapsoSetupLinkDialog } from "./AdminDialogs.jsx";
 
 const NO_ACT_TITLE = "Tu usuario puede ver Admin Spicy pero no hacer cambios. Pedile a un admin que te habilite las acciones.";
 
-export default function KapsoSetupLinkButton({ app, actor, canAct = true }) {
+export default function KapsoSetupLinkButton({ app, canAct = true }) {
   const [open, setOpen] = useState(false);
   if (!canOfferSetupLink(app)) return null;
   return (
     <>
       <button type="button" className="btn-sm" disabled={!canAct} title={canAct ? "Ver el link para que el cliente termine de conectar su número" : NO_ACT_TITLE} onClick={(e) => { e.stopPropagation(); setOpen(true); }}>Ver link de conexión</button>
-      {open && createPortal(<div onClick={(e) => e.stopPropagation()}><KapsoSetupLinkDialog app={app} onSubmit={() => getKapsoSetupLink(app._id, actor)} onClose={() => setOpen(false)} /></div>, document.querySelector(".rv") || document.body)}
+      {open && createPortal(<div onClick={(e) => e.stopPropagation()}><KapsoSetupLinkDialog app={app} onSubmit={() => getKapsoSetupLink(app._id)} onClose={() => setOpen(false)} /></div>, document.querySelector(".rv") || document.body)}
     </>
   );
 }
