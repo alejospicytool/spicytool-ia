@@ -44,7 +44,7 @@ function useRevenueData(sb) {
 
 const PAGES_WITH_FILTERS = ["metrics", "metrics_mrr", "metrics_churn", "metrics_retention", "metrics_customers"];
 
-export default function RevenueApp({ sb, view, setView, readOnly = false, canSegment = false }) {
+export default function RevenueApp({ sb, view, setView, readOnly = false, canSegment = false, canSpicy = false, onOpenFicha = null }) {
   const { data, error, reload } = useRevenueData(sb);
   const [period, setPeriod] = useState("year");
   const [seg, setSeg] = useState("todos");
@@ -60,7 +60,7 @@ export default function RevenueApp({ sb, view, setView, readOnly = false, canSeg
   if (!data) return <div style={{ padding: "3rem 1rem", textAlign: "center", color: "#888", fontSize: 14 }}>Cargando métricas...</div>;
 
   const done = data.events.some((e) => e.baseline) || data.runs.some((r) => r.kind === "baseline");
-  const common = { d: data, rows, allRows, seg, now, sb, reload, done, go, ro: readOnly, roSeg: readOnly && !canSegment };
+  const common = { d: data, rows, allRows, seg, now, sb, reload, done, go, ro: readOnly, roSeg: readOnly && !canSegment, canSpicy, onOpenFicha };
   return (
     <div className="rv">
       <RvStyles />

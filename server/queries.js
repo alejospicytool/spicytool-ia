@@ -1,7 +1,7 @@
 // Consultas de SOLO LECTURA a Mongo para el backoffice. Nada acá escribe, actualiza ni borra.
 // Las pantallas esperan la misma forma que tenía el simulador (src/admin/adminApi.js); la forma la fija shape.js.
 import { ObjectId } from "mongodb";
-import { matchesSearch, matchesFilters, planCounts, companiesView, isOwner, sortUsersRecent, paginate, companyIdOf, isMemberOf, isCollaboratorOf, collaboratesInOf, kapsoAppsOfUser, kapsoSummary, listKapsoRows } from "../src/admin/adminLogic.js";
+import { matchesSearch, matchesFilters, planCounts, companiesView, stripeCustomerLinks, isOwner, sortUsersRecent, paginate, companyIdOf, isMemberOf, isCollaboratorOf, collaboratesInOf, kapsoAppsOfUser, kapsoSummary, listKapsoRows } from "../src/admin/adminLogic.js";
 import { USER_PROJECTION, COMPANY_PROJECTION, KAPSOAPP_PROJECTION, shapeKapsoApp, CHILD, SUPPORT_PROJECTION, shapeUser, shapeCompany, shapeSupportSession, numbered } from "./shape.js";
 
 const MAX_MS = 8000;
@@ -57,6 +57,12 @@ export function makeQueries(db) {
     async listKapsoApps(params = {}) {
       const s = await snapshot();
       return listKapsoRows({ apps: s.kapsoApps, users: s.users, companies: s.companies }, params);
+    },
+
+    // Qué cuenta de Spicytool es de cada cliente de Stripe (para unir Métricas con las cuentas). Sale de la copia en memoria: no hace otra consulta a Mongo.
+    async listStripeCustomers() {
+      const s = await snapshot();
+      return stripeCustomerLinks(s.users, s.companies);
     },
 
     async listCompanies({ status = "active", search = "", plan = "", page = 1, pageSize = 8 } = {}) {

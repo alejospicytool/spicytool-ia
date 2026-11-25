@@ -73,6 +73,23 @@ export function autoRevCustomers(users, companyId, customers) {
   return (customers || []).filter((c) => byKey.has(c.key)).map((c) => ({ customer: c, via: byKey.get(c.key) }));
 }
 
+// De qué cuenta de Spicytool es un cliente de Métricas (clave "stripe:cus_…" o "manual:…"): primero por el cliente de Stripe de sus usuarios (exacto),
+// y si no, por el vínculo confirmado a mano (client_links). `stripeLinks` = [{ customerId, companyId, companyName }]; `manualLinks` = filas de client_links.
+// Devuelve { companyId, companyName, via: "auto" | "manual" } o null.
+export function companyOfRevCustomer(key, stripeLinks, manualLinks) {
+  const k = String(key || "");
+  const auto = k.startsWith("stripe:") ? (stripeLinks || []).find((x) => stripeKeyOf(x.customerId) === k) : null;
+  if (auto) return { companyId: auto.companyId, companyName: auto.companyName || "", via: "auto" };
+  const man = (manualLinks || []).find((l) => (l.kind === undefined || l.kind === "rev_customer") && l.ref === k);
+  return man ? { companyId: man.company_id, companyName: "", via: "manual" } : null;
+}
+// Cuántos de esos clientes tienen cuenta de Spicytool: { auto, manual, sin }.
+export function revCustomersSummary(keys, stripeLinks, manualLinks) {
+  const out = { auto: 0, manual: 0, sin: 0 };
+  for (const k of keys || []) { const c = companyOfRevCustomer(k, stripeLinks, manualLinks); if (!c) out.sin++; else out[c.via]++; }
+  return out;
+}
+
 export const refsOf = (links, companyId, kind) => (links || []).filter((l) => l.company_id === companyId && l.kind === kind).map((l) => l.ref);
 export const linkOf = (links, companyId, kind, ref) => (links || []).find((l) => l.company_id === companyId && l.kind === kind && l.ref === ref) || null;
 

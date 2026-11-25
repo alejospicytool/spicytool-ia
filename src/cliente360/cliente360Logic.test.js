@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { autoRevCustomers, stripeKeyOf, nameTokens, nameScore, suggestRevCustomers, suggestDeals, suggestTicketClients, dealIdsOfCompany, ticketsOfCompany, ticketsOpen, totalMrr, subLine, subStatusInfo, stageName, refsOf, linkOf, clientOptions, linkStatus, companyOfTicketName } from "./cliente360Logic.js";
+import { companyOfRevCustomer, revCustomersSummary, autoRevCustomers, stripeKeyOf, nameTokens, nameScore, suggestRevCustomers, suggestDeals, suggestTicketClients, dealIdsOfCompany, ticketsOfCompany, ticketsOpen, totalMrr, subLine, subStatusInfo, stageName, refsOf, linkOf, clientOptions, linkStatus, companyOfTicketName } from "./cliente360Logic.js";
 
 const co = { company_id: "c1", company_name: "Terra Pueblo Inmobiliaria", contact_name: "Marcos Gil", contact_email: "marcos@terra.com", contact_phone: "+54 9 351 555-0000" };
 
@@ -144,5 +144,25 @@ describe("pagos que se unen solos por el cliente de Stripe", () => {
     expect(autoRevCustomers(null, "c1", customers)).toEqual([]);
     expect(autoRevCustomers(users, "", customers)).toEqual([]);
     expect(autoRevCustomers(users, "c1", null)).toEqual([]);
+  });
+});
+
+describe("cuenta de Spicytool de un cliente de Métricas", () => {
+  const stripe = [{ customerId: "cus_1", companyId: "c1", companyName: "Alfa" }, { customerId: "cus_2", companyId: "c2", companyName: "" }];
+  const manual = [{ kind: "rev_customer", ref: "manual:x", company_id: "c3" }, { kind: "rev_customer", ref: "stripe:cus_9", company_id: "c9" }];
+  it("por el cliente de Stripe (exacto) y, si no, por el vínculo a mano", () => {
+    expect(companyOfRevCustomer("stripe:cus_1", stripe, manual)).toEqual({ companyId: "c1", companyName: "Alfa", via: "auto" });
+    expect(companyOfRevCustomer("manual:x", stripe, manual)).toEqual({ companyId: "c3", companyName: "", via: "manual" });
+    expect(companyOfRevCustomer("stripe:cus_9", stripe, manual)).toMatchObject({ companyId: "c9", via: "manual" });
+  });
+  it("lo automático gana sobre el vínculo a mano; sin nada, null", () => {
+    expect(companyOfRevCustomer("stripe:cus_1", stripe, [{ kind: "rev_customer", ref: "stripe:cus_1", company_id: "otra" }]).companyId).toBe("c1");
+    expect(companyOfRevCustomer("stripe:cus_7", stripe, manual)).toBeNull();
+    expect(companyOfRevCustomer("manual:y", stripe, manual)).toBeNull();
+    expect(companyOfRevCustomer("", null, null)).toBeNull();
+  });
+  it("revCustomersSummary cuenta automáticos, a mano y sin cuenta", () => {
+    expect(revCustomersSummary(["stripe:cus_1", "stripe:cus_2", "manual:x", "stripe:cus_7", "manual:y"], stripe, manual)).toEqual({ auto: 2, manual: 1, sin: 2 });
+    expect(revCustomersSummary(null, null, null)).toEqual({ auto: 0, manual: 0, sin: 0 });
   });
 });

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   PAID_PLANS, planOf, planLabel, isPaidPlan, validatePlanAssignment, newIdempotencyKey, formatPrice, explainWebhookError, WEBHOOK_ERRORS, validateSupportReason, buildSupportRequest, explainSupportError, SUPPORT_ERRORS, SUPPORT_ACTIONS, AUDIT_ACTIONS, expiryText, REASON_MIN, REASON_MAX, matchesSearch, escapeRegExp, sortUsersRecent, paginate, whatsappProvider, companyIdOf, isMemberOf, isCollaboratorOf, kapsoStatusInfo, kapsoAppsOfUser, kapsoSummary, kapsoQualityInfo, messagingTierLabel, incomingModeLabel, listKapsoRows,
-  validateCompanyEdit, validateContactEdit, diffFields, waLink, couponSummary, buildAuditEntry, userFullName, sortByPosition, isOwner, matchesFilters, isPaused, matchesCompanySearch, sortCompaniesByName, matchesPlan, planCounts, planOptions, NO_PLAN, companiesView, companyPlan, ownerIndex, canOfferSetupLink, explainSetupLinkError, AUDIT_ACTIONS as AUDIT_ACTIONS_2,
+  validateCompanyEdit, validateContactEdit, diffFields, waLink, couponSummary, buildAuditEntry, userFullName, sortByPosition, isOwner, matchesFilters, isPaused, matchesCompanySearch, sortCompaniesByName, matchesPlan, planCounts, planOptions, NO_PLAN, companiesView, companyPlan, ownerIndex, canOfferSetupLink, explainSetupLinkError, stripeCustomerLinks, AUDIT_ACTIONS as AUDIT_ACTIONS_2,
 } from "./adminLogic.js";
 
 describe("planes y suscripciones", () => {
@@ -575,5 +575,23 @@ describe("link de conexión de WhatsApp", () => {
     expect(explainSetupLinkError("LINK_VENCIDO").title).toMatch(/venció/);
     expect(explainSetupLinkError("COSA_RARA").title).toBe("Error inesperado");
     expect(AUDIT_ACTIONS_2.kapso_setup_link_view).toMatch(/link de conexión/);
+  });
+});
+
+describe("stripeCustomerLinks: qué cuenta es de cada cliente de Stripe", () => {
+  const cos = [{ _id: "c1", name: "Alfa" }, { _id: "c2", name: "Beta" }];
+  const mk = (email, companies, customerId, collab = []) => ({ email, companies, companiesWhereICollaborate: collab, stripe: { customerId } });
+  it("une el cliente de Stripe con la company PROPIA del usuario", () => {
+    const r = stripeCustomerLinks([mk("a@x.com", ["c1"], "cus_1"), mk("b@x.com", ["c2"], "cus_2")], cos);
+    expect(r).toEqual([{ customerId: "cus_1", companyId: "c1", companyName: "Alfa", userEmail: "a@x.com" }, { customerId: "cus_2", companyId: "c2", companyName: "Beta", userEmail: "b@x.com" }]);
+  });
+  it("sin Stripe, sin company propia (solo colaborador) o repetido: no suma ni duplica", () => {
+    const r = stripeCustomerLinks([mk("a@x.com", ["c1"], null), mk("b@x.com", [], "cus_2", ["c1"]), mk("c@x.com", ["c1"], "cus_3"), mk("d@x.com", ["c2"], "cus_3")], cos);
+    expect(r.map((x) => [x.customerId, x.companyId])).toEqual([["cus_3", "c1"]]);
+  });
+  it("si la company no está en la lista deja el nombre vacío y entradas raras no rompen", () => {
+    expect(stripeCustomerLinks([mk("a@x.com", ["zz"], "cus_9")], cos)[0].companyName).toBe("");
+    expect(stripeCustomerLinks(null, null)).toEqual([]);
+    expect(stripeCustomerLinks([null, {}], cos)).toEqual([]);
   });
 });

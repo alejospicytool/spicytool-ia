@@ -56,6 +56,8 @@ export const listAudit = ({ companyId = null, limit = 50 } = {}) => http("/audit
 export const listKapsoApps = ({ status = "pending", search = "", activeOnly = true, page = 1, pageSize = 10 } = {}) => http("/kapso-apps", { status, search, activeOnly: activeOnly ? "1" : "0", page, pageSize });
 export const listSupportLog = ({ search = "", page = 1, pageSize = 10 } = {}) => http("/support-sessions", { search, page, pageSize });
 export const listCoupons = () => http("/coupons");
+// Qué cuenta de Spicytool es de cada cliente de Stripe: [{ customerId, companyId, companyName, userEmail }].
+export const listStripeCustomers = () => http("/stripe-customers");
 export const listPrices = () => http("/prices");
 
 // Qué puede hacer quien está conectado. canAct / level / support vienen del servidor: la que manda es esa API; esto solo deshabilita botones.

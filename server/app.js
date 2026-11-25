@@ -53,6 +53,8 @@ export function createApp({ queries, authenticate, billing, companies, users, au
     activeOnly: req.query.activeOnly === undefined ? true : flag(req.query.activeOnly), page: int(req.query.page, 1, 1, 100000), pageSize: int(req.query.pageSize, 10, 1, 50),
   }))));
 
+  app.get("/api/admin/stripe-customers", route(async (req, res) => res.json(await queries.listStripeCustomers())));
+
   app.get("/api/admin/pipelines/:id/stages", route(async (req, res) => { if (needId(req, res)) res.json(await queries.getPipelineStages(req.params.id)); }));
 
   app.get("/api/admin/support-sessions", route(async (req, res) => res.json(await queries.listSupportSessions({

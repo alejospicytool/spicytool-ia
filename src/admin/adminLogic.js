@@ -162,6 +162,22 @@ export const isMemberOf = (u, companyId) => !!companyId && ((u && Array.isArray(
 // Colaborador de esa company: pertenece por colaboración y no por tener la company como propia.
 export const isCollaboratorOf = (u, companyId) => !!companyId && collaboratesInOf(u).includes(companyId) && !(u && Array.isArray(u.companies) && u.companies.includes(companyId));
 
+// Qué cuenta de Spicytool es de cada cliente de Stripe: users.stripe.customerId → la company PROPIA del usuario (no las que colabora).
+// Devuelve [{ customerId, companyId, companyName, userEmail }], uno por cliente de Stripe. Lo usan Métricas → Clientes y la Ficha 360 para unir pagos con cuentas.
+export function stripeCustomerLinks(users, companies) {
+  const byId = new Map((companies || []).map((c) => [c._id, c]));
+  const seen = new Set(), out = [];
+  for (const u of users || []) {
+    const customerId = String((u && u.stripe && u.stripe.customerId) || "").trim();
+    const companyId = u && Array.isArray(u.companies) && u.companies[0] ? String(u.companies[0]) : null;
+    if (!customerId || !companyId || seen.has(customerId)) continue;
+    seen.add(customerId);
+    const co = byId.get(companyId);
+    out.push({ customerId, companyId, companyName: (co && co.name) || "", userEmail: u.email || "" });
+  }
+  return out;
+}
+
 // ── Conexiones de WhatsApp por Kapso (colección kapsoapps) ─────────────────────────────────────────────────────────
 // status en Mongo: "success" (conectada) y "pending_setup" (se creó pero falta conectar el número). Cualquier otro valor se muestra tal cual.
 export const KAPSO_STATUS = { success: { label: "Conectada", tone: "green" }, pending_setup: { label: "Pendiente de conexión", tone: "amber" } };

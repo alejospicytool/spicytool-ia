@@ -7,6 +7,7 @@ const queries = {
   listUsers: vi.fn(async (a) => ({ items: [], total: 0, page: 1, pages: 1, pageSize: a.pageSize, echo: a })),
   getUser: vi.fn(async (id) => (id === ID ? { _id: id } : null)),
   listCompanies: vi.fn(async (a) => ({ items: [], echo: a })),
+  listStripeCustomers: vi.fn(async () => [{ customerId: "cus_1", companyId: "c1", companyName: "Alfa", userEmail: "a@x.com" }]),
   getCompanyBundle: vi.fn(async (id) => (id === ID ? { company: { _id: id } } : null)),
   listCompanyUsers: vi.fn(async () => []),
   getPipelineStages: vi.fn(async () => []),
@@ -66,6 +67,13 @@ describe("API del backoffice (solo lectura)", () => {
   it("el texto de búsqueda se corta a 100 caracteres", async () => {
     const r = await (await call("/api/admin/users?search=" + "a".repeat(500))).json();
     expect(r.echo.search).toHaveLength(100);
+  });
+  it("clientes de Stripe → cuenta de Spicytool: GET con admin, sin cachear", async () => {
+    const r = await call("/api/admin/stripe-customers");
+    expect(r.status).toBe(200);
+    expect(r.headers.get("cache-control")).toBe("no-store");
+    expect((await r.json())[0]).toMatchObject({ customerId: "cus_1", companyId: "c1" });
+    expect((await call("/api/admin/stripe-customers", { token: null })).status).toBe(401);
   });
   it("companies: solo 'paused' o 'active'", async () => {
     expect((await (await call("/api/admin/companies?status=paused")).json()).echo.status).toBe("paused");

@@ -1,5 +1,8 @@
 // Páginas de la sección Métricas: Overview, MRR & ARR, Churn, Retención, Pagos fallidos, Clientes, Proyección y Planes.
 import { useMemo, useState } from "react";
+import { useAsync } from "../admin/adminHooks.js";
+import { listStripeCustomers } from "../admin/adminApi.js";
+import { companyOfRevCustomer, revCustomersSummary } from "../cliente360/cliente360Logic.js";
 import { periodKpis, customerMonthly, segmentSummary, matchSegment, projectionMonths, projectionDefaults, computeProjection, failuresSummary, liveCustomerKeys, planUsage, movementsFor } from "./revenueMetrics.js";
 import { Kpi, PageHeader, Notice, Alerts, Modal, MonthBars, money, signed, pct, monthLabel, monthShort, fmtDate, fmtDateTime, initials } from "./revenueUi.jsx";
 import { callFn } from "./revenueApi.js";
@@ -234,10 +237,20 @@ export function FailedPage({ d, now }) {
 
 // ── Clientes ─────────────────────────────────────────────────────────────────────────────────────────
 const EMPTY = { customerKey: "", customerName: "", email: "", planPriceId: "", newPlanName: "", amount: "", currency: "usd", interval: "month", status: "active", subscriptionId: "", segment: "" };
-export function CustomersPage({ d, rows, seg, now, sb, reload, ro, roSeg = ro }) {
+export function CustomersPage({ d, rows, seg, now, sb, reload, ro, roSeg = ro, canSpicy = false, onOpenFicha = null }) {
   const [q, setQ] = useState(""), [onlyActive, setOnlyActive] = useState(true), [form, setForm] = useState(null), [busy, setBusy] = useState(false), [notice, setNotice] = useState(null);
   const customers = useMemo(() => d.customers.filter((c) => matchSegment(c, seg) && (!onlyActive || Number(c.mrr) > 0) && (!q || ((c.name || "") + " " + (c.email || "") + " " + c.key).toLowerCase().includes(q.toLowerCase()))).sort((a, b) => Number(b.mrr) - Number(a.mrr) || String(a.name).localeCompare(String(b.name))), [d.customers, seg, onlyActive, q]);
   const summary = useMemo(() => segmentSummary(d.customers), [d.customers]);
+  // Qué cuenta de Spicytool es de cada cliente (para ir a su Ficha 360): por el cliente de Stripe de sus usuarios y, si no, por los vínculos confirmados a mano.
+  // Solo con permiso de Admin Spicy (el dato sale de Spicytool); si algo falla, la lista se ve igual, sin el botón.
+  const spicy = useAsync(async () => {
+    if (!canSpicy) return null;
+    const [stripeLinks, manual] = await Promise.all([listStripeCustomers().catch(() => null), sb.from("client_links").select("kind,ref,company_id").eq("kind", "rev_customer").then((r) => r.data || [], () => [])]);
+    return stripeLinks ? { stripeLinks, manual } : null;
+  }, "revlinks:" + canSpicy);
+  const spicyData = spicy.data || null;
+  const accountOf = (key) => (spicyData ? companyOfRevCustomer(key, spicyData.stripeLinks, spicyData.manual) : null);
+  const accountSummary = spicyData ? revCustomersSummary(customers.map((c) => c.key), spicyData.stripeLinks, spicyData.manual) : null;
   const liveMonths = useMemo(() => rows.filter((r) => r.source === "nuevo").map((r) => r.month), [rows]);
   const monthly = useMemo(() => customerMonthly(d.customers, d.events, liveMonths, now), [d.customers, d.events, liveMonths, now]);
   const planName = useMemo(() => Object.fromEntries(d.plans.map((p) => [p.price_id, p.name || p.price_id])), [d.plans]);
@@ -295,9 +308,10 @@ export function CustomersPage({ d, rows, seg, now, sb, reload, ro, roSeg = ro })
           <input className="inp" style={{ maxWidth: 280 }} placeholder="Buscar por nombre o email" aria-label="Buscar cliente" value={q} onChange={(e) => setQ(e.target.value)} />
           <label style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={onlyActive} onChange={(e) => setOnlyActive(e.target.checked)} />Solo los que pagan hoy</label>
         </div>
+        {accountSummary && customers.length > 0 && <div style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 8px" }}>Con cuenta de Spicytool: <b style={{ color: "var(--text)" }}>{accountSummary.auto + accountSummary.manual} de {customers.length}</b> ({accountSummary.auto} {accountSummary.auto === 1 ? "unido solo" : "unidos solos"} por Stripe{accountSummary.manual ? `, ${accountSummary.manual} ${accountSummary.manual === 1 ? "vinculado" : "vinculados"} a mano` : ""}). {accountSummary.sin ? `${accountSummary.sin} sin cuenta encontrada (clientes manuales o que pagan con otro Stripe).` : ""}</div>}
         {customers.length === 0 && <div className="empty">Sin clientes para mostrar.</div>}
         {customers.map((c) => {
-          const s = subOf[c.key], it = (s && s.items[0]) || {}, active = Number(c.mrr) > 0, m = monthly[c.key] || {};
+          const s = subOf[c.key], it = (s && s.items[0]) || {}, active = Number(c.mrr) > 0, m = monthly[c.key] || {}, acc = accountOf(c.key);
           const chips = liveMonths.filter((k) => m[k]);
           return (
             <div key={c.key} className="customer-row">
@@ -305,11 +319,12 @@ export function CustomersPage({ d, rows, seg, now, sb, reload, ro, roSeg = ro })
                 <div className="avatar" style={{ borderColor: c.segment === "inmobiliaria" ? "var(--green)" : c.segment === "otro" ? "var(--blue)" : "var(--border)" }}>{initials(c.name || c.email)}</div>
                 <div className="customer-info">
                   <div className="customer-name">{c.name || c.email || c.key} <span className={"badge " + (active ? "badge-green" : "badge-red")} style={{ marginLeft: 6 }}>{active ? "Activo" : "Churneado"}</span></div>
-                  <div className="customer-plan">{(it.priceId && planName[it.priceId]) || "—"} · <span style={{ color: c.source === "stripe" ? "var(--blue)" : "var(--yellow)" }}>{c.source === "stripe" ? "Stripe" : "Por fuera"}</span>{c.email && c.name ? " · " + c.email : ""}</div>
+                  <div className="customer-plan">{(it.priceId && planName[it.priceId]) || "—"} · <span style={{ color: c.source === "stripe" ? "var(--blue)" : "var(--yellow)" }}>{c.source === "stripe" ? "Stripe" : "Por fuera"}</span>{c.email && c.name ? " · " + c.email : ""}{acc && acc.companyName ? " · cuenta: " + acc.companyName : ""}</div>
                 </div>
                 {d.v2 && <select className="seg-select" disabled={roSeg} aria-label={"Segmento de " + (c.name || c.key)} value={c.segment || ""} onChange={(e) => setSegment(c, e.target.value)}><option value="">Sin segmento</option><option value="inmobiliaria">🏠 Inmobiliaria</option><option value="otro">◎ Otro</option></select>}
                 <div className="customer-mrr">{money(c.mrr)}<span style={{ fontSize: 10, color: "#888", fontWeight: 400 }}>/mes</span></div>
-                <div style={{ display: "flex", gap: 6 }}>
+                <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                  {onOpenFicha && acc && <button className="btn-sm" title={acc.via === "auto" ? "Cuenta unida por el cliente de Stripe" : "Cuenta vinculada a mano"} onClick={() => onOpenFicha(acc.companyId)}>Ver ficha 360</button>}
                   {c.source === "manual" ? (<>
                     <button className="btn-sm" disabled={ro} onClick={() => edit(c)}>Editar</button>
                     {active ? <button className="btn-sm danger" disabled={busy || ro} onClick={() => toggleStatus(c, "canceled")}>Dar de baja</button> : <button className="btn-sm" disabled={busy || ro} onClick={() => toggleStatus(c, "active")}>Reactivar</button>}
