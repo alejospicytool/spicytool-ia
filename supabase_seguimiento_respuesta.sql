@@ -1,4 +1,5 @@
--- Seguimiento de clientes: registrar que el cliente respondió DESPUÉS del contacto. PENDIENTE DE APLICAR (se aplica con el MCP de Supabase; esto es la referencia).
+-- Seguimiento de clientes: registrar que el cliente respondió DESPUÉS del contacto. YA APLICADO en el proyecto real (khuavhbraikzreyhptog) vía Supabase MCP
+-- el 2026-11-25 (migración seguimiento_respuesta_posterior). Solo referencia.
 --
 -- Cuando alguien le escribe a un cliente casi nunca responde en el momento, así que el contacto se carga como "sin respuesta por ahora". Si más tarde contesta,
 -- el contacto se ACTUALIZA (resultado "respondió" o "queja") y queda anotado CUÁNDO respondió (respondio_en), sin perder cuándo se le escribió (fecha).
