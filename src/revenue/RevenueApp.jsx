@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { monthlyRows, periodRows, healthAlerts, PERIODS, SEGMENTS } from "./revenueMetrics.js";
 import { fetchAll } from "./revenueApi.js";
 import { RvStyles } from "./revenueUi.jsx";
-import { Overview, MrrPage, ChurnPage, RetentionPage, FailedPage, CustomersPage, ProjectionPage, PlansPage } from "./RevenuePages.jsx";
+import { Overview, MrrPage, ChurnPage, RetentionPage, FailedPage, CustomersPage, UpcomingPage, ProjectionPage, PlansPage } from "./RevenuePages.jsx";
 
 function useRevenueData(sb) {
   const [data, setData] = useState(null);
@@ -19,8 +19,13 @@ function useRevenueData(sb) {
       try { customers = await fetchAll((a, b) => sb.from("rev_customers").select("key,name,email,source,company_id,country,mrr,ever_paid,first_paid_at,segment").order("key").range(a, b)); }
       catch (e) { if (!/segment/i.test(e.message || "")) throw e; v2 = false; customers = await fetchAll((a, b) => sb.from("rev_customers").select("key,name,email,source,company_id,country,mrr,ever_paid,first_paid_at").order("key").range(a, b)); }
       let subs;
-      try { subs = await fetchAll((a, b) => sb.from("rev_subscriptions").select("id,customer_key,source,status,currency,items,discount,cancel_reason").order("id").range(a, b)); }
-      catch (e) { if (!/cancel_reason/i.test(e.message || "")) throw e; v2 = false; subs = await fetchAll((a, b) => sb.from("rev_subscriptions").select("id,customer_key,source,status,currency,items,discount").order("id").range(a, b)); }
+      // current_period_end / cancel_at_period_end = fecha del próximo cobro (supabase_revenue_proximo_cobro.sql); si faltan, se carga sin ellas
+      try { subs = await fetchAll((a, b) => sb.from("rev_subscriptions").select("id,customer_key,source,status,currency,items,discount,cancel_reason,current_period_end,cancel_at_period_end").order("id").range(a, b)); }
+      catch (e) {
+        if (!/cancel_reason|current_period_end|cancel_at_period_end/i.test(e.message || "")) throw e;
+        try { subs = await fetchAll((a, b) => sb.from("rev_subscriptions").select("id,customer_key,source,status,currency,items,discount,cancel_reason").order("id").range(a, b)); }
+        catch (e2) { if (!/cancel_reason/i.test(e2.message || "")) throw e2; v2 = false; subs = await fetchAll((a, b) => sb.from("rev_subscriptions").select("id,customer_key,source,status,currency,items,discount").order("id").range(a, b)); }
+      }
       let failures = [];
       try { failures = await fetchAll((a, b) => sb.from("rev_payment_failures").select("*").order("invoice_id").range(a, b)); }
       catch (e) { if (!/rev_payment_failures/i.test(e.message || "")) throw e; v2 = false; }
@@ -83,6 +88,7 @@ export default function RevenueApp({ sb, view, setView, readOnly = false, canSeg
       {view === "metrics_retention" && <RetentionPage {...common} />}
       {view === "metrics_failed" && <FailedPage {...common} />}
       {view === "metrics_customers" && <CustomersPage {...common} />}
+      {view === "metrics_upcoming" && <UpcomingPage {...common} />}
       {view === "metrics_projection" && <ProjectionPage {...common} />}
       {view === "metrics_plans" && <PlansPage {...common} />}
     </div>

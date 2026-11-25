@@ -9,6 +9,7 @@ import { planOf, planLabel, isOwner, userFullName, kapsoStatusInfo } from "../ad
 import { ToqueDialog, RespuestaDialog } from "../seguimiento/SeguimientoApp.jsx";
 import { semaforoInfo, proximoToque, estadoToque, fmtFecha, resultadoInfo, canalLabel, whatsappLink, diasDesde, respuestaTexto } from "../seguimiento/seguimientoLogic.js";
 import { baDateISO } from "../timeTracking.js";
+import { nextCharge, chargeText } from "../revenue/proximoCobro.js";
 import { suggestRevCustomers, autoRevCustomers, suggestDeals, suggestTicketClients, refsOf, linkOf, dealIdsOfCompany, ticketsOfCompany, ticketsOpen, totalMrr, subStatusInfo, subLine, stageName } from "./cliente360Logic.js";
 
 const RED = "#EF3E3E";
@@ -114,7 +115,7 @@ export default function Cliente360({ sb, companyId, followup, onboarding, ticket
   const linkedCustomers = [...autoRev.map((x) => ({ ...x.customer, _auto: true, _via: x.via, _linkable: false })), ...manualRev];
   const subs = useLoad(async () => {
     if (!linkedCustomers.length) return [];
-    const { data } = await sb.from("rev_subscriptions").select("id,customer_key,status,currency,items,canceled_at").in("customer_key", linkedCustomers.map((c) => c.key));
+    const { data } = await sb.from("rev_subscriptions").select("id,customer_key,status,currency,items,canceled_at,current_period_end,cancel_at_period_end").in("customer_key", linkedCustomers.map((c) => c.key));
     return data || [];
   }, [linkedCustomers.map((c) => c.key).join("|")], tab === "pagos" && !!canSeeMetrics && rev.data !== null);
   const dealIds = dealIdsOfCompany(L, onboarding, companyId);
@@ -230,6 +231,7 @@ export default function Cliente360({ sb, companyId, followup, onboarding, ticket
                     <div style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}><b>{c.name || c.email}</b> <span style={{ color: "#888" }}>· {c.email}</span>{c._auto && <Chip tone="green" title={`Es el mismo cliente de Stripe que usa esta cuenta de Spicytool${c._via ? " (usuario " + c._via + ")" : ""}`}>Automático</Chip>}</div>
                     <div style={{ fontSize: 12, color: "#555", margin: "3px 0" }}>MRR {money(c.mrr)}{c.segment ? ` · ${c.segment}` : ""}{c.first_paid_at ? ` · primer pago ${fmtFecha(String(c.first_paid_at).slice(0, 10))}` : ""}</div>
                     {(subs.data || []).filter((s) => s.customer_key === c.key).map((s) => { const i = subStatusInfo(s.status); return <div key={s.id} style={{ fontSize: 12, display: "flex", gap: 8, alignItems: "center" }}><Chip tone={i.tone}>{i.label}</Chip><span>{subLine(s)}</span></div>; })}
+                    {(subs.data || []).filter((s) => s.customer_key === c.key).map((s) => { const t = chargeText(nextCharge(s, new Date())); return t ? <div key={"nc" + s.id} style={{ fontSize: 12, marginTop: 2, color: { ok: "#16A34A", warn: "#B45309", bad: "#C42F2F", muted: "#666" }[t.tone] }}>📅 {t.text}</div> : null; })}
                   </>
                 )}
                 renderSuggestion={(c) => <div style={{ fontSize: 13 }}><b>{c.name || c.email}</b> <span style={{ color: "#888" }}>· {c.email} · MRR {money(c.mrr)}</span></div>} />

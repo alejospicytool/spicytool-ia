@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { useAsync } from "../admin/adminHooks.js";
 import { listStripeCustomers } from "../admin/adminApi.js";
 import { companyOfRevCustomer, revCustomersSummary } from "../cliente360/cliente360Logic.js";
+import { nextCharge, chargeText, upcomingCharges, groupByDay, dayLabel, fmtDiaCorto } from "./proximoCobro.js";
 import { periodKpis, customerMonthly, segmentSummary, matchSegment, projectionMonths, projectionDefaults, computeProjection, failuresSummary, liveCustomerKeys, planUsage, movementsFor } from "./revenueMetrics.js";
 import { Kpi, PageHeader, Notice, Alerts, Modal, MonthBars, money, signed, pct, monthLabel, monthShort, fmtDate, fmtDateTime, initials } from "./revenueUi.jsx";
 import { callFn } from "./revenueApi.js";
@@ -241,21 +242,74 @@ export function FailedPage({ d, now }) {
   );
 }
 
-// ── Clientes ─────────────────────────────────────────────────────────────────────────────────────────
-const EMPTY = { customerKey: "", customerName: "", email: "", planPriceId: "", newPlanName: "", amount: "", currency: "usd", interval: "month", status: "active", subscriptionId: "", segment: "" };
-export function CustomersPage({ d, rows, seg, now, sb, reload, ro, roSeg = ro, canSpicy = false, onOpenFicha = null }) {
-  const [q, setQ] = useState(""), [onlyActive, setOnlyActive] = useState(true), [form, setForm] = useState(null), [busy, setBusy] = useState(false), [notice, setNotice] = useState(null);
-  const customers = useMemo(() => d.customers.filter((c) => matchSegment(c, seg) && (!onlyActive || Number(c.mrr) > 0) && (!q || ((c.name || "") + " " + (c.email || "") + " " + c.key).toLowerCase().includes(q.toLowerCase()))).sort((a, b) => Number(b.mrr) - Number(a.mrr) || String(a.name).localeCompare(String(b.name))), [d.customers, seg, onlyActive, q]);
-  const summary = useMemo(() => segmentSummary(d.customers), [d.customers]);
-  // Qué cuenta de Spicytool es de cada cliente (para ir a su Ficha 360): por el cliente de Stripe de sus usuarios y, si no, por los vínculos confirmados a mano.
-  // Solo con permiso de Admin Spicy (el dato sale de Spicytool); si algo falla, la lista se ve igual, sin el botón.
+// Qué cuenta de Spicytool es de cada cliente de Métricas (para ir a su Ficha 360): por el cliente de Stripe de sus usuarios y, si no, por los vínculos confirmados a mano.
+// Solo con permiso de Admin Spicy (el dato sale de Spicytool); si algo falla, las pantallas se ven igual, sin el botón.
+function useAccountLinks(sb, canSpicy) {
   const spicy = useAsync(async () => {
     if (!canSpicy) return null;
     const [stripeLinks, manual] = await Promise.all([listStripeCustomers().catch(() => null), sb.from("client_links").select("kind,ref,company_id").eq("kind", "rev_customer").then((r) => r.data || [], () => [])]);
     return stripeLinks ? { stripeLinks, manual } : null;
   }, "revlinks:" + canSpicy);
   const spicyData = spicy.data || null;
-  const accountOf = (key) => (spicyData ? companyOfRevCustomer(key, spicyData.stripeLinks, spicyData.manual) : null);
+  return { spicyData, accountOf: (key) => (spicyData ? companyOfRevCustomer(key, spicyData.stripeLinks, spicyData.manual) : null) };
+}
+
+// ── Cobros que vienen ───────────────────────────────────────────────────────────────────────
+const RANGES = [[7, "7 días"], [30, "30 días"], [60, "60 días"]];
+const KIND_BADGE = { cobro: ["badge-green", "Se renueva"], prueba: ["badge-blue", "Termina la prueba"], cancela: ["badge-red", "Se cancela"], atrasado: ["badge-yellow", "Pago atrasado"] };
+export function UpcomingPage({ d, now, sb, canSpicy = false, onOpenFicha = null }) {
+  const [days, setDays] = useState(30);
+  const { accountOf } = useAccountLinks(sb, canSpicy);
+  const { rows, totals: t } = useMemo(() => upcomingCharges(d.subs, d.customers, { now, days }), [d.subs, d.customers, now, days]);
+  const groups = useMemo(() => groupByDay(rows), [rows]);
+  const planName = useMemo(() => Object.fromEntries(d.plans.map((p) => [p.price_id, p.name || p.price_id])), [d.plans]);
+  const hasDates = d.subs.some((s) => s.current_period_end);
+  const usd = (n) => "USD " + Number(n || 0).toLocaleString("es-AR", { maximumFractionDigits: 0 });
+  return (
+    <div>
+      <PageHeader title="Cobros que vienen" sub="La fecha en que Stripe va a renovar cada suscripción y cuánto se espera cobrar. Es la fecha de renovación: no garantiza que el cobro salga, y el monto es una estimación (sin impuestos ni ajustes)." />
+      {!hasDates && <div className="notice" role="status">Todavía no hay fechas de próximo cobro guardadas. En Métricas → Overview, “Actualizar desde Stripe” las trae.</div>}
+      <div className="filter-bar"><div className="filter-group" role="group" aria-label="Rango">{RANGES.map(([n, label]) => <button key={n} className={"pill" + (days === n ? " on" : "")} aria-pressed={days === n} onClick={() => setDays(n)}>Próximos {label}</button>)}</div></div>
+      <div className="kpi-grid">
+        <Kpi color="green" label="Cobros esperados" value={usd(t.expected)} sub={`${t.expectedCount} ${t.expectedCount === 1 ? "suscripción se renueva" : "suscripciones se renuevan"}`} />
+        <Kpi color="red" label="Se cancelan (no renuevan)" value={usd(t.cancel)} valueColor={t.cancelCount ? "var(--accent)" : undefined} sub={t.cancelCount ? `${t.cancelCount} ${t.cancelCount === 1 ? "cliente" : "clientes"}: no entra esta plata` : "ninguna cancelación programada"} />
+        <Kpi color="yellow" label="Con pago atrasado" value={usd(t.late)} sub={t.lateCount ? `${t.lateCount} ${t.lateCount === 1 ? "cliente" : "clientes"}: no es plata segura` : "ninguno"} />
+        <Kpi color="blue" label="Fecha a confirmar" value={t.vencidas} sub={t.vencidas ? "la fecha ya pasó y no se actualizó" : "todas al día"} />
+      </div>
+      {t.otherCurrency > 0 && <div className="notice" role="status">{t.otherCurrency} {t.otherCurrency === 1 ? "cobro está" : "cobros están"} en otra moneda y no se suma en los totales.</div>}
+      {groups.length === 0 && <div className="card"><div className="empty">No hay cobros en los próximos {days} días.</div></div>}
+      {groups.map((g) => (
+        <div key={g.key} className="card">
+          <div className="card-title">{dayLabel(g)}{!g.vencida && <span className="card-sub">{g.rows.length} {g.rows.length === 1 ? "cobro" : "cobros"}{g.total ? ` · ${usd(g.total)} esperados` : ""}</span>}</div>
+          {g.rows.map((r) => {
+            const c = r.customer, acc = c ? accountOf(c.key) : null, it = (r.sub.items && r.sub.items[0]) || {}, [badge, label] = KIND_BADGE[r.kind] || KIND_BADGE.cobro;
+            return (
+              <div key={r.sub.id} className="customer-row">
+                <div className="customer-top">
+                  <div className="avatar" style={{ borderColor: r.kind === "cancela" ? "var(--accent)" : r.kind === "atrasado" || r.vencida ? "var(--yellow)" : "var(--green)" }}>{initials(c && (c.name || c.email))}</div>
+                  <div className="customer-info">
+                    <div className="customer-name">{(c && (c.name || c.email)) || r.sub.customer_key} <span className={"badge " + (r.vencida ? "badge-yellow" : badge)} style={{ marginLeft: 6 }}>{r.vencida ? "A confirmar" : label}</span></div>
+                    <div className="customer-plan">{(it.priceId && planName[it.priceId]) || "—"}{c && c.email && c.name ? " · " + c.email : ""}{r.vencida ? " · venció el " + fmtDiaCorto(r.iso) : ""}{acc && acc.companyName ? " · cuenta: " + acc.companyName : ""}</div>
+                  </div>
+                  <div className="customer-mrr" style={{ color: r.kind === "cancela" ? "var(--accent)" : undefined }}>{r.currency === "usd" ? usd(r.amount) : `${r.amount.toLocaleString("es-AR")} ${r.currency.toUpperCase()}`}</div>
+                  <div style={{ display: "flex", gap: 6 }}>{onOpenFicha && acc && <button className="btn-sm" onClick={() => onOpenFicha(acc.companyId)}>Ver ficha 360</button>}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Clientes ─────────────────────────────────────────────────────────────────────────────────────────
+const EMPTY = { customerKey: "", customerName: "", email: "", planPriceId: "", newPlanName: "", amount: "", currency: "usd", interval: "month", status: "active", subscriptionId: "", segment: "" };
+export function CustomersPage({ d, rows, seg, now, sb, reload, ro, roSeg = ro, canSpicy = false, onOpenFicha = null }) {
+  const [q, setQ] = useState(""), [onlyActive, setOnlyActive] = useState(true), [form, setForm] = useState(null), [busy, setBusy] = useState(false), [notice, setNotice] = useState(null);
+  const customers = useMemo(() => d.customers.filter((c) => matchSegment(c, seg) && (!onlyActive || Number(c.mrr) > 0) && (!q || ((c.name || "") + " " + (c.email || "") + " " + c.key).toLowerCase().includes(q.toLowerCase()))).sort((a, b) => Number(b.mrr) - Number(a.mrr) || String(a.name).localeCompare(String(b.name))), [d.customers, seg, onlyActive, q]);
+  const summary = useMemo(() => segmentSummary(d.customers), [d.customers]);
+  const { accountOf, spicyData } = useAccountLinks(sb, canSpicy);
   const accountSummary = spicyData ? revCustomersSummary(customers.map((c) => c.key), spicyData.stripeLinks, spicyData.manual) : null;
   const liveMonths = useMemo(() => rows.filter((r) => r.source === "nuevo").map((r) => r.month), [rows]);
   const monthly = useMemo(() => customerMonthly(d.customers, d.events, liveMonths, now), [d.customers, d.events, liveMonths, now]);
@@ -317,7 +371,7 @@ export function CustomersPage({ d, rows, seg, now, sb, reload, ro, roSeg = ro, c
         {accountSummary && customers.length > 0 && <div style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 8px" }}>Con cuenta de Spicytool: <b style={{ color: "var(--text)" }}>{accountSummary.auto + accountSummary.manual} de {customers.length}</b> ({accountSummary.auto} {accountSummary.auto === 1 ? "unido solo" : "unidos solos"} por Stripe{accountSummary.manual ? `, ${accountSummary.manual} ${accountSummary.manual === 1 ? "vinculado" : "vinculados"} a mano` : ""}). {accountSummary.sin ? `${accountSummary.sin} sin cuenta encontrada (clientes manuales o que pagan con otro Stripe).` : ""}</div>}
         {customers.length === 0 && <div className="empty">Sin clientes para mostrar.</div>}
         {customers.map((c) => {
-          const s = subOf[c.key], it = (s && s.items[0]) || {}, active = Number(c.mrr) > 0, m = monthly[c.key] || {}, acc = accountOf(c.key);
+          const s = subOf[c.key], it = (s && s.items[0]) || {}, active = Number(c.mrr) > 0, m = monthly[c.key] || {}, acc = accountOf(c.key), nc = chargeText(nextCharge(s, now));
           const chips = liveMonths.filter((k) => m[k]);
           return (
             <div key={c.key} className="customer-row">
@@ -326,6 +380,7 @@ export function CustomersPage({ d, rows, seg, now, sb, reload, ro, roSeg = ro, c
                 <div className="customer-info">
                   <div className="customer-name">{c.name || c.email || c.key} <span className={"badge " + (active ? "badge-green" : "badge-red")} style={{ marginLeft: 6 }}>{active ? "Activo" : "Churneado"}</span></div>
                   <div className="customer-plan">{(it.priceId && planName[it.priceId]) || "—"} · <span style={{ color: c.source === "stripe" ? "var(--blue)" : "var(--yellow)" }}>{c.source === "stripe" ? "Stripe" : "Por fuera"}</span>{c.email && c.name ? " · " + c.email : ""}{acc && acc.companyName ? " · cuenta: " + acc.companyName : ""}</div>
+                  {nc && <div style={{ fontSize: 11, marginTop: 2, color: { ok: "var(--green)", warn: "#B45309", bad: "var(--accent)", muted: "var(--muted)" }[nc.tone] }}>{nc.text}</div>}
                 </div>
                 {d.v2 && <select className="seg-select" disabled={roSeg} aria-label={"Segmento de " + (c.name || c.key)} value={c.segment || ""} onChange={(e) => setSegment(c, e.target.value)}><option value="">Sin segmento</option><option value="inmobiliaria">🏠 Inmobiliaria</option><option value="otro">◎ Otro</option></select>}
                 <div className="customer-mrr">{money(c.mrr)}<span style={{ fontSize: 10, color: "#888", fontWeight: 400 }}>/mes</span></div>

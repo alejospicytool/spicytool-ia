@@ -182,7 +182,7 @@ const NAV_ICONS = {
   opsdash:"🧭", tickets:"🎫", tasks:"📋", onboarding:"🚀", seguimiento:"📞", usuarios:"👥",
   devdash:"📈", devtasks:"🛠️",
   crm:"💼",
-  metrics:"💹", metrics_mrr:"↗", metrics_churn:"↘", metrics_retention:"⟳", metrics_failed:"⚠️", metrics_customers:"👤", metrics_projection:"⇢", metrics_plans:"🏷️",
+  metrics:"💹", metrics_mrr:"↗", metrics_churn:"↘", metrics_retention:"⟳", metrics_failed:"⚠️", metrics_customers:"👤", metrics_upcoming:"📅", metrics_projection:"⇢", metrics_plans:"🏷️",
   adm_users:"🛡️", adm_companies:"🏢", adm_whatsapp:"💬", adm_support:"🎧",
 };
 const NAV_LABELS = {
@@ -193,7 +193,7 @@ const NAV_LABELS = {
   opsdash:"Resumen operativo", tickets:"Tickets", tasks:"Tareas", onboarding:"Onboarding", seguimiento:"Seguimiento de clientes", usuarios:"Usuarios y permisos",
   devdash:"Resumen de devs", devtasks:"Tareas de devs",
   crm:"CRM comercial",
-  metrics:"Overview", metrics_mrr:"MRR & ARR", metrics_churn:"Churn", metrics_retention:"Retención", metrics_failed:"Pagos fallidos", metrics_customers:"Clientes", metrics_projection:"Proyección", metrics_plans:"Planes",
+  metrics:"Overview", metrics_mrr:"MRR & ARR", metrics_churn:"Churn", metrics_retention:"Retención", metrics_failed:"Pagos fallidos", metrics_customers:"Clientes", metrics_upcoming:"Cobros que vienen", metrics_projection:"Proyección", metrics_plans:"Planes",
   adm_users:"Usuarios y companies", adm_companies:"Companies", adm_whatsapp:"Conexiones de WhatsApp", adm_support:"Soporte",
 };
 const ADMIN_ONLY_VIEWS = ["add","usuarios","timeadmin"];
@@ -265,7 +265,7 @@ const NAV_SECTIONS = [
   },
   {
     label: "Métricas",
-    views: ["metrics","metrics_mrr","metrics_churn","metrics_retention","metrics_failed","metrics_customers","metrics_projection","metrics_plans"],
+    views: ["metrics","metrics_mrr","metrics_churn","metrics_retention","metrics_failed","metrics_customers","metrics_upcoming","metrics_projection","metrics_plans"],
     adminOnly: false,
   },
   {
