@@ -1,6 +1,7 @@
 // "Ideas y feedback": sugerencias, feedback de clientes y cosas nuevas para sumar. Lo ve y lo carga cualquier usuario con sesión; ordenar las ideas
 // y mandarlas al tablero de Devs ("Enviar a Devs") es solo de admin, dev y editor. Los datos viven en Supabase (ver supabase_ideas.sql).
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { askConfirm } from "../confirmStore.js";
 import {
   IDEA_TYPES, IDEA_COLUMNS, MANUAL_STATUSES, IMAGES_MAX, typeInfo, displayStatus, validateIdea, validateImage, safeFileName, voteCount, hasVoted, sortIdeas, canEditIdea, buildDevTask,
@@ -24,6 +25,60 @@ function Thumb({ sb, path, name, height = 90, onClick }) {
   if (isPdf) return <div style={box} onClick={onClick}>📄 PDF</div>;
   if (!url) return <div style={box} />;
   return <img src={url} alt={name || "Imagen de la idea"} onClick={onClick} style={{ ...box, objectFit: "cover", display: "block" }} />;
+}
+
+// Visor de imágenes a pantalla completa: se ve la imagen entera (las miniaturas se recortan), flechas para pasar a la anterior/siguiente
+// (también con ← →), Esc o clic afuera para cerrar, y un enlace real para abrirla en otra pestaña (un enlace no lo bloquea el navegador).
+function ImageViewer({ sb, images, start = 0, onClose }) {
+  const [i, setI] = useState(Math.min(Math.max(0, start), images.length - 1));
+  const [urls, setUrls] = useState({});
+  const img = images[i];
+  useEffect(() => {
+    if (!img || urls[img.storage_path]) return undefined;
+    let alive = true;
+    const c = urlCache.get(img.storage_path);
+    if (c && Date.now() - c.at < 50 * 60000) { Promise.resolve().then(() => { if (alive) setUrls((u) => ({ ...u, [img.storage_path]: c.url })); }); return () => { alive = false; }; }
+    sb.storage.from("attachments").createSignedUrl(img.storage_path, 3600).then(({ data }) => {
+      if (!alive) return;
+      if (data) { urlCache.set(img.storage_path, { url: data.signedUrl, at: Date.now() }); setUrls((u) => ({ ...u, [img.storage_path]: data.signedUrl })); } else setUrls((u) => ({ ...u, [img.storage_path]: "error" }));
+    });
+    return () => { alive = false; };
+  }, [img, sb, urls]);
+  const n = images.length;
+  const go = (d) => setI((x) => (x + d + n) % n);
+  useEffect(() => {
+    // En fase de captura y frenando el evento: Esc cierra solo el visor (no la ventana de la idea que está abajo).
+    const k = (e) => {
+      if (e.key === "Escape") { e.stopPropagation(); e.stopImmediatePropagation(); onClose(); }
+      else if (e.key === "ArrowLeft" && n > 1) { e.stopPropagation(); setI((x) => (x - 1 + n) % n); }
+      else if (e.key === "ArrowRight" && n > 1) { e.stopPropagation(); setI((x) => (x + 1) % n); }
+    };
+    window.addEventListener("keydown", k, true);
+    return () => window.removeEventListener("keydown", k, true);
+  }, [onClose, n]);
+  if (!img) return null;
+  const url = urls[img.storage_path], isPdf = /\.pdf$/i.test(img.storage_path);
+  const arrow = (side, d, label) => <button type="button" aria-label={label} onClick={(e) => { e.stopPropagation(); go(d); }} style={{ position: "absolute", top: "50%", [side]: 14, transform: "translateY(-50%)", width: 44, height: 44, borderRadius: 22, border: "none", background: "rgba(255,255,255,0.18)", color: "white", fontSize: 24, cursor: "pointer" }}>{d < 0 ? "‹" : "›"}</button>;
+  return createPortal(
+    <div role="dialog" aria-modal="true" aria-label="Imagen de la idea" onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", zIndex: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "56px 70px" }}>
+      <div style={{ position: "absolute", top: 12, left: 16, right: 16, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, color: "white", fontSize: 13 }} onClick={(e) => e.stopPropagation()}>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{img.file_name}{n > 1 ? `  ·  ${i + 1} de ${n}` : ""}</span>
+        <span style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+          {url && url !== "error" && <a href={url} target="_blank" rel="noopener noreferrer" style={{ color: "white", background: "rgba(255,255,255,0.18)", borderRadius: 6, padding: "5px 10px", textDecoration: "none", fontSize: 12 }}>Abrir en otra pestaña</a>}
+          <button type="button" aria-label="Cerrar" onClick={onClose} style={{ width: 30, height: 30, borderRadius: 15, border: "none", background: "rgba(255,255,255,0.18)", color: "white", fontSize: 18, cursor: "pointer", lineHeight: 1 }}>×</button>
+        </span>
+      </div>
+      {n > 1 && arrow("left", -1, "Imagen anterior")}
+      {n > 1 && arrow("right", 1, "Imagen siguiente")}
+      <div onClick={(e) => e.stopPropagation()} style={{ maxWidth: "100%", maxHeight: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {url === "error" ? <div style={{ color: "white", fontSize: 14 }}>No se pudo cargar el archivo.</div>
+          : !url ? <div style={{ color: "#ccc", fontSize: 14 }}>Cargando…</div>
+          : isPdf ? <a href={url} target="_blank" rel="noopener noreferrer" style={{ color: "white", fontSize: 16 }}>📄 Abrir el PDF</a>
+          : <img src={url} alt={img.file_name || "Imagen de la idea"} style={{ maxWidth: "100%", maxHeight: "calc(100vh - 112px)", objectFit: "contain", borderRadius: 6, background: "#222" }} />}
+      </div>
+    </div>,
+    document.body,
+  );
 }
 
 function Modal({ onClose, children, maxWidth = 640 }) {
@@ -320,7 +375,7 @@ function IdeaDetail({ sb, idea, images, votes, me, nameOf, task, canTriage, canD
   const ds = displayStatus(idea, task), t = typeInfo(idea.type), voted = hasVoted(votes, idea.id, me.id);
   const mineEditable = canEditIdea(idea, me.id), canAddImages = mineEditable || canTriage;
   const canRemove = mineEditable || canDelete;
-  const open = async (path) => { const { data } = await sb.storage.from("attachments").createSignedUrl(path, 300); if (data) window.open(data.signedUrl, "_blank", "noopener"); };
+  const [viewer, setViewer] = useState(null); // posición de la imagen abierta en el visor (o null)
 
   async function save() {
     const v = validateIdea(f); setErrors(v.errors); setMsg("");
@@ -381,11 +436,12 @@ function IdeaDetail({ sb, idea, images, votes, me, nameOf, task, canTriage, canD
         </>
       )}
 
+      {viewer !== null && <ImageViewer sb={sb} images={images} start={viewer} onClose={() => setViewer(null)} />}
       {images.length > 0 && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 10 }}>
           {images.map((img) => (
             <div key={img.id}>
-              <Thumb sb={sb} path={img.storage_path} name={img.file_name} height={100} onClick={() => open(img.storage_path)} />
+              <Thumb sb={sb} path={img.storage_path} name={img.file_name} height={100} onClick={() => setViewer(images.indexOf(img))} />
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#999", marginTop: 3, gap: 4 }}>
                 <span title={img.file_name} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{img.file_name}</span>
                 {(img.uploaded_by_id === me.id || canDelete) && <button onClick={() => removeImage(img)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C42F2F", fontSize: 10, padding: 0 }}>Borrar</button>}
