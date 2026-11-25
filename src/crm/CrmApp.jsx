@@ -8,6 +8,7 @@ import { CrmStyles } from "./crmUi.jsx";
 import { HoyView, PipelineView, TasksView, ClientsView, ForecastView, ConfigView } from "./CrmViews.jsx";
 import { DealDialog, TaskDialog, NextDialog, BajaDialog, WeeklyDialog, PasteDialog, PresentOverlay } from "./CrmDialogs.jsx";
 import CrmAssistant from "./CrmAssistant.jsx";
+import { AI_ENABLED } from "./crmAi.js";
 import { formatTimeBA } from "../timeTracking.js";
 
 const VIEW_KEY = "crm-view";
@@ -133,7 +134,7 @@ export default function CrmApp({ sb }) {
         <nav className="crm-tabs" role="tablist">{tabs.map((t) => (
           <button key={t[0]} className="crm-tab" role="tab" aria-selected={view.tab === t[0]} onClick={() => setTab(t[0])}>{t[1]}{t[0] === "tareas" && n > 0 && <span className={"crm-badge" + (dc.v ? " late" : "")}>{n}</span>}</button>))}</nav>
         <span className="crm-save" data-state={chip[0]} aria-live="polite">{chip[1]}</span>
-        <button className="crm-ai-btn" onClick={() => { setAiOpen(true); try { sessionStorage.setItem("crm-ai-open", "1"); } catch { /* sin storage */ } }}><i>✦</i>Asistente</button>
+        {AI_ENABLED && <button className="crm-ai-btn" onClick={() => { setAiOpen(true); try { sessionStorage.setItem("crm-ai-open", "1"); } catch { /* sin storage */ } }}><i>✦</i>Asistente</button>}
       </div>
 
       {view.tab === "hoy" && <HoyView {...common} />}
@@ -158,7 +159,7 @@ export default function CrmApp({ sb }) {
         }} />;
         return null;
       })}
-      {aiOpen && <CrmAssistant crm={crm} sb={sb} onClose={() => { setAiOpen(false); try { sessionStorage.setItem("crm-ai-open", "0"); } catch { /* sin storage */ } }} />}
+      {AI_ENABLED && aiOpen && <CrmAssistant crm={crm} sb={sb} onClose={() => { setAiOpen(false); try { sessionStorage.setItem("crm-ai-open", "0"); } catch { /* sin storage */ } }} />}
       {nudge && (
         <div className="crm-nudge" role="alert"><p style={{ margin: 0 }}><strong>Ahora: {nudge.titulo}</strong>{nudge.deal && <><br /><span style={{ color: "#888" }}>{nudge.deal.empresa}</span></>}</p>
           <div><button className="crm-btn" onClick={() => setNudge(null)}>Cerrar</button><button className="crm-btn primary" onClick={handleNudgeOpen}>Ver</button></div></div>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { addMonths, fmtDate, initials, money, monthLabel, daysBetween, sum, ESTADOS, EST_NEXT, EST_TO, EST_LATE, KINDS_STAGE, TKINDS, TTIPO } from "./crmLogic.js";
 import * as A from "./crmActions.js";
-import { callAi } from "./crmAi.js";
+import { callAi, AI_ENABLED } from "./crmAi.js";
 import { askConfirm } from "../confirmStore.js";
 import { WA_ICON, md } from "./crmUi.jsx";
 
@@ -67,13 +67,13 @@ export function HoyView({ crm, commit, open, sb }) {
     <>
       <div className="crm-hoy-h"><h1>Hoy, {dn} {fmtDate(crm.today)}</h1><span>MRR real <b>{money(S.config.mrrActual)}</b></span>
         <span>Proyectado a {monthLabel(mr.m)} <b>{money(mr.proj)}</b>{meta ? (mr.proj >= meta ? ", supera la meta" : ", faltan " + money(meta - mr.proj) + " para la meta") : ""}</span></div>
-      <div className="crm-brief">
+      {AI_ENABLED && <div className="crm-brief">
         {brief ? <><div dangerouslySetInnerHTML={{ __html: md(brief.text) }} /><button className="crm-btn sm" onClick={runBrief}>✦ Actualizar</button></>
           : briefState && briefState.loading ? <p>Leyendo tu CRM…</p>
           : <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}><button className="crm-btn sm primary" onClick={runBrief}>✦ ¿Qué es lo más importante hoy?</button><span style={{ color: "#888", fontSize: 12.5 }}>La IA lee tu CRM y te dice por dónde arrancar.</span></div>}
         {briefState && briefState.err && <p className="crm-err" style={{ marginTop: 8 }}>{briefState.err}</p>}
-      </div>
-      <div className="crm-toolbar"><button className="crm-btn" onClick={open.paste}>✦ Pegar conversación</button><button className="crm-btn" onClick={() => open.task(null)}>Nueva tarea</button><button className="crm-btn primary" onClick={() => open.deal(null)}>Nuevo deal</button></div>
+      </div>}
+      <div className="crm-toolbar">{AI_ENABLED && <button className="crm-btn" onClick={open.paste}>✦ Pegar conversación</button>}<button className="crm-btn" onClick={() => open.task(null)}>Nueva tarea</button><button className="crm-btn primary" onClick={() => open.deal(null)}>Nuevo deal</button></div>
       <div className="crm-hoy">
         <Card title="Demos de hoy y mañana" n={h.demos.length} rows={h.demos.map(taskR)} empty="No hay demos para hoy ni mañana." />
         <Card title="Para hacer hoy" n={h.todo.length} rows={h.todo.map(taskR)} empty="Nada pendiente para hoy." late={h.todo.some((x) => x.fecha < crm.today)} />
@@ -164,7 +164,7 @@ export function PipelineView({ crm, view, setView, commit, open, toast, setTab }
         <select className="spicy-select" aria-label="Vendedor" value={view.seller} onChange={(e) => setView({ seller: e.target.value })}><option value="">Todos los vendedores</option>{c.sellers.map((x) => <option key={x}>{x}</option>)}</select>
         <select className="spicy-select" aria-label="País" value={view.country} onChange={(e) => setView({ country: e.target.value })}><option value="">Todos los países</option>{c.countries.map((x) => <option key={x}>{x}</option>)}</select>
         <select className="spicy-select" aria-label="Etiqueta" value={view.tag} onChange={(e) => setView({ tag: e.target.value })}><option value="">Todas las etiquetas</option>{groups.map((g) => <optgroup key={g} label={g}>{c.tags.filter((t) => t.group === g).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>)}</select>
-        <button className="crm-btn" onClick={open.paste}>✦ Pegar conversación</button><button className="crm-btn primary" onClick={() => open.deal(null)}>Nuevo deal</button>
+        {AI_ENABLED && <button className="crm-btn" onClick={open.paste}>✦ Pegar conversación</button>}<button className="crm-btn primary" onClick={() => open.deal(null)}>Nuevo deal</button>
       </section>
       <div className="crm-flags" role="group" aria-label="Atajos">{flag("vencidas", "Acciones vencidas", nV, "late")}{flag("sinaccion", "Sin próxima acción", nS)}{flag("frenados", "Deals frenados", nF, "rot")}</div>
       <div className="crm-board">

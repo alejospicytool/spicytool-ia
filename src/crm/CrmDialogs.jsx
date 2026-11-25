@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fmtDate, ESTADOS, Q_DEC, Q_TIM } from "./crmLogic.js";
 import * as A from "./crmActions.js";
-import { callAi } from "./crmAi.js";
+import { callAi, AI_ENABLED } from "./crmAi.js";
 import { rpSlides, rpStandalone, RP_CSS, RP_VARS } from "./crmPresentation.js";
 import { Overlay, DlgHead, Field, WA_ICON, copyText } from "./crmUi.jsx";
 import { formatTimeBA } from "../timeTracking.js";
@@ -101,7 +101,7 @@ export function DealDialog({ crm, id, stage, preset, prefill, focusCalif, onClos
           <Field label="Origen"><Sel value={f.origen} onChange={(v) => set("origen", v)} options={c.sources} blank="Sin dato" /></Field>
           <Field label="Partner que lo refirió" full><Sel value={f.partner} onChange={(v) => set("partner", v)} options={c.partners} blank="Ninguno" /></Field>
 
-          {!isNew && (
+          {AI_ENABLED && !isNew && (
             <div className="crm-aibox full">
               {!ai && <button type="button" className="crm-btn sm" onClick={suggest}>✦ Sugerir siguiente paso con IA</button>}
               {ai && ai.loading && <p>Analizando el deal…</p>}

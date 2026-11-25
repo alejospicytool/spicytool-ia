@@ -1,3 +1,8 @@
+// INTERRUPTOR DE LA IA DEL CRM. Está APAGADO: la función `crm-ai` todavía no está instalada en Supabase ni tiene la clave de Anthropic, así que los botones
+// de IA (asistente, resumen del día, sugerir siguiente paso y pegar conversación) están escondidos. Para volver a usarla: instalar la función
+// (supabase/functions/crm-ai, ver sus instrucciones), cargar ANTHROPIC_API_KEY en Supabase y poner esto en true.
+export const AI_ENABLED = false;
+
 // Cliente del asistente de IA: llama a la Edge Function `crm-ai` (la key de Anthropic vive en el servidor).
 export const AI_SUG = ["¿Qué deals tengo que empujar esta semana y por qué?", "¿Cómo vengo contra la meta y qué necesito cerrar para llegar?", "¿Qué clientes están en riesgo o tienen hitos cerca?", "Armame el plan de mañana con mis tareas y follow-ups", "¿Dónde se me traban los deals y qué cambiarías?"];
 
