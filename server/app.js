@@ -37,7 +37,7 @@ export function createApp({ queries, authenticate, billing, companies, users, au
   app.get("/api/admin/me", route(async (req, res) => res.json({ email: req.admin.email, level: req.admin.level, canAct: !!req.admin.canAct, support: !!(support && support.isAllowed(req.admin)) })));
 
   app.get("/api/admin/users", route(async (req, res) => res.json(await queries.listUsers({
-    search: text(req.query.search), page: int(req.query.page, 1, 1, 100000), pageSize: int(req.query.pageSize, 8, 1, 50), owners: flag(req.query.owners), activeOnly: flag(req.query.activeOnly),
+    search: text(req.query.search), page: int(req.query.page, 1, 1, 100000), pageSize: int(req.query.pageSize, 8, 1, 50), owners: flag(req.query.owners), activeOnly: flag(req.query.activeOnly), plan: text(req.query.plan),
   }))));
   app.get("/api/admin/users/:id", route(async (req, res) => { if (needId(req, res)) orNotFound(res, await queries.getUser(req.params.id)); }));
 

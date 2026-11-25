@@ -81,10 +81,37 @@ export function isOwner(user, company) {
 // "Paused" podía aparecer en las dos listas o en ninguna; acá hay una sola definición y todo lo demás es "activa".
 export const isPaused = (company) => String((company && company.status) || "").trim().toLowerCase() === "paused";
 
-// Filtros de la lista: solo owners y/o solo usuarios de una company activa (cualquiera que no esté pausada).
-export function matchesFilters(user, company, { owners = false, activeOnly = false } = {}) {
+// Filtro por tipo de suscripción: "" = todos, "none" = sin plan, o el nombre exacto del plan (Freemium, SpicyPro, FreeTrial…).
+export const NO_PLAN = "none";
+export const matchesPlan = (user, plan) => {
+  const p = String(plan || "").trim();
+  if (!p) return true;
+  return p === NO_PLAN ? !planOf(user) : planOf(user) === p;
+};
+// Orden fijo de los planes conocidos en el selector; los que aparezcan y no estén acá van al final, por orden alfabético.
+const PLAN_ORDER = ["Freemium", "FreeTrial", "SpicyOne", "SpicyStart", "SpicyPro", "SpicyProMax", "Custom", "Growth", "Build"];
+// Cuántos usuarios hay de cada plan: { Freemium: 120, SpicyPro: 8, none: 3 }.
+export function planCounts(users) {
+  const out = {};
+  for (const u of users || []) { const k = planOf(u) || NO_PLAN; out[k] = (out[k] || 0) + 1; }
+  return out;
+}
+// Opciones del selector de plan a partir de los conteos: [{ value, label, count }], solo planes que tienen usuarios (más el elegido, aunque quede en 0).
+export function planOptions(counts, selected = "") {
+  const c = counts || {};
+  const keys = Object.keys(c).filter((k) => k !== NO_PLAN);
+  if (selected && selected !== NO_PLAN && !keys.includes(selected)) keys.push(selected);
+  keys.sort((a, b) => { const ia = PLAN_ORDER.indexOf(a), ib = PLAN_ORDER.indexOf(b); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b); });
+  const opts = keys.map((k) => ({ value: k, label: planLabel(k), count: c[k] || 0 }));
+  if (c[NO_PLAN] || selected === NO_PLAN) opts.push({ value: NO_PLAN, label: "Sin plan", count: c[NO_PLAN] || 0 });
+  return opts;
+}
+
+// Filtros de la lista: solo owners, solo usuarios de una company activa (cualquiera que no esté pausada) y/o un tipo de suscripción.
+export function matchesFilters(user, company, { owners = false, activeOnly = false, plan = "" } = {}) {
   if (owners && !isOwner(user, company)) return false;
   if (activeOnly && (!company || isPaused(company))) return false;
+  if (!matchesPlan(user, plan)) return false;
   return true;
 }
 

@@ -11,11 +11,13 @@ import AdminCompaniesPage from "./AdminCompaniesPage.jsx";
 import AdminSupportPage from "./AdminSupportPage.jsx";
 import AdminWhatsappPage from "./AdminWhatsappPage.jsx";
 
-export default function AdminApp({ view, actor }) {
+export default function AdminApp({ view, actor, crmSb = null }) {
   const probe = useAsync(() => probeAdminApi(), "probe");
   const real = probe.data === "real";
   const perms = useAsync(() => (probe.data === "real" ? getMyPermissions(actor) : Promise.resolve({ canAct: true })), "appperms:" + actor + ":" + probe.data);
   const readOnly = real && !!perms.data && perms.data.canAct === false;
+  // "Enviar al CRM" escribe en el CRM real: solo con datos reales y para quien tiene la sección CRM (App.jsx pasa crmSb solo en ese caso).
+  const crm = real ? crmSb : null;
   return (
     <div className="rv">
       <RvStyles />
@@ -27,8 +29,8 @@ export default function AdminApp({ view, actor }) {
               : real ? "Datos reales. Entrar como usuario todavía no está conectado. Editar company, editar contacto y pausar/activar cambian la base real, y “Asignar plan” COBRA de verdad a la tarjeta del cliente."
               : "Datos de ejemplo: esta sección todavía no está conectada a la base real. Los cambios que hagas se pierden al recargar."}
           </div>
-          {view === "adm_users" && <AdminUsersPage actor={actor} />}
-          {view === "adm_companies" && <AdminCompaniesPage actor={actor} />}
+          {view === "adm_users" && <AdminUsersPage actor={actor} crmSb={crm} />}
+          {view === "adm_companies" && <AdminCompaniesPage actor={actor} crmSb={crm} />}
           {view === "adm_whatsapp" && <AdminWhatsappPage actor={actor} />}
           {view === "adm_support" && <AdminSupportPage />}
         </>

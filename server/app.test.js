@@ -58,10 +58,10 @@ describe("API del backoffice (solo lectura)", () => {
     expect(await (await call("/api/admin/health")).json()).toEqual({ ok: true, mode: "real" });
   });
   it("lista de usuarios: pasa los filtros y limita el tamaño de página", async () => {
-    const r = await (await call("/api/admin/users?search=ana&page=2&pageSize=999&owners=1&activeOnly=true")).json();
-    expect(r.echo).toEqual({ search: "ana", page: 2, pageSize: 50, owners: true, activeOnly: true });
+    const r = await (await call("/api/admin/users?search=ana&page=2&pageSize=999&owners=1&activeOnly=true&plan=Freemium")).json();
+    expect(r.echo).toEqual({ search: "ana", page: 2, pageSize: 50, owners: true, activeOnly: true, plan: "Freemium" });
     const d = await (await call("/api/admin/users?page=abc&pageSize=-5")).json();
-    expect(d.echo).toMatchObject({ page: 1, pageSize: 1, owners: false, activeOnly: false });
+    expect(d.echo).toMatchObject({ page: 1, pageSize: 1, owners: false, activeOnly: false, plan: "" });
   });
   it("el texto de búsqueda se corta a 100 caracteres", async () => {
     const r = await (await call("/api/admin/users?search=" + "a".repeat(500))).json();

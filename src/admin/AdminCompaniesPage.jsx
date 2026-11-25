@@ -10,12 +10,12 @@ import AdminCompanyDetail from "./AdminCompanyDetail.jsx";
 
 const PAGE_SIZE = 8;
 
-export default function AdminCompaniesPage({ actor }) {
+export default function AdminCompaniesPage({ actor, crmSb = null }) {
   const [status, setStatus] = useState("active"), [search, setSearch] = useState(""), [page, setPage] = useState(1), [company, setCompany] = useState(null), [userId, setUserId] = useState(null), [version, setVersion] = useState(0);
   const list = useAsync(() => listCompanies({ status, search, page, pageSize: PAGE_SIZE }), `companies:${status}:${search}:${page}:${version}`);
   const users = useAsync(() => (company ? listCompanyUsers(company._id) : Promise.resolve([])), `cusers:${company?._id}:${version}`);
 
-  if (userId) return <AdminCompanyDetail userId={userId} actor={actor} onBack={() => setUserId(null)} onChanged={() => setVersion((v) => v + 1)} />;
+  if (userId) return <AdminCompanyDetail userId={userId} actor={actor} crmSb={crmSb} onBack={() => setUserId(null)} onChanged={() => setVersion((v) => v + 1)} />;
 
   const r = list.data, counts = r?.counts || { active: 0, paused: 0 };
   const change = (fn) => (...a) => { fn(...a); setPage(1); setCompany(null); };

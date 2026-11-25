@@ -8,6 +8,8 @@ import { companyIdOf, isCollaboratorOf, userFullName, whatsappProvider, planOf, 
 import { Tabs, DataTable, StatusBadge, ConfirmDialog, AuditList, IdCell, ActGroup, PhoneLink } from "./adminUi.jsx";
 import { useAsync } from "./adminHooks.js";
 import { EditCompanyDialog, EditContactDialog, AssignPlanDialog, CardLinkDialog, SupportSessionDialog } from "./AdminDialogs.jsx";
+import SendToCrmButton from "./SendToCrmDialog.jsx";
+import { canSendToCrm } from "./crmSend.js";
 
 const yesNo = (v) => (v ? "Sí" : "No");
 // Columna con el id de Mongo (copiable) para que se pueda buscar el documento en la base.
@@ -142,7 +144,7 @@ function AuditTab({ companyId, version }) {
 }
 
 // Usuario que se registró pero no tiene company (en la base real es la mayoría): solo se ven sus datos y la suscripción.
-function NoCompanyView({ user, actor, onBack, refresh, dialog, setDialog, acts }) {
+function NoCompanyView({ user, actor, onBack, refresh, dialog, setDialog, acts, crmSb, crmDone, crmMsg }) {
   const wa = whatsappProvider(user), submitted = (fn) => async (v) => { await fn(v); refresh(); };
   return (
     <div>
@@ -163,8 +165,10 @@ function NoCompanyView({ user, actor, onBack, refresh, dialog, setDialog, acts }
           <ActGroup label="Cuenta">
             <button className="btn-access" disabled title="Este usuario no tiene company: no hay cuenta para revisar.">Entrar como usuario</button>
           </ActGroup>
+          {crmSb && canSendToCrm(user) && <ActGroup label="Comercial"><SendToCrmButton sb={crmSb} user={user} companyName="" actor={actor} className="btn-secondary" onSent={crmDone} /></ActGroup>}
         </div>
       </div>
+      {crmMsg && <div className="notice" role="status" style={{ background: "#EDFAF3", color: "#16A34A", border: "1px solid #BFE9D2" }}>{crmMsg}</div>}
       <div className="notice" style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #FCE4A0" }}>Este usuario todavía no tiene company (no terminó el alta). No hay contactos, campañas ni créditos para mostrar.</div>
       <Card title="Usuario">
         <dl className="kv">
@@ -184,7 +188,7 @@ function NoCompanyView({ user, actor, onBack, refresh, dialog, setDialog, acts }
   );
 }
 
-export default function AdminCompanyDetail({ userId, actor, onBack, onChanged }) {
+export default function AdminCompanyDetail({ userId, actor, crmSb = null, onBack, onChanged }) {
   const [version, setVersion] = useState(0), [tab, setTab] = useState("resumen"), [dialog, setDialog] = useState(null), [confirm, setConfirm] = useState(null);
   const [confirmBusy, setConfirmBusy] = useState(false), [confirmError, setConfirmError] = useState("");
   const perms = useAsync(() => getMyPermissions(actor), "perms:" + actor), cant = cantAct(perms);
@@ -192,6 +196,8 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
   const res = useAsync(async () => { const user = await getUser(userId); if (!user) throw new Error("No se encontró el usuario."); const cid = companyIdOf(user); return { user, bundle: cid ? await getCompanyBundle(cid) : null }; }, `detail:${userId}:${version}`);
 
   const refresh = () => { setVersion((v) => v + 1); onChanged(); };
+  const [crmMsg, setCrmMsg] = useState("");
+  const crmDone = (deal, stage) => setCrmMsg(`Enviado al CRM: ${deal.empresa} quedó en “${stage}”.`);
   async function runConfirmed() {
     setConfirmBusy(true); setConfirmError("");
     try { await confirm.action(); setConfirm(null); refresh(); } catch (e) { setConfirmError(e.message || String(e)); }
@@ -203,7 +209,7 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
   if (res.loading) return <div className="empty">Cargando…</div>;
   if (res.error) return <div><button className="btn-secondary" onClick={onBack}>← Volver</button><div className="err" style={{ marginTop: 12 }}>{res.error}</div></div>;
   const { user, bundle: b } = res.data;
-  if (!b) return <NoCompanyView user={user} actor={actor} onBack={onBack} refresh={refresh} dialog={dialog} setDialog={setDialog} acts={acts} />;
+  if (!b) return <NoCompanyView user={user} actor={actor} onBack={onBack} refresh={refresh} dialog={dialog} setDialog={setDialog} acts={acts} crmSb={crmSb} crmDone={crmDone} crmMsg={crmMsg} />;
   const co = b.company, paused = co.status === "paused";
   const changeKapso = (appId) => {
     const apps = b.kapsoApps || [], to = apps.find((a) => a._id === appId), from = apps.find((a) => a._id === (user.kapso && user.kapso.kapsoAppId));
@@ -244,8 +250,10 @@ export default function AdminCompanyDetail({ userId, actor, onBack, onChanged })
               ? <button className="btn-primary" {...acts} onClick={() => ask({ title: "Activar company", label: "Activar", text: <>Vas a <b>activar</b> la company <b>{co.name}</b>. Sus usuarios vuelven a poder usar la cuenta.</>, action: () => setCompanyStatus(co._id, "active", actor) })}>Activar company</button>
               : <button className="btn-warn" {...acts} onClick={() => ask({ title: "Pausar company", label: "Pausar", danger: true, text: <>Vas a <b>pausar</b> la company <b>{co.name}</b>. Sus usuarios dejan de poder usar la cuenta hasta que la actives de nuevo. No cancela la suscripción ni los cobros.</>, action: () => setCompanyStatus(co._id, "paused", actor) })}>Pausar company</button>}
           </ActGroup>
+          {crmSb && canSendToCrm(user) && <ActGroup label="Comercial"><SendToCrmButton sb={crmSb} user={user} companyName={co.name} actor={actor} className="btn-secondary" onSent={crmDone} /></ActGroup>}
         </div>
       </div>
+      {crmMsg && <div className="notice" role="status" style={{ background: "#EDFAF3", color: "#16A34A", border: "1px solid #BFE9D2" }}>{crmMsg}</div>}
 
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
 

@@ -2,7 +2,7 @@
 // la página vuelve todo al estado inicial. Las funciones tienen la forma de los endpoints que va a tener el backend
 // (ver PLAN.md), así que al conectar Mongo / Postgres solo se reemplaza este archivo; las pantallas no cambian.
 import { MOCK } from "./adminMock.js";
-import { matchesSearch, matchesFilters, isOwner, isPaused, matchesCompanySearch, sortCompaniesByName, sortUsersRecent, paginate, companyIdOf, isMemberOf, isCollaboratorOf, kapsoAppsOfUser, kapsoSummary, listKapsoRows, userFullName, planOf, isPaidPlan, PAID_PLANS, validateCompanyEdit, validateContactEdit, validateSupportReason, buildSupportRequest, SUPPORT_ACTIONS, diffFields, buildAuditEntry, sortByPosition } from "./adminLogic.js";
+import { matchesSearch, matchesFilters, planCounts, isOwner, isPaused, matchesCompanySearch, sortCompaniesByName, sortUsersRecent, paginate, companyIdOf, isMemberOf, isCollaboratorOf, kapsoAppsOfUser, kapsoSummary, listKapsoRows, userFullName, planOf, isPaidPlan, PAID_PLANS, validateCompanyEdit, validateContactEdit, validateSupportReason, buildSupportRequest, SUPPORT_ACTIONS, diffFields, buildAuditEntry, sortByPosition } from "./adminLogic.js";
 
 // ── Modo real o de ejemplo ───────────────────────────────────────────────────────────────────────
 // Al abrir Admin Spicy se prueba el backend (/api/admin, en el servidor). Si responde, las LECTURAS salen de Mongo (solo lectura);
@@ -57,14 +57,16 @@ function log(actor, action, { targetType, targetId, targetLabel, companyId, deta
 }
 
 // ── Lectura ─────────────────────────────────────────────────────────────────────────────────────
-// GET /admin/users?search=&owners=&activeOnly=&page=&pageSize=   (filtrado y paginado del lado del servidor)
-export async function listUsers({ search = "", page = 1, pageSize = 8, owners = false, activeOnly = false } = {}) {
-  if (real()) return http("/users", { search, page, pageSize, owners, activeOnly });
-  const rows = db.users.map((u) => ({ u, co: byId("companies", companyIdOf(u)) }))
+// GET /admin/users?search=&owners=&activeOnly=&plan=&page=&pageSize=   (filtrado y paginado del lado del servidor)
+export async function listUsers({ search = "", page = 1, pageSize = 8, owners = false, activeOnly = false, plan = "" } = {}) {
+  if (real()) return http("/users", { search, page, pageSize, owners, activeOnly, plan });
+  const base = db.users.map((u) => ({ u, co: byId("companies", companyIdOf(u)) }))
     .filter(({ u, co }) => matchesSearch(u, search) && matchesFilters(u, co, { owners, activeOnly }));
+  const rows = base.filter(({ u, co }) => matchesFilters(u, co, { plan }));
   const p = paginate(sortUsersRecent(rows.map((r) => r.u)), page, pageSize);
   return {
     ...p,
+    planCounts: planCounts(base.map((r) => r.u)),
     items: p.items.map((u) => {
       const co = byId("companies", companyIdOf(u));
       return { ...copy(u), kapsoApps: kapsoAppsOfUser(db.kapsoapps, u).map(kapsoSummary), companyName: co ? co.name : "—", companyStatus: co ? co.status : null, isCollaborator: !!co && isCollaboratorOf(u, co._id), isOwner: isOwner(u, co) };

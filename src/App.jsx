@@ -6338,7 +6338,7 @@ export default function SpicyFinanzas() {
       {view==="timeadmin"&&isAdmin&&<ControlJornadaView allUsers={allUsers}/>}
       {view==="crm"&&<CrmApp sb={sb}/>}
       {canSeeSection("Métricas")&&view.startsWith("metrics")&&<RevenueApp sb={sb} view={view} setView={setView} readOnly={!isAdmin} canSegment={canWriteOps(role)}/>}
-      {canSeeSection("Admin Spicy")&&view.startsWith("adm_")&&<AdminApp view={view} actor={session.user.email}/>}
+      {canSeeSection("Admin Spicy")&&view.startsWith("adm_")&&<AdminApp view={view} actor={session.user.email} crmSb={canSeeSection("CRM")?sb:null}/>}
       {view==="notes"&&<NotesView notes={notes} currentUserId={session.user.id} currentUserEmail={session.user.email} isAdmin={isAdmin} onRefresh={loadAll}/>}
 
       {/* ADD */}

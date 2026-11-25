@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   PAID_PLANS, planOf, planLabel, isPaidPlan, validatePlanAssignment, newIdempotencyKey, formatPrice, explainWebhookError, WEBHOOK_ERRORS, validateSupportReason, buildSupportRequest, explainSupportError, SUPPORT_ERRORS, SUPPORT_ACTIONS, AUDIT_ACTIONS, expiryText, REASON_MIN, REASON_MAX, matchesSearch, escapeRegExp, sortUsersRecent, paginate, whatsappProvider, companyIdOf, isMemberOf, isCollaboratorOf, kapsoStatusInfo, kapsoAppsOfUser, kapsoSummary, kapsoQualityInfo, messagingTierLabel, incomingModeLabel, listKapsoRows,
-  validateCompanyEdit, validateContactEdit, diffFields, waLink, couponSummary, buildAuditEntry, userFullName, sortByPosition, isOwner, matchesFilters, isPaused, matchesCompanySearch, sortCompaniesByName,
+  validateCompanyEdit, validateContactEdit, diffFields, waLink, couponSummary, buildAuditEntry, userFullName, sortByPosition, isOwner, matchesFilters, isPaused, matchesCompanySearch, sortCompaniesByName, matchesPlan, planCounts, planOptions, NO_PLAN,
 } from "./adminLogic.js";
 
 describe("planes y suscripciones", () => {
@@ -493,5 +493,35 @@ describe("resumen del cobro con cupón (couponSummary)", () => {
     expect(couponSummary(null, c({ percentOff: 10 }))).toBeNull();
     expect(couponSummary(price, null)).toBeNull();
     expect(couponSummary({}, c({ percentOff: 10 }))).toBeNull();
+  });
+});
+
+describe("filtro por tipo de suscripción", () => {
+  const u = (plan) => ({ subscription: plan === undefined ? undefined : { subscriptionType: plan } });
+  it("matchesPlan: vacío pasa todos, 'none' es sin plan y el resto es el nombre exacto", () => {
+    expect(matchesPlan(u("Freemium"), "")).toBe(true);
+    expect(matchesPlan(u("Freemium"), "Freemium")).toBe(true);
+    expect(matchesPlan(u("SpicyPro"), "Freemium")).toBe(false);
+    expect(matchesPlan(u(undefined), NO_PLAN)).toBe(true);
+    expect(matchesPlan(u(null), NO_PLAN)).toBe(true);
+    expect(matchesPlan(u("Freemium"), NO_PLAN)).toBe(false);
+    expect(matchesPlan(u(undefined), "Freemium")).toBe(false);
+  });
+  it("matchesFilters combina plan con owners y company activa", () => {
+    const co = { userEmail: "a@a.com", status: "active" };
+    const owner = { email: "a@a.com", subscription: { subscriptionType: "Freemium" } };
+    expect(matchesFilters(owner, co, { owners: true, activeOnly: true, plan: "Freemium" })).toBe(true);
+    expect(matchesFilters(owner, co, { owners: true, plan: "SpicyPro" })).toBe(false);
+  });
+  it("planCounts cuenta por plan y agrupa los sin plan", () => {
+    expect(planCounts([u("Freemium"), u("Freemium"), u("SpicyPro"), u(undefined), u(null)])).toEqual({ Freemium: 2, SpicyPro: 1, none: 2 });
+    expect(planCounts(null)).toEqual({});
+  });
+  it("planOptions: orden fijo, desconocidos al final, 'Sin plan' último y solo con usuarios", () => {
+    const o = planOptions({ SpicyPro: 3, Freemium: 10, Zeta: 1, FreeTrial: 2, none: 4 });
+    expect(o.map((x) => x.value)).toEqual(["Freemium", "FreeTrial", "SpicyPro", "Zeta", "none"]);
+    expect(o.find((x) => x.value === "FreeTrial").label).toBe("Free trial");
+    expect(o.at(-1)).toEqual({ value: "none", label: "Sin plan", count: 4 });
+    expect(planOptions({ Freemium: 1 }, "SpicyPro").map((x) => [x.value, x.count])).toEqual([["Freemium", 1], ["SpicyPro", 0]]);
   });
 });

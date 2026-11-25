@@ -1,7 +1,7 @@
 // Consultas de SOLO LECTURA a Mongo para el backoffice. Nada acá escribe, actualiza ni borra.
 // Las pantallas esperan la misma forma que tenía el simulador (src/admin/adminApi.js); la forma la fija shape.js.
 import { ObjectId } from "mongodb";
-import { matchesSearch, matchesFilters, isOwner, isPaused, matchesCompanySearch, sortCompaniesByName, sortUsersRecent, paginate, companyIdOf, isMemberOf, isCollaboratorOf, collaboratesInOf, kapsoAppsOfUser, kapsoSummary, listKapsoRows } from "../src/admin/adminLogic.js";
+import { matchesSearch, matchesFilters, planCounts, isOwner, isPaused, matchesCompanySearch, sortCompaniesByName, sortUsersRecent, paginate, companyIdOf, isMemberOf, isCollaboratorOf, collaboratesInOf, kapsoAppsOfUser, kapsoSummary, listKapsoRows } from "../src/admin/adminLogic.js";
 import { USER_PROJECTION, COMPANY_PROJECTION, KAPSOAPP_PROJECTION, shapeKapsoApp, CHILD, SUPPORT_PROJECTION, shapeUser, shapeCompany, shapeSupportSession, numbered } from "./shape.js";
 
 const MAX_MS = 8000;
@@ -44,11 +44,13 @@ export function makeQueries(db) {
 
     async health() { await db.command({ ping: 1 }); return { ok: true, mode: "real" }; },
 
-    async listUsers({ search = "", page = 1, pageSize = 8, owners = false, activeOnly = false } = {}) {
+    async listUsers({ search = "", page = 1, pageSize = 8, owners = false, activeOnly = false, plan = "" } = {}) {
       const s = await snapshot();
-      const rows = s.users.map((u) => ({ u, co: s.companyById.get(companyIdOf(u)) })).filter(({ u, co }) => matchesSearch(u, search) && matchesFilters(u, co, { owners, activeOnly }));
+      // Los conteos por plan respetan la búsqueda y los demás filtros (pero no el plan elegido) para que el selector muestre cuántos hay de cada uno.
+      const base = s.users.map((u) => ({ u, co: s.companyById.get(companyIdOf(u)) })).filter(({ u, co }) => matchesSearch(u, search) && matchesFilters(u, co, { owners, activeOnly }));
+      const rows = base.filter(({ u, co }) => matchesFilters(u, co, { plan }));
       const p = paginate(sortUsersRecent(rows.map((r) => r.u)), page, pageSize);
-      return { ...p, items: p.items.map((u) => { const co = s.companyById.get(companyIdOf(u)); return { ...u, kapsoApps: kapsoAppsOfUser(s.kapsoApps, u).map(kapsoSummary), companyName: co ? co.name : "—", companyStatus: co ? co.status : null, isCollaborator: !!co && isCollaboratorOf(u, co._id), otherCollabs: Math.max(0, collaboratesInOf(u).filter((x) => x !== (co && co._id)).length), isOwner: isOwner(u, co) }; }) };
+      return { ...p, planCounts: planCounts(base.map((r) => r.u)), items: p.items.map((u) => { const co = s.companyById.get(companyIdOf(u)); return { ...u, kapsoApps: kapsoAppsOfUser(s.kapsoApps, u).map(kapsoSummary), companyName: co ? co.name : "—", companyStatus: co ? co.status : null, isCollaborator: !!co && isCollaboratorOf(u, co._id), otherCollabs: Math.max(0, collaboratesInOf(u).filter((x) => x !== (co && co._id)).length), isOwner: isOwner(u, co) }; }) };
     },
 
     // Conexiones de WhatsApp por Kapso de todas las companies (vista "Conexiones de WhatsApp").
