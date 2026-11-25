@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { resetMock, listUsers, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, listCoupons, getPaymentMethodUrl, listPrices, WebhookError, getUser, listCompanies, listCompanyUsers, getMyPermissions, createSupportLink, listSupportLog, SupportError, configureAdminApi, probeAdminApi, listKapsoApps, setUserKapsoApp } from "./adminApi.js";
+import { resetMock, listUsers, getCompanyBundle, getPipelineStages, getCredits, listAudit, updateCompany, updateUserContact, setCompanyStatus, assignPlan, listCoupons, getPaymentMethodUrl, listPrices, WebhookError, getUser, listCompanies, listCompanyUsers, getMyPermissions, createSupportLink, listSupportLog, SupportError, configureAdminApi, probeAdminApi, listKapsoApps, setUserKapsoApp, getKapsoSetupLink } from "./adminApi.js";
 import { MOCK } from "./adminMock.js";
 
 const ACTOR = "admin@ejemplo.test";
@@ -611,5 +611,22 @@ describe("cambiar la conexión de WhatsApp que usa un usuario", () => {
     expect((await err(setUserKapsoApp(sin._id, appsOf(u)[0]._id, ACTOR))).message).toMatch(/todavía no tiene una conexión/);
     expect((await err(setUserKapsoApp("nope", appsOf(u)[0]._id, ACTOR))).message).toMatch(/No se encontró el usuario/);
     await expect(setUserKapsoApp(u._id, appsOf(u)[0]._id, "")).rejects.toThrow(/quién/);
+  });
+});
+
+describe("link de conexión de WhatsApp (simulador)", () => {
+  it("de una conexión pendiente devuelve un link y queda auditado sin el link adentro", async () => {
+    const pend = MOCK.kapsoapps.find((a) => a.status === "pending_setup" && !(a.setupLinkExpiresAt && new Date(a.setupLinkExpiresAt) <= new Date()));
+    const r = await getKapsoSetupLink(pend._id, ACTOR);
+    expect(r.url).toMatch(/^https:\/\//);
+    const entry = (await listAudit({ limit: 5 })).find((e) => e.action === "kapso_setup_link_view");
+    expect(entry).toMatchObject({ actor: ACTOR, targetId: pend._id });
+    expect(JSON.stringify(entry)).not.toContain(r.url);
+  });
+  it("una conexión ya conectada o inexistente da error con código", async () => {
+    const ok = MOCK.kapsoapps.find((a) => a.status === "success");
+    await expect(getKapsoSetupLink(ok._id, ACTOR)).rejects.toMatchObject({ code: "CONEXION_YA_CONECTADA" });
+    await expect(getKapsoSetupLink("nada", ACTOR)).rejects.toMatchObject({ code: "CONEXION_NO_ENCONTRADA" });
+    await expect(getKapsoSetupLink(ok._id, "")).rejects.toThrow();
   });
 });

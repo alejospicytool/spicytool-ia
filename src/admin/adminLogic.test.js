@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   PAID_PLANS, planOf, planLabel, isPaidPlan, validatePlanAssignment, newIdempotencyKey, formatPrice, explainWebhookError, WEBHOOK_ERRORS, validateSupportReason, buildSupportRequest, explainSupportError, SUPPORT_ERRORS, SUPPORT_ACTIONS, AUDIT_ACTIONS, expiryText, REASON_MIN, REASON_MAX, matchesSearch, escapeRegExp, sortUsersRecent, paginate, whatsappProvider, companyIdOf, isMemberOf, isCollaboratorOf, kapsoStatusInfo, kapsoAppsOfUser, kapsoSummary, kapsoQualityInfo, messagingTierLabel, incomingModeLabel, listKapsoRows,
-  validateCompanyEdit, validateContactEdit, diffFields, waLink, couponSummary, buildAuditEntry, userFullName, sortByPosition, isOwner, matchesFilters, isPaused, matchesCompanySearch, sortCompaniesByName, matchesPlan, planCounts, planOptions, NO_PLAN, companiesView, companyPlan, ownerIndex,
+  validateCompanyEdit, validateContactEdit, diffFields, waLink, couponSummary, buildAuditEntry, userFullName, sortByPosition, isOwner, matchesFilters, isPaused, matchesCompanySearch, sortCompaniesByName, matchesPlan, planCounts, planOptions, NO_PLAN, companiesView, companyPlan, ownerIndex, canOfferSetupLink, explainSetupLinkError, AUDIT_ACTIONS as AUDIT_ACTIONS_2,
 } from "./adminLogic.js";
 
 describe("planes y suscripciones", () => {
@@ -559,5 +559,21 @@ describe("companies filtradas por plan del owner", () => {
     expect(r.planCounts).toEqual({ Freemium: 1, SpicyPro: 1, none: 1 });
     expect(companiesView({ companies: cos, users: us, status: "paused", plan: "Freemium" }).items.map((c) => c.name)).toEqual(["Gamma"]);
     expect(companiesView({ companies: cos, users: us, plan: "none" }).items.map((c) => c.name)).toEqual(["Delta"]);
+  });
+});
+
+describe("link de conexión de WhatsApp", () => {
+  const NOW = Date.parse("2026-11-25T12:00:00Z");
+  it("se ofrece solo en conexiones pendientes cuyo link no venció", () => {
+    expect(canOfferSetupLink({ status: "pending_setup", setupLinkExpiresAt: "2026-11-30T00:00:00Z" }, NOW)).toBe(true);
+    expect(canOfferSetupLink({ status: "pending_setup", setupLinkExpiresAt: null }, NOW)).toBe(true);
+    expect(canOfferSetupLink({ status: "pending_setup", setupLinkExpiresAt: "2026-11-20T00:00:00Z" }, NOW)).toBe(false);
+    expect(canOfferSetupLink({ status: "success" }, NOW)).toBe(false);
+    expect(canOfferSetupLink(null, NOW)).toBe(false);
+  });
+  it("los errores se explican y hay un genérico", () => {
+    expect(explainSetupLinkError("LINK_VENCIDO").title).toMatch(/venció/);
+    expect(explainSetupLinkError("COSA_RARA").title).toBe("Error inesperado");
+    expect(AUDIT_ACTIONS_2.kapso_setup_link_view).toMatch(/link de conexión/);
   });
 });

@@ -14,7 +14,12 @@ const ID_RE = /^[0-9a-f]{24}$/i;
 const fail = (status, code, message) => ({ status, body: { code, message } });
 const label = (a) => (a ? [a.alias, a.displayPhoneNumber].filter(Boolean).join(" · ") || String(a._id) : null);
 
-export function makeKapsoAdmin({ db, audit, invalidate = () => {}, now = () => Date.now(), maxPerMinute = 30, log = console.error }) {
+// Link para que el cliente termine de conectar su número (kapsoapps.setupLinkUrl). Es una llave: con él se conecta un número a esa conexión, por eso:
+//  · NO viaja en las listas ni se guarda en el snapshot (shape.js lo deja afuera a propósito): solo se lee acá, de a uno, cuando alguien lo pide.
+//  · Solo para quien puede hacer cambios (la ruta es POST), con tope por minuto, y ANTES de devolverlo se guarda quién lo pidió (sin registro no se muestra).
+//  · Solo de conexiones pendientes y con link vigente y https; nunca se escribe en el registro de auditoría ni en los logs.
+// `readDb` es la conexión de LECTURA (la de escritura puede ser un usuario que solo escribe).
+export function makeKapsoAdmin({ db, readDb = db, audit, invalidate = () => {}, now = () => Date.now(), maxPerMinute = 30, log = console.error }) {
   const attempts = new Map();
   const tooMany = (email) => {
     const t = now(), recent = (attempts.get(email) || []).filter((x) => t - x < 60_000);
@@ -24,6 +29,22 @@ export function makeKapsoAdmin({ db, audit, invalidate = () => {}, now = () => D
   };
 
   return {
+    async getSetupLink(admin, token, appId) {
+      if (!ID_RE.test(String(appId ?? ""))) return fail(400, "ID_INVALIDO", "Id inválido.");
+      const app = await readDb.collection("kapsoapps").findOne({ _id: new ObjectId(String(appId)) }, { projection: { alias: 1, displayPhoneNumber: 1, status: 1, companyId: 1, userId: 1, setupLinkUrl: 1, setupLinkExpiresAt: 1 } });
+      if (!app) return fail(404, "CONEXION_NO_ENCONTRADA", "No se encontró esa conexión de WhatsApp.");
+      if (app.status === "success") return fail(422, "CONEXION_YA_CONECTADA", "Esa conexión ya está conectada: no necesita un link.");
+      const url = String(app.setupLinkUrl || "");
+      if (!/^https:\/\/\S+$/.test(url)) return fail(404, "SIN_LINK", "Esta conexión no tiene un link de conexión guardado.");
+      const expires = app.setupLinkExpiresAt ? new Date(app.setupLinkExpiresAt) : null;
+      if (expires && !Number.isNaN(expires.getTime()) && expires.getTime() <= now()) return fail(410, "LINK_VENCIDO", "El link de conexión ya venció: hay que generar uno nuevo desde Spicytool.");
+      if (tooMany(admin.email)) return fail(429, "DEMASIADOS_INTENTOS", "Demasiados pedidos en un minuto. Esperá un momento.");
+      const entry = { actor: admin.email, action: "kapso_setup_link_view", targetType: "kapsoapp", targetId: String(app._id), targetLabel: label(app), companyId: app.companyId ? String(app.companyId) : null, detail: { userId: app.userId ? String(app.userId) : null, expiresAt: expires ? expires.toISOString() : null } };
+      try { await audit.record(token, entry); }
+      catch (e) { log("Auditoría no disponible:", e.message); return fail(503, "AUDITORIA_NO_DISPONIBLE", "No se pudo guardar el registro de auditoría, por eso no se muestra el link."); }
+      return { status: 200, body: { url, expiresAt: expires ? expires.toISOString() : null, alias: app.alias || "", displayPhoneNumber: app.displayPhoneNumber || null } };
+    },
+
     async setUserApp(admin, token, userId, appId) {
       if (!ID_RE.test(String(userId)) || !ID_RE.test(String(appId ?? ""))) return fail(400, "ID_INVALIDO", "Id inválido.");
       const users = db.collection("users"), apps = db.collection("kapsoapps");

@@ -92,6 +92,17 @@ export async function setUserKapsoApp(userId, appId, actor) {
   return { _id: userId, kapsoAppId: appId, previousKapsoAppId: current, changed: true };
 }
 
+// POST /admin/kapso-apps/:id/setup-link: el link para que el cliente termine de conectar su número. Se pide de a uno, queda auditado y nunca viaja en las listas.
+export async function getKapsoSetupLink(appId, actor) {
+  if (real()) return http(`/kapso-apps/${encodeURIComponent(appId)}/setup-link`, {}, { method: "POST", body: {} });
+  needActor(actor);
+  const a = byId("kapsoapps", appId) || wh(404, "CONEXION_NO_ENCONTRADA", "No se encontró esa conexión de WhatsApp.");
+  if (a.status === "success") wh(422, "CONEXION_YA_CONECTADA", "Esa conexión ya está conectada.");
+  if (a.setupLinkExpiresAt && new Date(a.setupLinkExpiresAt) <= new Date()) wh(410, "LINK_VENCIDO", "El link ya venció.");
+  log(actor, "kapso_setup_link_view", { targetType: "kapsoapp", targetId: appId, targetLabel: a.alias || appId, companyId: a.companyId, detail: {} });
+  return { url: `https://kapso.example.test/setup/${appId}`, expiresAt: a.setupLinkExpiresAt || null, alias: a.alias || "", displayPhoneNumber: a.displayPhoneNumber || null };
+}
+
 // GET /admin/kapso-apps?status=pending|connected|all&search=&activeOnly=&page=&pageSize=
 export async function listKapsoApps({ status = "pending", search = "", activeOnly = true, page = 1, pageSize = 10 } = {}) {
   if (real()) return http("/kapso-apps", { status, search, activeOnly: activeOnly ? "1" : "0", page, pageSize });

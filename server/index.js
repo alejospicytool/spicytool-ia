@@ -42,7 +42,7 @@ if (process.env.MONGODB_WRITE_URI) {
 }
 const companies = makeCompanyAdmin({ db: writeDb, audit, invalidate: queries.invalidate });
 const users = makeUserAdmin({ db: writeDb, audit, invalidate: queries.invalidate });
-const kapso = makeKapsoAdmin({ db: writeDb, audit, invalidate: queries.invalidate });
+const kapso = makeKapsoAdmin({ db: writeDb, readDb: db, audit, invalidate: queries.invalidate });
 console.log(`Escrituras en Mongo: ${process.env.MONGODB_WRITE_URI ? "usuario de escritura aparte" : "misma conexión que la lectura"}`);
 
 const port = Number(process.env.PORT || 3100);

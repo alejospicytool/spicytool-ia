@@ -8,6 +8,7 @@ import { companyIdOf, isCollaboratorOf, userFullName, whatsappProvider, planOf, 
 import { Tabs, DataTable, StatusBadge, ConfirmDialog, AuditList, IdCell, ActGroup, PhoneLink } from "./adminUi.jsx";
 import { useAsync } from "./adminHooks.js";
 import { EditCompanyDialog, EditContactDialog, AssignPlanDialog, CardLinkDialog, SupportSessionDialog } from "./AdminDialogs.jsx";
+import KapsoSetupLinkButton from "./KapsoSetupLinkButton.jsx";
 import SendToCrmButton from "./SendToCrmDialog.jsx";
 import { canSendToCrm } from "./crmSend.js";
 
@@ -22,7 +23,7 @@ const TONE = { green: "badge-green", amber: "badge-yellow", red: "badge-red", mu
 const KapsoStatus = ({ status }) => { const i = kapsoStatusInfo(status); return <span className={"badge " + TONE[i.tone]}>{i.label}</span>; };
 
 // Conexiones de WhatsApp por Kapso de la company (colección kapsoapps). Las del usuario que se está mirando quedan marcadas.
-function KapsoAppsCard({ apps, users, user, canChange, onChange }) {
+function KapsoAppsCard({ apps, users, user, actor, canChange, onChange }) {
   const mine = new Set(kapsoAppsOfUser(apps, user).map((a) => a._id));
   const inUse = user.kapso && user.kapso.kapsoAppId, options = apps.filter((a) => a.status === "success");
   const [pick, setPick] = useState(inUse || "");
@@ -45,7 +46,7 @@ function KapsoAppsCard({ apps, users, user, canChange, onChange }) {
       <DataTable rows={apps} empty="Esta company no tiene conexiones de WhatsApp por Kapso." columns={[
         { key: "alias", label: "Conexión", render: (a) => <><b>{a.alias || "Sin nombre"}</b>{a.isDefault && <span className="badge badge-blue" style={{ marginLeft: 6 }}>Principal</span>}{a._id === inUse && <span className="badge badge-green" style={{ marginLeft: 6 }} title="Es la conexión que tiene asignada este usuario">En uso</span>}{mine.has(a._id) && a._id !== inUse && <span className="badge badge-muted" style={{ marginLeft: 6 }}>Creada por este usuario</span>}{a.connectionType && a.connectionType !== "coexistence" && <span className="badge badge-muted" style={{ marginLeft: 6 }} title="Tipo de conexión (lo habitual es coexistencia)">{a.connectionType}</span>}</> },
         { key: "displayPhoneNumber", label: "Número", render: (a) => a.displayPhoneNumber ? <><PhoneLink phone={a.displayPhoneNumber} />{a.verifiedName && <div style={{ color: "var(--muted)", fontSize: 11 }}>{a.verifiedName}</div>}</> : <span style={{ color: "var(--muted)" }}>Sin número</span> },
-        { key: "status", label: "Estado", render: (a) => <><KapsoStatus status={a.status} />{a.status !== "success" && a.setupLinkExpiresAt && <div style={{ color: "var(--muted)", fontSize: 11 }}>{new Date(a.setupLinkExpiresAt) < new Date() ? "El link de conexión venció" : "Link de conexión vigente hasta " + fmtDate(a.setupLinkExpiresAt)}</div>}</> },
+        { key: "status", label: "Estado", render: (a) => <><KapsoStatus status={a.status} />{a.status !== "success" && a.setupLinkExpiresAt && <div style={{ color: "var(--muted)", fontSize: 11 }}>{new Date(a.setupLinkExpiresAt) < new Date() ? "El link de conexión venció" : "Link de conexión vigente hasta " + fmtDate(a.setupLinkExpiresAt)}</div>}<div style={{ marginTop: 4 }}><KapsoSetupLinkButton app={a} actor={actor} canAct={canChange} /></div></> },
         { key: "qualityRating", label: "Calidad del número", render: (a) => { const q = kapsoQualityInfo(a.qualityRating); return q ? <span className={"badge " + TONE[q.tone]}>{q.label}</span> : "—"; } },
         { key: "messagingLimitTier", label: "Límite de envío (24 h)", muted: true, render: (a) => messagingTierLabel(a.messagingLimitTier) },
         { key: "incomingMessageMode", label: "Mensajes entrantes", muted: true, render: (a) => incomingModeLabel(a.incomingMessageMode) },
@@ -270,7 +271,7 @@ export default function AdminCompanyDetail({ userId, actor, crmSb = null, onBack
         { key: "condition", label: "Condición" }, { key: "conversionCategory", label: "Categoría", render: (c) => <span className="badge badge-blue">{c.conversionCategory}</span> },
       ID_COL]} /></Card>}
       {tab === "whatsapp" && (<>
-        <KapsoAppsCard key={user.kapso && user.kapso.kapsoAppId} apps={b.kapsoApps || []} users={b.users} user={user} canChange={!cant} onChange={changeKapso} />
+        <KapsoAppsCard key={user.kapso && user.kapso.kapsoAppId} apps={b.kapsoApps || []} users={b.users} user={user} actor={actor} canChange={!cant} onChange={changeKapso} />
         <Card title="Conversaciones de WhatsApp" sub={b.whatsappConversions.length}><DataTable rows={b.whatsappConversions} empty="Sin conversiones de WhatsApp." columns={[
           { key: "date", label: "Fecha", render: (c) => fmtDate(c.date) }, { key: "behavior", label: "Comportamiento" }, { key: "checked", label: "Verificada", render: (c) => yesNo(c.checked) }, { key: "source", label: "Origen", muted: true }, { key: "trackId", label: "Track ID", muted: true },
         ID_COL]} /></Card>

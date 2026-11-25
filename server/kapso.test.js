@@ -108,3 +108,56 @@ describe("cambiar la conexión de WhatsApp de un usuario", () => {
     expect((await svc.setUserApp(ADMIN, TOKEN, UID, A2)).status).toBe(200);
   });
 });
+
+describe("link de conexión de una conexión pendiente", () => {
+  const URL_SECRETA = "https://kapso.test/setup/LINK_SECRETO_123";
+  const NOW = Date.parse("2026-11-25T12:00:00Z");
+  const withLink = (over = {}) => ({ [A3]: { ...APPS[A3], userId: UID, setupLinkUrl: URL_SECRETA, setupLinkExpiresAt: new Date("2026-11-30T12:00:00Z"), ...over } });
+  const build = (apps, extra = {}) => {
+    const order = [], records = [];
+    const readDb = { collection: vi.fn(() => ({ findOne: vi.fn(async (f) => apps[String(f._id)] || null) })) };
+    const audit = { record: vi.fn(async (token, e) => { order.push("auditoria"); if (extra.auditFails) throw new Error("audit down"); records.push({ token, ...e }); }) };
+    // La base de ESCRITURA no se usa para leer: si se la usara, este test fallaría.
+    const db = { collection: () => { throw new Error("no debe leer de la base de escritura"); } };
+    const svc = makeKapsoAdmin({ db, readDb, audit, log: vi.fn(), now: () => NOW, ...(extra.maxPerMinute ? { maxPerMinute: extra.maxPerMinute } : {}) });
+    return { svc, readDb, audit, records, order };
+  };
+  it("camino feliz: devuelve el link y deja registro ANTES (sin el link adentro)", async () => {
+    const { svc, records } = build(withLink());
+    const r = await svc.getSetupLink(ADMIN, TOKEN, A3);
+    expect(r).toEqual({ status: 200, body: { url: URL_SECRETA, expiresAt: "2026-11-30T12:00:00.000Z", alias: "Pendiente", displayPhoneNumber: null } });
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ token: TOKEN, actor: ADMIN.email, action: "kapso_setup_link_view", targetType: "kapsoapp", targetId: A3, companyId: C1 });
+    expect(JSON.stringify(records)).not.toContain("LINK_SECRETO");
+  });
+  it("sin registro de auditoría no se muestra el link: 503 y el link no sale en la respuesta", async () => {
+    const { svc } = build(withLink(), { auditFails: true });
+    const r = await svc.getSetupLink(ADMIN, TOKEN, A3);
+    expect(r.status).toBe(503);
+    expect(r.body.code).toBe("AUDITORIA_NO_DISPONIBLE");
+    expect(JSON.stringify(r)).not.toContain("LINK_SECRETO");
+  });
+  it("no ofrece el link si la conexión ya está conectada, venció, no existe o no es https", async () => {
+    expect((await build({ [A1]: { ...APPS[A1], setupLinkUrl: URL_SECRETA } }).svc.getSetupLink(ADMIN, TOKEN, A1)).body.code).toBe("CONEXION_YA_CONECTADA");
+    const venc = await build(withLink({ setupLinkExpiresAt: new Date("2026-11-20T12:00:00Z") })).svc.getSetupLink(ADMIN, TOKEN, A3);
+    expect(venc).toMatchObject({ status: 410, body: { code: "LINK_VENCIDO" } });
+    expect(JSON.stringify(venc)).not.toContain("LINK_SECRETO");
+    expect((await build({}).svc.getSetupLink(ADMIN, TOKEN, A3)).body.code).toBe("CONEXION_NO_ENCONTRADA");
+    expect((await build(withLink({ setupLinkUrl: "" })).svc.getSetupLink(ADMIN, TOKEN, A3)).body.code).toBe("SIN_LINK");
+    expect((await build(withLink({ setupLinkUrl: "javascript:alert(1)" })).svc.getSetupLink(ADMIN, TOKEN, A3)).body.code).toBe("SIN_LINK");
+    expect((await build(withLink({ setupLinkUrl: "http://inseguro.test/x" })).svc.getSetupLink(ADMIN, TOKEN, A3)).body.code).toBe("SIN_LINK");
+    expect((await build(withLink()).svc.getSetupLink(ADMIN, TOKEN, "xyz")).body.code).toBe("ID_INVALIDO");
+  });
+  it("sin vencimiento guardado igual se muestra; y hay tope por minuto", async () => {
+    const { svc } = build(withLink({ setupLinkExpiresAt: undefined }), { maxPerMinute: 1 });
+    const r = await svc.getSetupLink(ADMIN, TOKEN, A3);
+    expect(r.status).toBe(200);
+    expect(r.body.expiresAt).toBeNull();
+    expect((await svc.getSetupLink(ADMIN, TOKEN, A3)).body.code).toBe("DEMASIADOS_INTENTOS");
+  });
+  it("pide a Mongo solo los campos necesarios", async () => {
+    const { svc, readDb } = build(withLink());
+    await svc.getSetupLink(ADMIN, TOKEN, A3);
+    expect(readDb.collection).toHaveBeenCalledWith("kapsoapps");
+  });
+});

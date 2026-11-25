@@ -257,6 +257,7 @@ export const AUDIT_ACTIONS = {
   contact_edit: "Editó la ficha de contacto",
   kapso_app_change: "Cambió la conexión de WhatsApp (Kapso) de un usuario",
   kapso_app_change_failed: "Intentó cambiar la conexión de WhatsApp de un usuario (no se guardó)",
+  kapso_setup_link_view: "Vio el link de conexión de WhatsApp de un cliente",
   company_pause: "Pausó la company",
   company_activate: "Activó la company",
   company_status_failed: "Intentó cambiar el estado de la company (no se guardó)",
@@ -326,6 +327,22 @@ export const SUPPORT_ERRORS = {
   ERROR: { title: "Error inesperado", action: "Avisá a un desarrollador." },
 };
 export const explainSupportError = (code) => SUPPORT_ERRORS[code] || SUPPORT_ERRORS.ERROR;
+
+// Link de conexión de una conexión de WhatsApp pendiente (para mandárselo al cliente).
+export const SETUP_LINK_ERRORS = {
+  CONEXION_NO_ENCONTRADA: { title: "No se encontró la conexión", action: "Recargá la lista y volvé a intentar." },
+  CONEXION_YA_CONECTADA: { title: "Esa conexión ya está conectada", action: "No necesita un link." },
+  SIN_LINK: { title: "Esta conexión no tiene un link guardado", action: "Hay que generar uno nuevo desde Spicytool o avisar a un desarrollador." },
+  LINK_VENCIDO: { title: "El link de conexión ya venció", action: "Hay que generar uno nuevo desde Spicytool o avisar a un desarrollador." },
+  DEMASIADOS_INTENTOS: { title: "Demasiados pedidos seguidos", action: "Esperá un minuto y volvé a probar." },
+  AUDITORIA_NO_DISPONIBLE: { title: "No se pudo guardar el registro de auditoría", action: "Por seguridad no se muestra el link. Revisá que la tabla admin_audit exista en Supabase." },
+  SIN_PERMISO_ACCIONES: { title: "Tu usuario no puede hacer cambios", action: "Pedile a un admin que te habilite las acciones." },
+  KAPSO_NO_CONFIGURADO: { title: "El servidor no tiene configurado este pedido", action: "Avisá a un desarrollador." },
+  ERROR: { title: "Error inesperado", action: "Probá de nuevo; si sigue, avisá a un desarrollador." },
+};
+export const explainSetupLinkError = (code) => SETUP_LINK_ERRORS[code] || SETUP_LINK_ERRORS.ERROR;
+// ¿Tiene sentido ofrecer "Ver link de conexión"? Solo en conexiones pendientes y cuyo link no venció (si no se sabe el vencimiento, se ofrece).
+export const canOfferSetupLink = (app, now = Date.now()) => !!app && app.status !== "success" && !(app.setupLinkExpiresAt && new Date(app.setupLinkExpiresAt).getTime() <= new Date(now).getTime());
 
 // "vence en 14 min" / "venció"
 export function expiryText(expiresAt, now = Date.now()) {

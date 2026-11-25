@@ -2,7 +2,7 @@
 // Validan con adminLogic.js antes de enviar; el error del "servidor" se muestra dentro del diálogo.
 import { useRef, useState } from "react";
 import { Modal } from "../revenue/revenueUi.jsx";
-import { validateCompanyEdit, validateContactEdit, validatePlanAssignment, PAID_PLANS, planOf, planLabel, newIdempotencyKey, formatPrice, couponSummary, explainWebhookError, validateSupportReason, explainSupportError, expiryText, REASON_MIN, REASON_MAX, userFullName } from "./adminLogic.js";
+import { validateCompanyEdit, validateContactEdit, validatePlanAssignment, PAID_PLANS, planOf, planLabel, newIdempotencyKey, formatPrice, couponSummary, explainWebhookError, explainSetupLinkError, validateSupportReason, explainSupportError, expiryText, REASON_MIN, REASON_MAX, userFullName } from "./adminLogic.js";
 import { useAsync } from "./adminHooks.js";
 import { listPrices, listCoupons } from "./adminApi.js";
 
@@ -66,9 +66,9 @@ function CopyButton({ text }) {
   return <button className="btn-sm" onClick={copy}>{state === "ok" ? "¡Copiado!" : state === "fail" ? "Copialo a mano" : "Copiar"}</button>;
 }
 
-const LinkBox = ({ url }) => (
+const LinkBox = ({ url, label = "Link para cambiar la tarjeta" }) => (
   <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
-    <input className="inp" readOnly aria-label="Link para cambiar la tarjeta" value={url} onFocus={(e) => e.target.select()} />
+    <input className="inp" readOnly aria-label={label} value={url} onFocus={(e) => e.target.select()} />
     <CopyButton text={url} />
   </div>
 );
@@ -191,6 +191,31 @@ export function CardLinkDialog({ user, onSubmit, onClose }) {
       <div className="confirm-text">Cliente: <b>{user.email}</b></div>
       <div style={{ fontSize: 12, color: "var(--muted)", margin: "8px 0" }}>No cobra nada ni cambia la suscripción. El link es de un solo uso y vence a los pocos minutos: generá uno nuevo cada vez, no lo guardes.</div>
       {state.data && <LinkBox url={state.data.paymentMethodUpdateUrl} />}
+      {state.error && <div className="err" role="alert">{state.error}</div>}
+    </Modal>
+  );
+}
+
+// Link para que el cliente termine de conectar su número de WhatsApp (conexión pendiente de Kapso). Se pide recién al apretar el botón (queda registrado
+// quién lo vio) y solo se muestra acá: no se guarda en ningún lado. Si hay un error, se explica con qué hacer.
+export function KapsoSetupLinkDialog({ app, onSubmit, onClose }) {
+  const [state, setState] = useState({ busy: false, data: null, error: "" });
+  async function show() {
+    setState({ busy: true, data: null, error: "" });
+    try { setState({ busy: false, data: await onSubmit(), error: "" }); }
+    catch (e) { const ex = explainSetupLinkError(e.code); setState({ busy: false, data: null, error: `${ex.title}. ${ex.action}` }); }
+  }
+  const name = [app.alias || "Sin nombre", app.displayPhoneNumber].filter(Boolean).join(" · ");
+  return (
+    <Modal title="Link de conexión de WhatsApp" onClose={state.busy ? () => {} : onClose} footer={<><button className="btn-secondary" onClick={onClose}>Cerrar</button>{!state.data && <button className="btn-primary" disabled={state.busy} onClick={show}>{state.busy ? "Buscando…" : "Mostrar link"}</button>}</>}>
+      <div className="confirm-text">Conexión: <b>{name}</b>{app.companyName ? <> · {app.companyName}</> : null}</div>
+      <div style={{ fontSize: 12, color: "var(--muted)", margin: "8px 0" }}>Es el link que el cliente usa para terminar de conectar su número. Mandáselo a esa persona y a nadie más: con él se conecta un número a esta cuenta. Queda registrado quién lo vio.</div>
+      {state.data && (
+        <>
+          <LinkBox url={state.data.url} label="Link de conexión de WhatsApp" />
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 8 }}>{state.data.expiresAt ? `Vence el ${new Date(state.data.expiresAt).toLocaleString("es-AR", { dateStyle: "medium", timeStyle: "short" })}.` : "No se sabe cuándo vence."}</div>
+        </>
+      )}
       {state.error && <div className="err" role="alert">{state.error}</div>}
     </Modal>
   );

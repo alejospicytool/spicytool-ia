@@ -107,6 +107,13 @@ export function createApp({ queries, authenticate, billing, companies, users, au
     res.status(r.status).json(r.body);
   }));
 
+  // Link de conexión de una conexión de WhatsApp pendiente (para mandárselo al cliente). Es POST a propósito: queda detrás del permiso de acciones y la respuesta no se cachea.
+  app.post("/api/admin/kapso-apps/:id/setup-link", route(async (req, res) => {
+    if (!needId(req, res)) return;
+    const r = kapso ? await kapso.getSetupLink(req.admin, req.token, req.params.id) : { status: 503, body: { code: "KAPSO_NO_CONFIGURADO", message: "El servidor todavía no tiene configurado este pedido." } };
+    res.status(r.status).json(r.body);
+  }));
+
   // Todo lo demás (cualquier otro POST/PATCH/PUT/DELETE) no existe.
   app.use("/api/admin", (req, res) => res.status(404).json({ error: "No existe" }));
   // eslint-disable-next-line no-unused-vars
