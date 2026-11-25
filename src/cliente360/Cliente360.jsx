@@ -9,7 +9,7 @@ import { planOf, planLabel, isOwner, userFullName, kapsoStatusInfo } from "../ad
 import { ToqueDialog } from "../seguimiento/SeguimientoApp.jsx";
 import { semaforoInfo, proximoToque, estadoToque, fmtFecha, resultadoInfo, canalLabel, whatsappLink, diasDesde } from "../seguimiento/seguimientoLogic.js";
 import { baDateISO } from "../timeTracking.js";
-import { suggestRevCustomers, suggestDeals, suggestTicketClients, refsOf, linkOf, dealIdsOfCompany, ticketsOfCompany, ticketsOpen, totalMrr, subStatusInfo, subLine, stageName } from "./cliente360Logic.js";
+import { suggestRevCustomers, autoRevCustomers, suggestDeals, suggestTicketClients, refsOf, linkOf, dealIdsOfCompany, ticketsOfCompany, ticketsOpen, totalMrr, subStatusInfo, subLine, stageName } from "./cliente360Logic.js";
 
 const RED = "#EF3E3E";
 const rid = (p) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -106,7 +106,11 @@ export default function Cliente360({ sb, companyId, followup, onboarding, ticket
   const myOnb = onboarding.filter((o) => o.spicy_company_id === companyId);
   const myTickets = useMemo(() => ticketsOfCompany(tickets, L, companyId), [tickets, L, companyId]);
   const openTickets = ticketsOpen(myTickets);
-  const linkedCustomers = (rev.data || []).filter((c) => refsOf(L, companyId, "rev_customer").includes(c.key));
+  // Pagos: los que se unen solos por el cliente de Stripe de la cuenta (necesita los datos de Spicytool) + los vinculados a mano.
+  const autoRev = autoRevCustomers(spicyUsers, companyId, rev.data);
+  const autoKeys = autoRev.map((x) => x.customer.key);
+  const manualRev = (rev.data || []).filter((c) => refsOf(L, companyId, "rev_customer").includes(c.key) && !autoKeys.includes(c.key));
+  const linkedCustomers = [...autoRev.map((x) => ({ ...x.customer, _auto: true, _via: x.via, _linkable: false })), ...manualRev];
   const subs = useLoad(async () => {
     if (!linkedCustomers.length) return [];
     const { data } = await sb.from("rev_subscriptions").select("id,customer_key,status,currency,items,canceled_at").in("customer_key", linkedCustomers.map((c) => c.key));
@@ -217,12 +221,12 @@ export default function Cliente360({ sb, companyId, followup, onboarding, ticket
             {!canSeeMetrics ? <Empty>Para ver los pagos hace falta el permiso de la sección Métricas.</Empty> : rev.loading ? <Empty>Cargando…</Empty> : (
               <LinkBox kind="rev_customer" busy={busy} canWrite={canWrite}
                 linked={linkedCustomers.map((c) => ({ ...c, id: c.key }))}
-                suggestions={suggestRevCustomers(ctx, rev.data || [], L, ownerEmails).map((s) => ({ ...s, ref: s.item.key }))}
+                suggestions={suggestRevCustomers(ctx, rev.data || [], L, ownerEmails).filter((s) => !autoKeys.includes(s.item.key)).map((s) => ({ ...s, ref: s.item.key }))}
                 emptyText="Todavía no hay pagos vinculados a este cliente."
                 onLink={(ref) => link("rev_customer", ref)} onUnlink={(c) => unlink("rev_customer", c.key, c.name || c.email)}
                 renderLinked={(c) => (
                   <>
-                    <div style={{ fontSize: 13 }}><b>{c.name || c.email}</b> <span style={{ color: "#888" }}>· {c.email}</span></div>
+                    <div style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}><b>{c.name || c.email}</b> <span style={{ color: "#888" }}>· {c.email}</span>{c._auto && <Chip tone="green" title={`Es el mismo cliente de Stripe que usa esta cuenta de Spicytool${c._via ? " (usuario " + c._via + ")" : ""}`}>Automático</Chip>}</div>
                     <div style={{ fontSize: 12, color: "#555", margin: "3px 0" }}>MRR {money(c.mrr)}{c.segment ? ` · ${c.segment}` : ""}{c.first_paid_at ? ` · primer pago ${fmtFecha(String(c.first_paid_at).slice(0, 10))}` : ""}</div>
                     {(subs.data || []).filter((s) => s.customer_key === c.key).map((s) => { const i = subStatusInfo(s.status); return <div key={s.id} style={{ fontSize: 12, display: "flex", gap: 8, alignItems: "center" }}><Chip tone={i.tone}>{i.label}</Chip><span>{subLine(s)}</span></div>; })}
                   </>

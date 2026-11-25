@@ -60,6 +60,19 @@ export function suggestTicketClients(company, tickets, links) {
   return out.sort((a, b) => Number(b.strong) - Number(a.strong) || b.item.count - a.item.count).slice(0, 6);
 }
 
+// Pagos que se unen SOLOS: el cliente de Métricas cuya clave es "stripe:<id>" es el mismo cliente de Stripe que guarda Spicytool en el usuario
+// (users.stripe.customerId). Se toman los usuarios de la cuenta (sin colaboradores, que pertenecen a otra). Devuelve [{ customer, via }] con via = email del usuario.
+export const stripeKeyOf = (customerId) => (customerId ? "stripe:" + String(customerId).trim() : "");
+export function autoRevCustomers(users, companyId, customers) {
+  const byKey = new Map();
+  for (const u of users || []) {
+    if (!companyId || !Array.isArray(u.companies) || !u.companies.includes(companyId)) continue;
+    const k = stripeKeyOf(u.stripe && u.stripe.customerId);
+    if (k && !byKey.has(k)) byKey.set(k, u.email || "");
+  }
+  return (customers || []).filter((c) => byKey.has(c.key)).map((c) => ({ customer: c, via: byKey.get(c.key) }));
+}
+
 export const refsOf = (links, companyId, kind) => (links || []).filter((l) => l.company_id === companyId && l.kind === kind).map((l) => l.ref);
 export const linkOf = (links, companyId, kind, ref) => (links || []).find((l) => l.company_id === companyId && l.kind === kind && l.ref === ref) || null;
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nameTokens, nameScore, suggestRevCustomers, suggestDeals, suggestTicketClients, dealIdsOfCompany, ticketsOfCompany, ticketsOpen, totalMrr, subLine, subStatusInfo, stageName, refsOf, linkOf, clientOptions, linkStatus, companyOfTicketName } from "./cliente360Logic.js";
+import { autoRevCustomers, stripeKeyOf, nameTokens, nameScore, suggestRevCustomers, suggestDeals, suggestTicketClients, dealIdsOfCompany, ticketsOfCompany, ticketsOpen, totalMrr, subLine, subStatusInfo, stageName, refsOf, linkOf, clientOptions, linkStatus, companyOfTicketName } from "./cliente360Logic.js";
 
 const co = { company_id: "c1", company_name: "Terra Pueblo Inmobiliaria", contact_name: "Marcos Gil", contact_email: "marcos@terra.com", contact_phone: "+54 9 351 555-0000" };
 
@@ -120,5 +120,29 @@ describe("selector de cliente para tickets", () => {
     expect(companyOfTicketName(links, " Terra Pueblo ")).toBe("c1");
     expect(companyOfTicketName(links, "Otro")).toBeNull();
     expect(companyOfTicketName(links, "")).toBeNull();
+  });
+});
+
+describe("pagos que se unen solos por el cliente de Stripe", () => {
+  const customers = [{ key: "stripe:cus_1", name: "A" }, { key: "stripe:cus_2", name: "B" }, { key: "stripe:cus_3", name: "C" }, { key: "manual:x", name: "M" }];
+  const users = [
+    { email: "owner@x.com", companies: ["c1"], stripe: { customerId: "cus_1" } },
+    { email: "otro@x.com", companies: ["c1"], stripe: { customerId: "cus_2" } },
+    { email: "colab@x.com", companies: ["c9"], companiesWhereICollaborate: ["c1"], stripe: { customerId: "cus_3" } },
+    { email: "sin@x.com", companies: ["c1"], stripe: { customerId: null } },
+  ];
+  it("stripeKeyOf arma la clave de Métricas", () => {
+    expect(stripeKeyOf("cus_1")).toBe("stripe:cus_1");
+    expect(stripeKeyOf(null)).toBe("");
+  });
+  it("une los clientes de Stripe de los usuarios de la cuenta, sin los colaboradores", () => {
+    const r = autoRevCustomers(users, "c1", customers);
+    expect(r.map((x) => [x.customer.key, x.via])).toEqual([["stripe:cus_1", "owner@x.com"], ["stripe:cus_2", "otro@x.com"]]);
+  });
+  it("sin datos de Spicytool, sin usuarios o sin company no une nada", () => {
+    expect(autoRevCustomers([], "c1", customers)).toEqual([]);
+    expect(autoRevCustomers(null, "c1", customers)).toEqual([]);
+    expect(autoRevCustomers(users, "", customers)).toEqual([]);
+    expect(autoRevCustomers(users, "c1", null)).toEqual([]);
   });
 });
