@@ -70,6 +70,7 @@ describe("API del backoffice (solo lectura)", () => {
   it("companies: solo 'paused' o 'active'", async () => {
     expect((await (await call("/api/admin/companies?status=paused")).json()).echo.status).toBe("paused");
     expect((await (await call("/api/admin/companies?status=cualquier-cosa")).json()).echo.status).toBe("active");
+    expect((await (await call("/api/admin/companies?plan=Freemium")).json()).echo.plan).toBe("Freemium");
   });
   it("ids: inválido = 400, inexistente = 404, existente = 200", async () => {
     expect((await call("/api/admin/users/no-es-un-id")).status).toBe(400);

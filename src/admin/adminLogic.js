@@ -122,6 +122,22 @@ export function matchesCompanySearch(company, q) {
   const re = new RegExp(escapeRegExp(text), "i");
   return [company.name, company.userEmail].some((v) => v != null && re.test(String(v)));
 }
+// Plan de una company = el plan de su owner (el usuario cuyo email es el "userEmail" de la company). `ownerByEmail` = Map email en minúsculas → usuario.
+export const ownerIndex = (users) => { const m = new Map(); for (const u of users || []) { const e = String((u && u.email) || "").trim().toLowerCase(); if (e && !m.has(e)) m.set(e, u); } return m; };
+export const companyPlan = (company, ownerByEmail) => { const o = ownerByEmail && ownerByEmail.get(String((company && company.userEmail) || "").trim().toLowerCase()); return o ? planOf(o) : null; };
+
+// Lista de companies (pestañas activas/pausadas) con búsqueda y filtro por plan del owner. Lo usan el servidor y el simulador.
+// Los conteos de las pestañas respetan búsqueda y plan; los del selector de plan respetan búsqueda y pestaña (no el plan elegido).
+export function companiesView({ companies, users, status = "active", search = "", plan = "", page = 1, pageSize = 8 }) {
+  const owners = ownerIndex(users);
+  const found = (companies || []).filter((c) => matchesCompanySearch(c, search));
+  const inTab = found.filter((c) => (status === "paused" ? isPaused(c) : !isPaused(c)));
+  const withPlan = (list) => list.filter((c) => matchesPlan({ subscription: { subscriptionType: companyPlan(c, owners) } }, plan));
+  const counts = { active: withPlan(found.filter((c) => !isPaused(c))).length, paused: withPlan(found.filter(isPaused)).length };
+  const planCountsOut = planCounts(inTab.map((c) => ({ subscription: { subscriptionType: companyPlan(c, owners) } })));
+  const p = paginate(sortCompaniesByName(withPlan(inTab)), page, pageSize);
+  return { ...p, counts, planCounts: planCountsOut, items: p.items.map((c) => ({ ...c, plan: companyPlan(c, owners), userCount: (users || []).filter((u) => isMemberOf(u, c._id)).length })) };
+}
 export const sortCompaniesByName = (companies) => [...companies].sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "es", { sensitivity: "base" }));
 
 // Más recientes primero. Los _id de Mongo (ObjectId en hexa) crecen con el tiempo.

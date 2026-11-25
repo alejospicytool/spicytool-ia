@@ -42,7 +42,7 @@ export function createApp({ queries, authenticate, billing, companies, users, au
   app.get("/api/admin/users/:id", route(async (req, res) => { if (needId(req, res)) orNotFound(res, await queries.getUser(req.params.id)); }));
 
   app.get("/api/admin/companies", route(async (req, res) => res.json(await queries.listCompanies({
-    status: req.query.status === "paused" ? "paused" : "active", search: text(req.query.search), page: int(req.query.page, 1, 1, 100000), pageSize: int(req.query.pageSize, 8, 1, 50),
+    status: req.query.status === "paused" ? "paused" : "active", search: text(req.query.search), plan: text(req.query.plan), page: int(req.query.page, 1, 1, 100000), pageSize: int(req.query.pageSize, 8, 1, 50),
   }))));
   app.get("/api/admin/companies/:id", route(async (req, res) => { if (needId(req, res)) orNotFound(res, await queries.getCompanyBundle(req.params.id)); }));
   app.get("/api/admin/companies/:id/users", route(async (req, res) => { if (needId(req, res)) orNotFound(res, await queries.listCompanyUsers(req.params.id)); }));

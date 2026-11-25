@@ -2,7 +2,7 @@
 // detalle completo (el mismo de "Usuarios y companies").
 import { useState } from "react";
 import { listCompanies, listCompanyUsers } from "./adminApi.js";
-import { userFullName } from "./adminLogic.js";
+import { userFullName, planLabel, planOptions } from "./adminLogic.js";
 import { Tabs, DataTable, StatusBadge, Pager, PhoneLink } from "./adminUi.jsx";
 import { useAsync } from "./adminHooks.js";
 import { fmtDate } from "../revenue/revenueUi.jsx";
@@ -11,9 +11,12 @@ import AdminCompanyDetail from "./AdminCompanyDetail.jsx";
 const PAGE_SIZE = 8;
 
 export default function AdminCompaniesPage({ actor, crmSb = null }) {
-  const [status, setStatus] = useState("active"), [search, setSearch] = useState(""), [page, setPage] = useState(1), [company, setCompany] = useState(null), [userId, setUserId] = useState(null), [version, setVersion] = useState(0);
-  const list = useAsync(() => listCompanies({ status, search, page, pageSize: PAGE_SIZE }), `companies:${status}:${search}:${page}:${version}`);
+  const [status, setStatus] = useState("active"), [search, setSearch] = useState(""), [plan, setPlan] = useState(""), [page, setPage] = useState(1), [company, setCompany] = useState(null), [userId, setUserId] = useState(null), [version, setVersion] = useState(0);
+  const list = useAsync(() => listCompanies({ status, search, plan, page, pageSize: PAGE_SIZE }), `companies:${status}:${search}:${plan}:${page}:${version}`);
   const users = useAsync(() => (company ? listCompanyUsers(company._id) : Promise.resolve([])), `cusers:${company?._id}:${version}`);
+
+  const [planCounts, setPlanCounts] = useState(null);
+  if (list.data && list.data.planCounts && list.data.planCounts !== planCounts) setPlanCounts(list.data.planCounts);
 
   if (userId) return <AdminCompanyDetail userId={userId} actor={actor} crmSb={crmSb} onBack={() => setUserId(null)} onChanged={() => setVersion((v) => v + 1)} />;
 
@@ -26,15 +29,20 @@ export default function AdminCompaniesPage({ actor, crmSb = null }) {
       </div>
       <div className="card">
         <Tabs active={status} onChange={change(setStatus)} tabs={[{ key: "active", label: "Activas", count: counts.active }, { key: "paused", label: "Pausadas", count: counts.paused }]} />
-        <div style={{ marginBottom: 14 }}>
+        <div style={{ marginBottom: 14, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <input className="inp" style={{ maxWidth: 360 }} placeholder="Buscar por nombre o email del owner" aria-label="Buscar company" value={search} onChange={(e) => change(setSearch)(e.target.value)} />
+          <select className="inp" style={{ maxWidth: 220 }} aria-label="Filtrar por tipo de suscripción" value={plan} onChange={(e) => change(setPlan)(e.target.value)}>
+            <option value="">Todas las suscripciones</option>
+            {planOptions(planCounts, plan).map((o) => <option key={o.value} value={o.value}>{o.label} ({o.count})</option>)}
+          </select>
+          {plan && <button className="btn-sm" onClick={() => change(setPlan)("")}>Quitar filtro</button>}
         </div>
         {list.loading && !r ? <div className="empty">Cargando…</div> : list.error ? <div className="err">{list.error}</div> : (
           <>
             <DataTable rows={r?.items || []} selectedId={company?._id} onRowClick={setCompany}
-              empty={search ? "Ninguna company coincide con la búsqueda." : status === "paused" ? "No hay companies pausadas." : "No hay companies activas."} columns={[
+              empty={search || plan ? "Ninguna company coincide con la búsqueda y el filtro." : status === "paused" ? "No hay companies pausadas." : "No hay companies activas."} columns={[
                 { key: "name", label: "Company", render: (c) => <b>{c.name}</b> }, { key: "userEmail", label: "Owner", muted: true },
-                { key: "status", label: "Estado", render: (c) => <StatusBadge status={c.status} /> }, { key: "userCount", label: "Usuarios", num: true },
+                { key: "status", label: "Estado", render: (c) => <StatusBadge status={c.status} /> }, { key: "plan", label: "Plan", render: (c) => planLabel(c.plan) }, { key: "userCount", label: "Usuarios", num: true },
                 { key: "credits", label: "Créditos", num: true, render: (c) => Number(c.credits || 0).toLocaleString("es-AR") }, { key: "creationDate", label: "Alta", muted: true, render: (c) => fmtDate(c.creationDate) },
               ]} />
             {r && <Pager page={r.page} pages={r.pages} total={r.total} label={r.total === 1 ? "company" : "companies"} onChange={(p) => { setPage(p); setCompany(null); }} />}

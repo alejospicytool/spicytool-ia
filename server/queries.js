@@ -1,7 +1,7 @@
 // Consultas de SOLO LECTURA a Mongo para el backoffice. Nada acá escribe, actualiza ni borra.
 // Las pantallas esperan la misma forma que tenía el simulador (src/admin/adminApi.js); la forma la fija shape.js.
 import { ObjectId } from "mongodb";
-import { matchesSearch, matchesFilters, planCounts, isOwner, isPaused, matchesCompanySearch, sortCompaniesByName, sortUsersRecent, paginate, companyIdOf, isMemberOf, isCollaboratorOf, collaboratesInOf, kapsoAppsOfUser, kapsoSummary, listKapsoRows } from "../src/admin/adminLogic.js";
+import { matchesSearch, matchesFilters, planCounts, companiesView, isOwner, sortUsersRecent, paginate, companyIdOf, isMemberOf, isCollaboratorOf, collaboratesInOf, kapsoAppsOfUser, kapsoSummary, listKapsoRows } from "../src/admin/adminLogic.js";
 import { USER_PROJECTION, COMPANY_PROJECTION, KAPSOAPP_PROJECTION, shapeKapsoApp, CHILD, SUPPORT_PROJECTION, shapeUser, shapeCompany, shapeSupportSession, numbered } from "./shape.js";
 
 const MAX_MS = 8000;
@@ -59,12 +59,9 @@ export function makeQueries(db) {
       return listKapsoRows({ apps: s.kapsoApps, users: s.users, companies: s.companies }, params);
     },
 
-    async listCompanies({ status = "active", search = "", page = 1, pageSize = 8 } = {}) {
+    async listCompanies({ status = "active", search = "", plan = "", page = 1, pageSize = 8 } = {}) {
       const s = await snapshot();
-      const found = s.companies.filter((c) => matchesCompanySearch(c, search));
-      const counts = { active: found.filter((c) => !isPaused(c)).length, paused: found.filter(isPaused).length };
-      const p = paginate(sortCompaniesByName(found.filter((c) => (status === "paused" ? isPaused(c) : !isPaused(c)))), page, pageSize);
-      return { ...p, counts, items: p.items.map((c) => ({ ...c, userCount: s.users.filter((u) => isMemberOf(u, c._id)).length })) };
+      return companiesView({ companies: s.companies, users: s.users, status, search, plan, page, pageSize });
     },
 
     async listCompanyUsers(companyId) {

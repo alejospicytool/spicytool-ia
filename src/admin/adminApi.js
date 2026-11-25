@@ -2,7 +2,7 @@
 // la página vuelve todo al estado inicial. Las funciones tienen la forma de los endpoints que va a tener el backend
 // (ver PLAN.md), así que al conectar Mongo / Postgres solo se reemplaza este archivo; las pantallas no cambian.
 import { MOCK } from "./adminMock.js";
-import { matchesSearch, matchesFilters, planCounts, isOwner, isPaused, matchesCompanySearch, sortCompaniesByName, sortUsersRecent, paginate, companyIdOf, isMemberOf, isCollaboratorOf, kapsoAppsOfUser, kapsoSummary, listKapsoRows, userFullName, planOf, isPaidPlan, PAID_PLANS, validateCompanyEdit, validateContactEdit, validateSupportReason, buildSupportRequest, SUPPORT_ACTIONS, diffFields, buildAuditEntry, sortByPosition } from "./adminLogic.js";
+import { matchesSearch, matchesFilters, planCounts, companiesView, isOwner, sortUsersRecent, paginate, companyIdOf, isMemberOf, isCollaboratorOf, kapsoAppsOfUser, kapsoSummary, listKapsoRows, userFullName, planOf, isPaidPlan, PAID_PLANS, validateCompanyEdit, validateContactEdit, validateSupportReason, buildSupportRequest, SUPPORT_ACTIONS, diffFields, buildAuditEntry, sortByPosition } from "./adminLogic.js";
 
 // ── Modo real o de ejemplo ───────────────────────────────────────────────────────────────────────
 // Al abrir Admin Spicy se prueba el backend (/api/admin, en el servidor). Si responde, las LECTURAS salen de Mongo (solo lectura);
@@ -100,13 +100,9 @@ export async function listKapsoApps({ status = "pending", search = "", activeOnl
 
 // GET /admin/companies?status=active|paused&search=&page=&pageSize=
 // "counts" son los totales de cada lista con la búsqueda aplicada, para mostrarlos en las pestañas.
-export async function listCompanies({ status = "active", search = "", page = 1, pageSize = 8 } = {}) {
-  if (real()) return http("/companies", { status, search, page, pageSize });
-  const found = db.companies.filter((c) => matchesCompanySearch(c, search));
-  const counts = { active: found.filter((c) => !isPaused(c)).length, paused: found.filter(isPaused).length };
-  const list = sortCompaniesByName(found.filter((c) => (status === "paused" ? isPaused(c) : !isPaused(c))));
-  const p = paginate(list, page, pageSize);
-  return { ...p, counts, items: p.items.map((c) => ({ ...copy(c), userCount: db.users.filter((u) => isMemberOf(u, c._id)).length })) };
+export async function listCompanies({ status = "active", search = "", plan = "", page = 1, pageSize = 8 } = {}) {
+  if (real()) return http("/companies", { status, search, plan, page, pageSize });
+  return copy(companiesView({ companies: db.companies, users: db.users, status, search, plan, page, pageSize }));
 }
 
 // GET /admin/companies/:id/users   (el owner primero)

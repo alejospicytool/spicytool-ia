@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   PAID_PLANS, planOf, planLabel, isPaidPlan, validatePlanAssignment, newIdempotencyKey, formatPrice, explainWebhookError, WEBHOOK_ERRORS, validateSupportReason, buildSupportRequest, explainSupportError, SUPPORT_ERRORS, SUPPORT_ACTIONS, AUDIT_ACTIONS, expiryText, REASON_MIN, REASON_MAX, matchesSearch, escapeRegExp, sortUsersRecent, paginate, whatsappProvider, companyIdOf, isMemberOf, isCollaboratorOf, kapsoStatusInfo, kapsoAppsOfUser, kapsoSummary, kapsoQualityInfo, messagingTierLabel, incomingModeLabel, listKapsoRows,
-  validateCompanyEdit, validateContactEdit, diffFields, waLink, couponSummary, buildAuditEntry, userFullName, sortByPosition, isOwner, matchesFilters, isPaused, matchesCompanySearch, sortCompaniesByName, matchesPlan, planCounts, planOptions, NO_PLAN,
+  validateCompanyEdit, validateContactEdit, diffFields, waLink, couponSummary, buildAuditEntry, userFullName, sortByPosition, isOwner, matchesFilters, isPaused, matchesCompanySearch, sortCompaniesByName, matchesPlan, planCounts, planOptions, NO_PLAN, companiesView, companyPlan, ownerIndex,
 } from "./adminLogic.js";
 
 describe("planes y suscripciones", () => {
@@ -523,5 +523,41 @@ describe("filtro por tipo de suscripción", () => {
     expect(o.find((x) => x.value === "FreeTrial").label).toBe("Free trial");
     expect(o.at(-1)).toEqual({ value: "none", label: "Sin plan", count: 4 });
     expect(planOptions({ Freemium: 1 }, "SpicyPro").map((x) => [x.value, x.count])).toEqual([["Freemium", 1], ["SpicyPro", 0]]);
+  });
+});
+
+describe("companies filtradas por plan del owner", () => {
+  const cos = [
+    { _id: "c1", name: "Alfa", userEmail: "a@x.com", status: "active" },
+    { _id: "c2", name: "Beta", userEmail: "B@x.com", status: "active" },
+    { _id: "c3", name: "Gamma", userEmail: "g@x.com", status: "paused" },
+    { _id: "c4", name: "Delta", userEmail: "d@x.com", status: "active" },
+  ];
+  const us = [
+    { _id: "u1", email: "a@x.com", companies: ["c1"], subscription: { subscriptionType: "Freemium" } },
+    { _id: "u2", email: "b@x.com", companies: ["c2"], subscription: { subscriptionType: "SpicyPro" } },
+    { _id: "u3", email: "g@x.com", companies: ["c3"], subscription: { subscriptionType: "Freemium" } },
+    { _id: "u4", email: "otro@x.com", companies: ["c1"], subscription: { subscriptionType: "SpicyPro" } },
+  ];
+  it("companyPlan toma el plan del owner (email sin distinguir mayúsculas) y null si no hay owner", () => {
+    const idx = ownerIndex(us);
+    expect(companyPlan(cos[0], idx)).toBe("Freemium");
+    expect(companyPlan(cos[1], idx)).toBe("SpicyPro");
+    expect(companyPlan(cos[3], idx)).toBeNull();
+  });
+  it("sin filtro lista la pestaña activa con su plan", () => {
+    const r = companiesView({ companies: cos, users: us });
+    expect(r.items.map((c) => [c.name, c.plan])).toEqual([["Alfa", "Freemium"], ["Beta", "SpicyPro"], ["Delta", null]]);
+    expect(r.counts).toEqual({ active: 3, paused: 1 });
+    expect(r.planCounts).toEqual({ Freemium: 1, SpicyPro: 1, none: 1 });
+    expect(r.items[0].userCount).toBe(2);
+  });
+  it("filtra por plan y los conteos de pestañas lo respetan; los del selector no", () => {
+    const r = companiesView({ companies: cos, users: us, plan: "Freemium" });
+    expect(r.items.map((c) => c.name)).toEqual(["Alfa"]);
+    expect(r.counts).toEqual({ active: 1, paused: 1 });
+    expect(r.planCounts).toEqual({ Freemium: 1, SpicyPro: 1, none: 1 });
+    expect(companiesView({ companies: cos, users: us, status: "paused", plan: "Freemium" }).items.map((c) => c.name)).toEqual(["Gamma"]);
+    expect(companiesView({ companies: cos, users: us, plan: "none" }).items.map((c) => c.name)).toEqual(["Delta"]);
   });
 });
