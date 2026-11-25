@@ -26,7 +26,7 @@ export function useTaskToggle({ commit, open }) {
 const logWa = (commit, dealId, text) => commit((crm) => { const d = crm.dealById(dealId); if (d) A.logH(crm, d, "WhatsApp: " + text); });
 
 // ── HOY ─────────────────────────────────────────────────────────────────────
-export function HoyView({ crm, commit, open }) {
+export function HoyView({ crm, commit, open, sb }) {
   const h = crm.hoyData();
   const toggle = useTaskToggle({ commit, open });
   const S = crm.S;

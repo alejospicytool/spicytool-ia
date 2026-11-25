@@ -2938,6 +2938,7 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
     if (found && filterAssignee && !assignees.some(a=>a.entity_type==="ticket"&&a.entity_id===found.id&&a.user_id===filterAssignee)) setFilterAssignee(""); // un link a un ticket ajeno: se pasa a ver todos
     if (found) setDetail(found);
     onOpenHandled();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Solo debe correr cuando llega un link nuevo (openId): si dependiera de tickets o assignees reabriría el ticket cada vez que cambian los datos.
   }, [openId]);
 
   const visibleTickets = tickets.filter(t =>
@@ -3009,7 +3010,7 @@ function TicketsView({ tickets, statusHistory, allUsers, currentUserEmail, curre
     setStatusError(null);
     setPendingMove(null);
     await updateTicket(ticket, { status: newStatus });
-    await sb.from("ticket_status_history").insert({ id:"tsh_"+Date.now()+"_"+Math.random().toString(36).slice(2,6), ticket_id:ticket.id, status:newStatus, changed_by:currentUserEmail });
+    await sb.from("ticket_status_history").insert({ id:newLocalId("tsh"), ticket_id:ticket.id, status:newStatus, changed_by:currentUserEmail });
     onRefresh();
   }
 
@@ -3312,6 +3313,7 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
     if (found && filterAssignee && !assignees.some(a=>a.entity_type==="dev_task"&&a.entity_id===found.id&&a.user_id===filterAssignee)) setFilterAssignee(""); // un link a una tarea ajena: se pasa a ver todas
     if (found) setDetail(found);
     onOpenHandled();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Solo debe correr cuando llega un link nuevo (openId): si dependiera de devTasks o assignees reabriría la tarea cada vez que cambian los datos.
   }, [openId]);
 
   const commentsCount = (taskId) => comments.filter(c=>c.entity_type==="dev_task" && c.entity_id===taskId).length;
@@ -3359,7 +3361,7 @@ function DevTasksView({ devTasks, statusHistory, allUsers, currentUserEmail, cur
     setStageError(null);
     setPendingStage(null);
     await updateDevTask(task, { stage: newStage });
-    await sb.from("dev_task_status_history").insert({ id:"dth_"+Date.now()+"_"+Math.random().toString(36).slice(2,6), dev_task_id:task.id, stage:newStage, changed_by:currentUserEmail });
+    await sb.from("dev_task_status_history").insert({ id:newLocalId("dth"), dev_task_id:task.id, stage:newStage, changed_by:currentUserEmail });
     onRefresh();
   }
 
@@ -3809,6 +3811,7 @@ function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks
     if (found && filterAssigned && !assignees.some(a=>a.entity_type==="task"&&a.entity_id===found.id&&a.user_id===filterAssigned)) setFilterAssigned(""); // un link a una tarea ajena: se pasa a ver todas
     if (found) setDetail(found);
     onOpenHandled();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Solo debe correr cuando llega un link nuevo (openId): si dependiera de tasks o assignees reabriría la tarea cada vez que cambian los datos.
   }, [openId]);
 
   const commentsCount = (taskId) => comments.filter(c=>c.entity_type==="task" && c.entity_id===taskId).length;
@@ -4165,7 +4168,7 @@ function NotesView({ notes, currentUserId, currentUserEmail, isAdmin, onRefresh 
     if (looksLikeSecret(newForm.content) && !newWarned) { setNewWarned(true); return; }
     setSaving(true);
     await sb.from("notes").insert({
-      id: "note_"+Date.now(),
+      id: newLocalId("note"),
       title: newForm.title.trim(),
       content: newForm.content.trim() || null,
       author_id: currentUserId,
@@ -4412,6 +4415,7 @@ function TaskTimeInfo({ entityType, entityId }) {
     return () => { alive = false; if (poll) clearInterval(poll); if (tick) clearInterval(tick); };
   }, [entityType, entityId, key, working]);
 
+  // eslint-disable-next-line react-hooks/purity -- El tiempo transcurrido se recalcula cada 15 s con el contador "tick"; es a propósito que use la hora actual.
   const extra = working && info ? Math.floor((Date.now() - info.fetchedAt) / 1000) : 0;
   if (!info || (info.total_segundos === 0 && extra < 60)) return <span style={{ fontSize: 12, color: "#bbb" }}>{working ? "⏱ Registrando tiempo..." : "Sin tiempo registrado todavía"}</span>;
   const por = (info.por_persona || []).map(p => `${p.nombre}: ${formatHM(p.segundos)}`).join(" · ");
@@ -4473,6 +4477,7 @@ function TimeTrackerBar() {
     const onVis = () => { if (document.visibilityState === "visible") refresh(); };
     document.addEventListener("visibilitychange", onVis);
     return () => { clearInterval(poll); document.removeEventListener("visibilitychange", onVis); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Se arma una sola vez al abrir; refresh solo usa funciones fijas del módulo, no estado.
   }, []);
 
   // Interacción dentro del backoffice: solo click, teclado y scroll (nada de mouse ni capturas)
@@ -4544,6 +4549,7 @@ function TimeTrackerBar() {
       }
     }, 1000);
     return () => clearInterval(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- sessionId es fijo mientras la pantalla está abierta (viene de useState sin setter).
   }, [idleDeadline]);
 
   async function stillWorking() {
@@ -4692,6 +4698,7 @@ function MiTiempoView({ currentUserId }) {
     const poll = setInterval(load, 60000);
     window.addEventListener(TIME_CHANGED_EVENT, load);
     return () => { clearInterval(poll); window.removeEventListener(TIME_CHANGED_EVENT, load); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Se rearma al cambiar de usuario; load no depende de nada más que cambie.
   }, [currentUserId]);
 
   function openCorr(j) {
@@ -4942,12 +4949,14 @@ function ControlJornadaView({ allUsers }) {
     catch (e) { setError(timeErrorMessage(e)); }
   }
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Recarga al cambiar el rango o el usuario elegido; las funciones leen esos valores de este mismo render.
   useEffect(() => { loadResumen(); if (detailUser) loadDetail(); }, [range.desde, range.hasta, detailUser]);
   useEffect(() => {
     if (tab === "solicitudes") loadSolicitudes();
     if (tab === "feriados") loadDias();
     if (tab === "auditoria") loadAuditoria();
     if (tab === "tareas") loadPorTarea();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Recarga al cambiar de pestaña o de rango; las funciones leen range de este mismo render.
   }, [tab, range.desde, range.hasta]);
 
   const pendientes = solicitudes.filter(s => s.estado === "pendiente");
@@ -5244,6 +5253,7 @@ function UserContractsEditor({ user }) {
     try { setList(await timeQuery(sb.from("contratos_usuario").select("*").eq("user_id", user.user_id).order("vigente_desde", { ascending: false }))); }
     catch (e) { setError(timeErrorMessage(e)); }
   }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Recarga al cambiar de usuario; load lee user.user_id de este mismo render.
   useEffect(() => { load(); }, [user.user_id]);
 
   async function save() {
@@ -5392,13 +5402,14 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
   // Notas del seguimiento (tabla comments, entity_type 'onboarding'): cuántas hay y cuándo fue la última
   const notasDe = (id) => (comments||[]).filter(c=>c.entity_type==="onboarding" && c.entity_id===id);
   const ultimaNota = (id) => notasDe(id).reduce((m,c)=>c.created_at>m?c.created_at:m, "");
+  // eslint-disable-next-line react-hooks/purity -- Solo muestra "hace N días" con la hora de este render; no hace falta que sea exacto.
   const hace = (iso) => { const d = Math.floor((Date.now()-new Date(iso).getTime())/86400000); return d<=0 ? "hoy" : d===1 ? "ayer" : "hace "+d+" días"; };
 
   async function createRecord(e) {
     e.preventDefault();
     if (!form.client_name.trim()) return;
     setSaving(true);
-    const id = "ob_"+Date.now();
+    const id = newLocalId("ob");
     await sb.from("onboarding").insert({
       id,
       client_name: form.client_name.trim(),
@@ -5411,7 +5422,7 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
       estado_de_pago: "No Cobrado",
     });
     await sb.from("onboarding_stage_history").insert({
-      id: "oh_"+Date.now(), onboarding_id:id, etapa:ONBOARDING_STAGES[0].key, fecha_entrada: form.fecha_registro,
+      id: newLocalId("oh"), onboarding_id:id, etapa:ONBOARDING_STAGES[0].key, fecha_entrada: form.fecha_registro,
     });
     setSaving(false);
     setForm(emptyForm());
@@ -5429,7 +5440,7 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
     if (record.etapa_actual === newEtapa) return;
     const patch = { etapa_actual: newEtapa, fecha_entrada_etapa_actual: todayISO };
     await sb.from("onboarding").update(patch).eq("id", record.id);
-    await sb.from("onboarding_stage_history").insert({ id:"oh_"+Date.now(), onboarding_id:record.id, etapa:newEtapa, fecha_entrada:todayISO });
+    await sb.from("onboarding_stage_history").insert({ id:newLocalId("oh"), onboarding_id:record.id, etapa:newEtapa, fecha_entrada:todayISO });
     setDetail(d => d && d.id===record.id ? { ...d, ...patch } : d);
     onRefresh();
   }
@@ -5804,6 +5815,7 @@ export default function SpicyFinanzas() {
   useEffect(()=>{
     if (!session) return;
     loadAll();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Carga los datos una vez por sesión: si dependiera de loadAll (que se recrea en cada render) recargaría todo sin parar.
   },[session]);
 
   async function loadAll() {
@@ -5882,6 +5894,7 @@ export default function SpicyFinanzas() {
       .filter(s => canSeeSection(s.label))
       .flatMap(s => s.views.filter(v => !ADMIN_ONLY_VIEWS.includes(v) || isAdmin))[0];
     setView(fallback || "dashboard");
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- canSeeSection y currentViewBlocked se derivan de isAdmin, view y allowedSections, que ya están en la lista.
   },[session, dataLoaded, isAdmin, view, allowedSections]);
 
   // ── Link directo (?ticket=…): abre la vista y el detalle si la persona tiene acceso a esa sección ──
@@ -5926,6 +5939,7 @@ export default function SpicyFinanzas() {
     const target = LINK_TARGETS[pendingLink.type];
     if (!target || !canSeeSection(target.section)) { setPendingLink(null); return; }
     setView(target.view);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Corre solo cuando llega un link pendiente o terminan de cargar los datos; los permisos se leen de ese mismo render.
   },[dataLoaded, pendingLink]);
 
   async function handleAdd(e) {
