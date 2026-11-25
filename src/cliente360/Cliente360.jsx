@@ -6,8 +6,8 @@ import { askConfirm } from "../confirmStore.js";
 import { probeAdminApi, getCompanyBundle } from "../admin/adminApi.js";
 import { useAsync } from "../admin/adminHooks.js";
 import { planOf, planLabel, isOwner, userFullName, kapsoStatusInfo } from "../admin/adminLogic.js";
-import { ToqueDialog } from "../seguimiento/SeguimientoApp.jsx";
-import { semaforoInfo, proximoToque, estadoToque, fmtFecha, resultadoInfo, canalLabel, whatsappLink, diasDesde } from "../seguimiento/seguimientoLogic.js";
+import { ToqueDialog, RespuestaDialog } from "../seguimiento/SeguimientoApp.jsx";
+import { semaforoInfo, proximoToque, estadoToque, fmtFecha, resultadoInfo, canalLabel, whatsappLink, diasDesde, respuestaTexto } from "../seguimiento/seguimientoLogic.js";
 import { baDateISO } from "../timeTracking.js";
 import { suggestRevCustomers, autoRevCustomers, suggestDeals, suggestTicketClients, refsOf, linkOf, dealIdsOfCompany, ticketsOfCompany, ticketsOpen, totalMrr, subStatusInfo, subLine, stageName } from "./cliente360Logic.js";
 
@@ -64,10 +64,11 @@ function LinkBox({ kind, linked, suggestions, canWrite, busy, onLink, onUnlink, 
   );
 }
 
-export default function Cliente360({ sb, companyId, followup, onboarding, tickets, allUsers, me, canWrite, canSearchSpicy, canSeeMetrics, onClose, onRefresh, onGoSeguimiento, onGoOnboarding }) {
+export default function Cliente360({ sb, companyId, followup, onboarding, tickets, allUsers, me, isAdmin, canWrite, canSearchSpicy, canSeeMetrics, onClose, onRefresh, onGoSeguimiento, onGoOnboarding }) {
   const today = baDateISO();
   const [tab, setTab] = useState("resumen");
   const [toque, setToque] = useState(false);
+  const [respT, setRespT] = useState(null); // contacto al que se le marca "Me respondió"
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const row = followup.find((r) => r.company_id === companyId) || null;
@@ -206,7 +207,7 @@ export default function Cliente360({ sb, companyId, followup, onboarding, ticket
                   {touches.loading ? <Empty>Cargando…</Empty> : (touches.data || []).length === 0 ? <Empty>Todavía no se registró ningún contacto.</Empty> : (
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{touches.data.map((t) => { const r = resultadoInfo(t.resultado); return (
                       <div key={t.id} style={{ background: "#F7F7F8", borderRadius: 8, padding: "7px 10px" }}>
-                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 12 }}><b>{fmtFecha(t.fecha)}</b><span style={{ color: "#666" }}>{canalLabel(t.canal)}</span><span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 5, color: r.color, background: r.bg }}>{r.short}</span><span style={{ color: "#aaa", marginLeft: "auto" }}>{String(t.author_email).split("@")[0]}</span></div>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 12 }}><b>{fmtFecha(t.fecha)}</b><span style={{ color: "#666" }}>{canalLabel(t.canal)}</span><span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 5, color: r.color, background: r.bg }}>{r.short}</span>{respuestaTexto(t) && <span style={{ color: "#16A34A", fontSize: 11 }}>{respuestaTexto(t)}</span>}{t.resultado === "no_respondio" && (t.author_id === me.id || isAdmin) && <button onClick={() => setRespT(t)} style={{ background: "none", border: "1px solid #BFE9D2", borderRadius: 6, cursor: "pointer", color: "#16A34A", fontSize: 11, padding: "1px 8px" }}>Me respondió</button>}<span style={{ color: "#aaa", marginLeft: "auto" }}>{String(t.author_email).split("@")[0]}</span></div>
                         {t.nota && <div style={{ fontSize: 13, color: "#333", marginTop: 4, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{t.nota}</div>}
                       </div>); })}</div>
                   )}
@@ -280,6 +281,7 @@ export default function Cliente360({ sb, companyId, followup, onboarding, ticket
           </Section>
         )}
       </div>
+      {respT && <RespuestaDialog sb={sb} touch={respT} today={today} onClose={() => setRespT(null)} onSaved={() => { setRespT(null); touches.reload(); onRefresh(); }} />}
       {toque && row && <ToqueDialog sb={sb} row={row} today={today} me={me} onClose={() => setToque(false)} onSaved={() => { setToque(false); onRefresh(); }} />}
     </div>
   );

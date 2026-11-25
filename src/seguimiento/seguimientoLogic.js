@@ -15,7 +15,8 @@ export const CANALES = [
 export const RESULTADOS = [
   { key: "respondio", label: "Respondió", short: "Respondió", color: "#16A34A", bg: "#EDFAF3" },
   { key: "queja", label: "Respondió con una queja", short: "Queja", color: "#B45309", bg: "#FEF3C7" },
-  { key: "no_respondio", label: "No respondió", short: "No respondió", color: "#C42F2F", bg: "#FEF0F0" },
+  // "Sin respuesta por ahora": casi nadie contesta en el momento. Si responde después, el contacto se actualiza (ver validateRespuesta) y queda anotado cuándo contestó.
+  { key: "no_respondio", label: "Sin respuesta por ahora", short: "Sin respuesta", color: "#C42F2F", bg: "#FEF0F0" },
 ];
 export const SEMAFOROS = [
   { key: "verde", label: "Verde", color: "#16A34A", bg: "#EDFAF3" },
@@ -110,6 +111,34 @@ export function validateToque({ canal, resultado, fecha, proximo }, today) {
   return { ok: Object.keys(errors).length === 0, errors };
 }
 
+// Opciones al marcar que el cliente respondió después de un contacto sin respuesta.
+export const RESPUESTAS = RESULTADOS.filter((r) => r.key !== "no_respondio");
+
+// Formulario "Me respondió": el contacto sigue siendo el mismo (fecha), se anota cuándo respondió y qué resultó. `touch` = el contacto que se actualiza.
+export function validateRespuesta({ resultado, fecha }, touch, today) {
+  const errors = {};
+  if (!RESPUESTAS.some((r) => r.key === resultado)) errors.resultado = "Elegí cómo respondió.";
+  if (!isISO(fecha)) errors.fecha = "La fecha no es válida.";
+  else if (fecha > today) errors.fecha = "La respuesta no puede ser de una fecha futura.";
+  else if (touch && isISO(touch.fecha) && fecha < touch.fecha) errors.fecha = "No puede ser anterior al contacto (" + fmtFecha(touch.fecha) + ").";
+  return { ok: Object.keys(errors).length === 0, errors };
+}
+// Cuándo respondió, si se sabe: { fecha, dias } (dias = cuántos después del contacto) o null.
+export function respuestaInfo(t) {
+  if (!t || !isISO(t.respondio_en)) return null;
+  return { fecha: t.respondio_en, dias: Math.max(0, diasEntre(t.fecha, t.respondio_en) ?? 0) };
+}
+// "el 13/11/2026, 3 días después" (o "el mismo día").
+export const cuandoRespondio = (t) => { const r = respuestaInfo(t); return r ? `el ${fmtFecha(r.fecha)}, ${r.dias > 0 ? `${r.dias} día${r.dias === 1 ? "" : "s"} después` : "el mismo día"}` : ""; };
+export const respuestaTexto = (t) => { const c = cuandoRespondio(t); return c ? "respondió " + c : ""; };
+// La nota del contacto con lo que se agregó al marcar la respuesta.
+export function notaConRespuesta(t, fecha, texto) {
+  const extra = String(texto || "").trim();
+  const base = String((t && t.nota) || "").trim();
+  if (!extra) return base || null;
+  return (base ? base + "\n" : "") + "Respondió el " + fmtFecha(fecha) + ": " + extra;
+}
+
 // Clientes sugeridos para sumar a la cartera: dueños (owners) de cuentas no pausadas con un plan pago.
 // "Plan pago" = cualquier plan que no sea Freemium, Free trial ni vacío. Una persona confirma la lista antes de agregarlos.
 const NO_PAGOS = ["freemium", "freetrial", "free trial", ""];
@@ -146,7 +175,8 @@ export function buildConstancia(row, touches, today) {
   const n = list.length;
   const sin = list.filter((t) => t.resultado === "no_respondio").length;
   const efectivos = list.filter((t) => t.resultado !== "no_respondio");
-  const ultimoEfectivo = efectivos.length ? efectivos[efectivos.length - 1].fecha : null;
+  // Cuándo hubo respuesta: la fecha en que respondió (si se anotó) o la del contacto.
+  const ultimoEfectivo = efectivos.length ? efectivos.map((t) => (isISO(t.respondio_en) ? t.respondio_en : t.fecha)).sort().at(-1) : null;
   let seguidos = 0;
   for (let i = list.length - 1; i >= 0 && list[i].resultado === "no_respondio"; i--) seguidos++;
   const lines = [];
@@ -166,7 +196,7 @@ export function buildConstancia(row, touches, today) {
   lines.push("Detalle:");
   for (const t of list) {
     const quien = String(t.author_email || "").split("@")[0];
-    lines.push(`- ${fmtFecha(t.fecha)} · ${canalLabel(t.canal)} · ${resultadoInfo(t.resultado).label}${t.nota ? ` · ${String(t.nota).replace(/\s+/g, " ").trim()}` : ""}${quien ? ` (${quien})` : ""}`);
+    lines.push(`- ${fmtFecha(t.fecha)} · ${canalLabel(t.canal)} · ${resultadoInfo(t.resultado).label}${cuandoRespondio(t) ? ` (contestó ${cuandoRespondio(t)})` : ""}${t.nota ? ` · ${String(t.nota).replace(/\s+/g, " ").trim()}` : ""}${quien ? ` (${quien})` : ""}`);
   }
   return lines.join("\n");
 }

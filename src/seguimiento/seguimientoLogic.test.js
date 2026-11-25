@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { proximoToque, estadoToque, tocaEstaSemana, sortPorUrgencia, resumen, whatsappLink, validateToque, candidatosCartera, filaDesdeCuenta, buildConstancia, normFrecuencia, diasEntre, escapeHtml } from "./seguimientoLogic.js";
+import { proximoToque, estadoToque, tocaEstaSemana, sortPorUrgencia, resumen, whatsappLink, validateToque, validateRespuesta, respuestaInfo, respuestaTexto, notaConRespuesta, RESPUESTAS, candidatosCartera, filaDesdeCuenta, buildConstancia, normFrecuencia, diasEntre, escapeHtml } from "./seguimientoLogic.js";
 
 // 2026-11-18 es miércoles → la semana va del 16 al 22.
 const HOY = "2026-11-18";
@@ -128,7 +128,7 @@ describe("buildConstancia", () => {
     expect(txt).toContain("Intentos de contacto: 3 (2 sin respuesta, 1 con respuesta)");
     expect(txt).toContain("Intentos seguidos sin respuesta al día de hoy: 2");
     expect(txt).toContain("Último contacto con respuesta: 02/11/2026");
-    expect(txt).toContain("- 16/11/2026 · WhatsApp · No respondió · Le escribí de nuevo (tici)");
+    expect(txt).toContain("- 16/11/2026 · WhatsApp · Sin respuesta por ahora · Le escribí de nuevo (tici)");
     expect(txt).toContain("Período: 02/11/2026 al 16/11/2026");
   });
   it("si el último tuvo respuesta no hay racha", () => {
@@ -142,4 +142,42 @@ describe("buildConstancia", () => {
 
 describe("escapeHtml", () => {
   it("escapa lo que rompería el HTML impreso", () => expect(escapeHtml(`<b>"a" & 'b'</b>`)).toBe("&lt;b&gt;&quot;a&quot; &amp; &#39;b&#39;&lt;/b&gt;"));
+});
+
+describe("respuesta posterior al contacto", () => {
+  const T = { fecha: "2026-11-10", resultado: "no_respondio", nota: "Le escribí por WhatsApp" };
+  it("RESPUESTAS son las opciones con respuesta (no 'sin respuesta')", () => {
+    expect(RESPUESTAS.map((r) => r.key)).toEqual(["respondio", "queja"]);
+  });
+  it("validateRespuesta: exige resultado con respuesta y fecha entre el contacto y hoy", () => {
+    expect(validateRespuesta({ resultado: "respondio", fecha: "2026-11-12" }, T, HOY).ok).toBe(true);
+    expect(validateRespuesta({ resultado: "respondio", fecha: "2026-11-10" }, T, HOY).ok).toBe(true); // el mismo día
+    expect(validateRespuesta({ resultado: "no_respondio", fecha: "2026-11-12" }, T, HOY).errors.resultado).toBeTruthy();
+    expect(validateRespuesta({ resultado: "", fecha: "2026-11-12" }, T, HOY).errors.resultado).toBeTruthy();
+    expect(validateRespuesta({ resultado: "queja", fecha: "2026-11-09" }, T, HOY).errors.fecha).toMatch(/anterior al contacto/);
+    expect(validateRespuesta({ resultado: "queja", fecha: "2999-01-01" }, T, HOY).errors.fecha).toMatch(/futura/);
+    expect(validateRespuesta({ resultado: "queja", fecha: "x" }, T, HOY).errors.fecha).toBeTruthy();
+  });
+  it("respuestaInfo / respuestaTexto: cuántos días después respondió", () => {
+    expect(respuestaInfo({ ...T })).toBeNull();
+    expect(respuestaInfo({ ...T, respondio_en: "2026-11-13" })).toEqual({ fecha: "2026-11-13", dias: 3 });
+    expect(respuestaTexto({ ...T, respondio_en: "2026-11-13" })).toBe("respondió el 13/11/2026, 3 días después");
+    expect(respuestaTexto({ ...T, respondio_en: "2026-11-11" })).toBe("respondió el 11/11/2026, 1 día después");
+    expect(respuestaTexto({ ...T, respondio_en: "2026-11-10" })).toBe("respondió el 10/11/2026, el mismo día");
+    expect(respuestaTexto(T)).toBe("");
+  });
+  it("notaConRespuesta agrega lo nuevo sin pisar la nota original", () => {
+    expect(notaConRespuesta(T, "2026-11-13", "Dice que está de viaje")).toBe("Le escribí por WhatsApp\nRespondió el 13/11/2026: Dice que está de viaje");
+    expect(notaConRespuesta(T, "2026-11-13", "  ")).toBe("Le escribí por WhatsApp");
+    expect(notaConRespuesta({ nota: "" }, "2026-11-13", "ok")).toBe("Respondió el 13/11/2026: ok");
+    expect(notaConRespuesta({ nota: "" }, "2026-11-13", "")).toBeNull();
+  });
+  it("la constancia cuenta como respuesta al contacto actualizado y muestra cuándo contestó", () => {
+    const r = row({ company_name: "Inmo Paz" });
+    const t = (fecha, resultado, extra = {}) => ({ fecha, resultado, canal: "whatsapp", created_at: fecha + "T10:00:00Z", author_email: "tici@spicytool.net", nota: "", ...extra });
+    const txt = buildConstancia(r, [t("2026-11-02", "respondio", { respondio_en: "2026-11-05" }), t("2026-11-09", "no_respondio")], HOY);
+    expect(txt).toContain("Intentos de contacto: 2 (1 sin respuesta, 1 con respuesta)");
+    expect(txt).toContain("Último contacto con respuesta: 05/11/2026");
+    expect(txt).toContain("- 02/11/2026 · WhatsApp · Respondió (contestó el 05/11/2026, 3 días después)");
+  });
 });

@@ -6,7 +6,7 @@ import { askConfirm } from "../confirmStore.js";
 import { listUsers, listCompanies, probeAdminApi } from "../admin/adminApi.js";
 import {
   CANALES, RESULTADOS, SEMAFOROS, DEFAULT_FRECUENCIA, canalLabel, resultadoInfo, semaforoInfo, diasDesde, fmtFecha, normFrecuencia,
-  proximoToque, estadoToque, sortPorUrgencia, resumen, whatsappLink, validateToque, candidatosCartera, filaDesdeCuenta, buildConstancia, escapeHtml,
+  proximoToque, estadoToque, sortPorUrgencia, resumen, whatsappLink, validateToque, validateRespuesta, notaConRespuesta, respuestaTexto, RESPUESTAS, candidatosCartera, filaDesdeCuenta, buildConstancia, escapeHtml,
 } from "./seguimientoLogic.js";
 
 const RED = "#EF3E3E";
@@ -112,6 +112,7 @@ export function ToqueDialog({ sb, row, today, me, onClose, onSaved }) {
             ))}
           </div>
           <Err>{errors.resultado}</Err>
+          <div style={{ fontSize: 11, color: "#999", marginTop: 4 }}>Si todavía no te contestó, dejalo en «Sin respuesta por ahora». Cuando responda, abrí el historial del cliente y marcá «Me respondió».</div>
         </div>
         <label style={lbl}>Nota (qué se habló, qué quedó pendiente)
           <textarea className="spicy-input" rows={3} value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Ej: Le escribí por WhatsApp para saber cómo viene con los leads. Sin respuesta." style={{ width: "100%", marginTop: 4, resize: "vertical", fontFamily: "inherit" }} />
@@ -144,12 +145,71 @@ export function ToqueDialog({ sb, row, today, me, onClose, onSaved }) {
   );
 }
 
+// ── "Me respondió": el cliente contestó DESPUÉS de un contacto que se había cargado sin respuesta ──────────────────────
+// Actualiza ese mismo contacto (no crea otro): queda cuándo se le escribió y cuándo contestó. Lo puede hacer quien lo cargó o un admin (lo hace cumplir la base).
+export function RespuestaDialog({ sb, touch, today, onClose, onSaved }) {
+  const [resultado, setResultado] = useState("respondio");
+  const [fecha, setFecha] = useState(today);
+  const [nota, setNota] = useState("");
+  const [errors, setErrors] = useState({});
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function save(e) {
+    e.preventDefault();
+    const v = validateRespuesta({ resultado, fecha }, touch, today);
+    setErrors(v.errors); setMsg("");
+    if (!v.ok) return;
+    setBusy(true);
+    try {
+      const { data, error } = await sb.from("client_touches").update({ resultado, respondio_en: fecha, nota: notaConRespuesta(touch, fecha, nota) }).eq("id", touch.id).select("id");
+      if (error) throw error;
+      if (!data || !data.length) throw new Error("solo puede actualizarlo quien lo cargó o un admin");
+      onSaved();
+    } catch (err) {
+      setMsg("No se pudo guardar: " + (err.message || "error"));
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <Modal onClose={onClose} maxWidth={460}>
+      <form onSubmit={save} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#111" }}>Me respondió</div>
+          <div style={{ fontSize: 13, color: "#888" }}>Contacto del {fmtFecha(touch.fecha)} por {canalLabel(touch.canal)}. Se actualiza ese mismo contacto: queda cuándo le escribiste y cuándo contestó.</div>
+        </div>
+        <div style={lbl}>¿Cómo respondió?
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+            {RESPUESTAS.map((r) => (
+              <button type="button" key={r.key} onClick={() => setResultado(r.key)} aria-pressed={resultado === r.key} style={{ flex: "1 1 130px", padding: "10px 12px", borderRadius: 10, border: `2px solid ${resultado === r.key ? r.color : "#E8E8E8"}`, background: resultado === r.key ? r.bg : "white", color: resultado === r.key ? r.color : "#555", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{r.label}</button>
+            ))}
+          </div>
+          <Err>{errors.resultado}</Err>
+        </div>
+        <label style={lbl}>¿Qué día respondió?
+          <input type="date" className="spicy-input" value={fecha} min={touch.fecha} max={today} onChange={(e) => setFecha(e.target.value)} style={{ width: "100%", marginTop: 4 }} />
+          <Err>{errors.fecha}</Err>
+        </label>
+        <label style={lbl}>Qué dijo (opcional)
+          <textarea className="spicy-input" rows={3} value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Ej: Dice que estuvo de viaje y que esta semana lo mira." style={{ width: "100%", marginTop: 4, resize: "vertical", fontFamily: "inherit" }} />
+        </label>
+        <Err>{msg}</Err>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button type="button" className="spicy-btn-secondary" onClick={onClose}>Cancelar</button>
+          <button type="submit" className="spicy-btn-primary" disabled={busy}>{busy ? "Guardando…" : "Guardar"}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 // ── Ficha del cliente: datos, rutina, historial y constancia ───────────────────────────────────────────────────────────
 function FichaDialog({ sb, row, today, me, isAdmin, canWrite, responsables, onClose, onChanged, onToque }) {
   const [touches, setTouches] = useState(null);
   const [f, setF] = useState(() => ({ contact_name: row.contact_name || "", contact_email: row.contact_email || "", contact_phone: row.contact_phone || "", responsable_id: row.responsable_id || "", sinRutina: row.frecuencia_dias == null, frecuencia: String(row.frecuencia_dias || DEFAULT_FRECUENCIA), semaforo: row.semaforo, semaforo_motivo: row.semaforo_motivo || "", proximo_toque: row.proximo_toque || "" }));
   const [msg, setMsg] = useState(""); const [ok, setOk] = useState(""); const [busy, setBusy] = useState(false);
   const [bajaMotivo, setBajaMotivo] = useState(""); const [bajaOpen, setBajaOpen] = useState(false);
+  const [respT, setRespT] = useState(null); // contacto al que se le marca "Me respondió"
 
   const load = () => sb.from("client_touches").select("*").eq("company_id", row.company_id).order("fecha", { ascending: false }).order("created_at", { ascending: false }).then(({ data, error }) => { if (error) setMsg("No se pudo leer el historial: " + error.message); setTouches(data || []); });
   useEffect(() => { load(); }, [row.company_id, row.ultimo_toque, row.sin_respuesta]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -252,6 +312,8 @@ function FichaDialog({ sb, row, today, me, isAdmin, canWrite, responsables, onCl
                   <strong style={{ color: "#111" }}>{fmtFecha(t.fecha)}</strong>
                   <span style={{ color: "#666" }}>{canalLabel(t.canal)}</span>
                   <Chip color={r.color} bg={r.bg}>{r.short}</Chip>
+                  {respuestaTexto(t) && <span style={{ color: "#16A34A", fontSize: 11 }}>{respuestaTexto(t)}</span>}
+                  {t.resultado === "no_respondio" && (t.author_id === me.id || isAdmin) && <button onClick={() => setRespT(t)} style={{ background: "none", border: "1px solid #BFE9D2", borderRadius: 6, cursor: "pointer", color: "#16A34A", fontSize: 11, padding: "1px 8px" }}>Me respondió</button>}
                   <span style={{ color: "#aaa", marginLeft: "auto" }}>{String(t.author_email).split("@")[0]}</span>
                   {(t.author_id === me.id || isAdmin) && <button onClick={() => borrarToque(t)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C42F2F", fontSize: 11 }}>Borrar</button>}
                 </div>
@@ -287,6 +349,7 @@ function FichaDialog({ sb, row, today, me, isAdmin, canWrite, responsables, onCl
           <div style={{ fontSize: 11, color: "#aaa", marginTop: 6 }}>La baja no borra nada: el historial de contactos queda guardado.</div>
         </div>
       )}
+      {respT && <RespuestaDialog sb={sb} touch={respT} today={today} onClose={() => setRespT(null)} onSaved={() => { setRespT(null); setOk("Listo: el contacto quedó actualizado con la respuesta."); onChanged(); load(); }} />}
     </Modal>
   );
 }

@@ -6406,7 +6406,7 @@ export default function SpicyFinanzas() {
       )}
 
       </div>{/* end spicy-main */}
-    {cliente360Id&&<Cliente360 sb={sb} companyId={cliente360Id} followup={followup} onboarding={onboarding} tickets={tickets} allUsers={allUsers} me={{ id:session.user.id, email:session.user.email }}
+    {cliente360Id&&<Cliente360 isAdmin={isAdmin} sb={sb} companyId={cliente360Id} followup={followup} onboarding={onboarding} tickets={tickets} allUsers={allUsers} me={{ id:session.user.id, email:session.user.email }}
       canWrite={canWriteOps(role)} canSearchSpicy={canSeeSection("Admin Spicy")} canSeeMetrics={canSeeSection("Métricas")} onClose={()=>setCliente360Id(null)} onRefresh={loadAll}
       onGoSeguimiento={()=>{ setCliente360Id(null); setView("seguimiento"); }} onGoOnboarding={()=>{ setCliente360Id(null); setView("onboarding"); }}/>}
     <ConfirmHost/>
