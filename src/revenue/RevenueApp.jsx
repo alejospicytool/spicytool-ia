@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { monthlyRows, periodRows, healthAlerts, PERIODS, SEGMENTS } from "./revenueMetrics.js";
 import { fetchAll } from "./revenueApi.js";
 import { RvStyles } from "./revenueUi.jsx";
+import { UPCOMING_ENABLED } from "./proximoCobro.js";
 import { Overview, MrrPage, ChurnPage, RetentionPage, FailedPage, CustomersPage, UpcomingPage, ProjectionPage, PlansPage } from "./RevenuePages.jsx";
 
 function useRevenueData(sb) {
@@ -88,7 +89,7 @@ export default function RevenueApp({ sb, view, setView, readOnly = false, canSeg
       {view === "metrics_retention" && <RetentionPage {...common} />}
       {view === "metrics_failed" && <FailedPage {...common} />}
       {view === "metrics_customers" && <CustomersPage {...common} />}
-      {view === "metrics_upcoming" && <UpcomingPage {...common} />}
+      {UPCOMING_ENABLED && view === "metrics_upcoming" && <UpcomingPage {...common} />}
       {view === "metrics_projection" && <ProjectionPage {...common} />}
       {view === "metrics_plans" && <PlansPage {...common} />}
     </div>

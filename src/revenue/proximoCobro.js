@@ -3,6 +3,10 @@
 // OJO: es la fecha de RENOVACIÓN, no garantiza que el cobro salga (puede fallar). El monto es una estimación: no incluye impuestos ni ajustes.
 import { baDateISO } from "../timeTracking.js";
 
+// INTERRUPTOR de la vista "Cobros que vienen" (menú Métricas). Está APAGADO por ahora: hay cosas para revisar antes de mostrarla.
+// Las líneas de "próximo cobro" en Métricas → Clientes y en la Ficha 360 no dependen de este interruptor. Para prenderla: poner true.
+export const UPCOMING_ENABLED = false;
+
 export const LIVE_STATUSES = ["active", "past_due", "trialing"];
 const round2 = (n) => Math.round(n * 100) / 100;
 const MS_DAY = 86400000;

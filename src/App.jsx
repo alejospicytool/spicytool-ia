@@ -11,6 +11,7 @@ import { dayBA, weekStartBA, closureEvents, scoreRequiredForStatus } from "./met
 import CrmApp from "./crm/CrmApp.jsx";
 import RevenueApp from "./revenue/RevenueApp.jsx";
 import AdminApp from "./admin/AdminApp.jsx";
+import { UPCOMING_ENABLED } from "./revenue/proximoCobro.js";
 import SeguimientoApp, { SeguimientoBanner } from "./seguimiento/SeguimientoApp.jsx";
 import IdeasApp from "./ideas/IdeasApp.jsx";
 import Cliente360 from "./cliente360/Cliente360.jsx";
@@ -265,7 +266,7 @@ const NAV_SECTIONS = [
   },
   {
     label: "Métricas",
-    views: ["metrics","metrics_mrr","metrics_churn","metrics_retention","metrics_failed","metrics_customers","metrics_upcoming","metrics_projection","metrics_plans"],
+    views: ["metrics","metrics_mrr","metrics_churn","metrics_retention","metrics_failed","metrics_customers",...(UPCOMING_ENABLED?["metrics_upcoming"]:[]),"metrics_projection","metrics_plans"],
     adminOnly: false,
   },
   {
