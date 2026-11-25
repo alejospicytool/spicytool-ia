@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { subscriptionMrr, normalizeStripeSub, verifyStripeSignature, handle, monthsOf, saveManualSubscription, reconcile, mergeFailure, invoiceSubscriptionId } from "./index.ts";
+import { subscriptionMrr, normalizeStripeSub, periodEndOf, verifyStripeSignature, handle, monthsOf, saveManualSubscription, reconcile, mergeFailure, invoiceSubscriptionId } from "./index.ts";
 
 // ── Base y Stripe en memoria ───────────────────────────────────────────────────────────────────────────
 function fakeStore(over = {}) {
@@ -498,5 +498,55 @@ describe("baja involuntaria", () => {
   it("guarda el motivo de cancelación de Stripe", () => {
     expect(normalizeStripeSub({ ...stripeSub("s", "c", [[price("p", 100)]]), cancellation_details: { reason: "payment_failed" } }).cancelReason).toBe("payment_failed");
     expect(normalizeStripeSub(stripeSub("s", "c", [[price("p", 100)]])).cancelReason).toBeNull();
+  });
+});
+
+// ── Próximo cobro ──────────────────────────────────────────────────────────────────────────────────
+describe("próximo cobro (periodEndOf / normalizeStripeSub)", () => {
+  const SEC = 1796083200; // 2026-12-01T00:00:00Z
+  const ISO = "2026-12-01T00:00:00.000Z";
+  it("API clásica: current_period_end en la suscripción", () => {
+    expect(periodEndOf({ ...stripeSub("s", "c", [[price("p", 100)]]), current_period_end: SEC })).toBe(ISO);
+  });
+  it("API nueva: current_period_end en cada ítem (se toma el más próximo)", () => {
+    const s = stripeSub("s", "c", [[price("p", 100)], [price("q", 100)]]);
+    s.items.data[0].current_period_end = SEC + 86400;
+    s.items.data[1].current_period_end = SEC;
+    expect(periodEndOf(s)).toBe(ISO);
+  });
+  it("en prueba el próximo cobro es cuando termina la prueba", () => {
+    expect(periodEndOf({ ...stripeSub("s", "c", [[price("p", 100)]], { status: "trialing" }), current_period_end: SEC + 999999, trial_end: SEC })).toBe(ISO);
+  });
+  it("canceladas e impagas no tienen próximo cobro; sin dato tampoco (no se inventa)", () => {
+    expect(periodEndOf({ ...stripeSub("s", "c", [[price("p", 100)]], { status: "canceled" }), current_period_end: SEC })).toBeNull();
+    expect(periodEndOf({ ...stripeSub("s", "c", [[price("p", 100)]], { status: "unpaid" }), current_period_end: SEC })).toBeNull();
+    expect(periodEndOf(stripeSub("s", "c", [[price("p", 100)]]))).toBeNull();
+    expect(periodEndOf({ ...stripeSub("s", "c", [[price("p", 100)]]), current_period_end: "x" })).toBeNull();
+  });
+  it("past_due conserva la fecha (Stripe sigue reintentando)", () => {
+    expect(periodEndOf({ ...stripeSub("s", "c", [[price("p", 100)]], { status: "past_due" }), current_period_end: SEC })).toBe(ISO);
+  });
+  it("normalizeStripeSub guarda la fecha y la cancelación al final del período (o con fecha de cancelación)", () => {
+    const base = { ...stripeSub("s", "c", [[price("p", 100)]]), current_period_end: SEC };
+    expect(normalizeStripeSub(base)).toMatchObject({ currentPeriodEnd: ISO, cancelAtPeriodEnd: false });
+    expect(normalizeStripeSub({ ...base, cancel_at_period_end: true }).cancelAtPeriodEnd).toBe(true);
+    expect(normalizeStripeSub({ ...base, cancel_at: SEC }).cancelAtPeriodEnd).toBe(true);
+    expect(normalizeStripeSub({ ...base, status: "canceled", cancel_at_period_end: true })).toMatchObject({ currentPeriodEnd: null, cancelAtPeriodEnd: false });
+  });
+  it("el webhook de baja limpia la fecha de la suscripción cancelada", async () => {
+    const store = fakeStore();
+    store.st.plans.set("pa", { countsInMrr: true });
+    store.st.subs.set("stripe:sub_1", { id: "stripe:sub_1", customerKey: "stripe:cus_1", source: "stripe", status: "active", currency: "usd", items: [{ priceId: "pa", unitAmount: 10000, quantity: 1, interval: "month", intervalCount: 1 }], discount: null, currentPeriodEnd: ISO, cancelAtPeriodEnd: true });
+    const res = await handle(await eventReq(evt("e1", "customer.subscription.deleted", "sub_1")), deps(store, fakeStripe([])));
+    expect(res.status).toBe(200);
+    expect(store.st.subs.get("stripe:sub_1")).toMatchObject({ status: "canceled", currentPeriodEnd: null, cancelAtPeriodEnd: false });
+  });
+  it("una renovación (el webhook relee la suscripción) actualiza la fecha del próximo cobro", async () => {
+    const store = fakeStore();
+    store.st.plans.set("pa", { countsInMrr: true });
+    const renovada = { ...stripeSub("sub_1", "cus_1", [[price("pa", 10000)]]), current_period_end: SEC + 30 * 86400 };
+    const res = await handle(await eventReq(evt("e2", "customer.subscription.updated", "sub_1")), deps(store, fakeStripe([renovada])));
+    expect(res.status).toBe(200);
+    expect(store.st.subs.get("stripe:sub_1").currentPeriodEnd).toBe("2026-12-31T00:00:00.000Z");
   });
 });

@@ -32,6 +32,8 @@ export type Discount = { percentOff?: number | null; amountOff?: number | null; 
 export type SubDoc = {
   id: string; customerKey: string; source: "stripe" | "manual"; status: string; currency: string;
   items: Item[]; discount: Discount; canceledAt?: string | null; cancelReason?: string | null;
+  // Próximo cobro: cuándo vence el período actual (en prueba, cuando termina la prueba) y si se cancela al final. Solo de suscripciones vivas.
+  currentPeriodEnd?: string | null; cancelAtPeriodEnd?: boolean;
 };
 export type PlanInfo = { countsInMrr: boolean };
 
@@ -83,6 +85,16 @@ export function couponRefOf(sub: any): { coupon: any; end: number | null } | nul
   return coupon ? { coupon, end: d.end ?? null } : null;
 }
 
+// Cuándo vence el período actual. Stripe lo cambió de lugar según la versión de la API: antes estaba en la suscripción y ahora en cada ítem
+// (se toma el más próximo). En prueba, el próximo cobro es cuando termina la prueba. Solo para suscripciones vivas: canceladas e impagas no cobran más.
+export function periodEndOf(sub: any): string | null {
+  if (!LIVE_STATUSES.includes(sub.status)) return null;
+  const fromItems = (sub.items?.data || []).map((it: any) => it.current_period_end).filter((n: unknown) => typeof n === "number" && Number.isFinite(n));
+  const own = typeof sub.current_period_end === "number" && Number.isFinite(sub.current_period_end) ? sub.current_period_end : (fromItems.length ? Math.min(...fromItems) : null);
+  const end = sub.status === "trialing" && typeof sub.trial_end === "number" ? sub.trial_end : own;
+  return end ? new Date(end * 1000).toISOString() : null;
+}
+
 export function customerKeyOf(sub: any): string {
   return `stripe:${typeof sub.customer === "string" ? sub.customer : sub.customer.id}`;
 }
@@ -111,6 +123,8 @@ export function normalizeStripeSub(sub: any, coupons: Map<string, any> = new Map
     } : null,
     canceledAt: sub.canceled_at ? new Date(sub.canceled_at * 1000).toISOString() : null,
     cancelReason: sub.cancellation_details?.reason ?? null, // 'payment_failed' = baja involuntaria
+    currentPeriodEnd: periodEndOf(sub),
+    cancelAtPeriodEnd: LIVE_STATUSES.includes(sub.status) && !!(sub.cancel_at_period_end || sub.cancel_at),
   };
 }
 
@@ -305,7 +319,7 @@ export async function pullFromStripe(ctx: Ctx) {
     const sub = await ctx.stripe.getSubscription(id.replace(/^stripe:/, ""));
     if (sub) { await saveStripeSubscription(ctx, sub); continue; }
     const prev = await ctx.store.getSubscription(id); // Stripe ya no la tiene: se da por cancelada
-    if (prev) await ctx.store.upsertSubscription({ ...prev, status: "canceled", canceledAt: ctx.now().toISOString() });
+    if (prev) await ctx.store.upsertSubscription({ ...prev, status: "canceled", canceledAt: ctx.now().toISOString(), currentPeriodEnd: null, cancelAtPeriodEnd: false });
   }
   // Facturas abiertas con intentos de cobro fallidos; y las que teníamos abiertas y ya no lo están (se pagaron o se anularon)
   const openSeen = new Set<string>();
@@ -432,7 +446,7 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
         result = (await deps.store.baselineDone()) ? await recomputeCustomer(ctx, doc.customerKey, { cause: event.type }) : { skipped: "sin_carga_inicial" };
       } else {
         const prev = await deps.store.getSubscription(`stripe:${event.data.object.id}`);
-        if (prev) { await deps.store.upsertSubscription({ ...prev, status: "canceled", canceledAt: now().toISOString() }); result = (await deps.store.baselineDone()) ? await recomputeCustomer(ctx, prev.customerKey, { cause: event.type }) : { skipped: "sin_carga_inicial" }; }
+        if (prev) { await deps.store.upsertSubscription({ ...prev, status: "canceled", canceledAt: now().toISOString(), currentPeriodEnd: null, cancelAtPeriodEnd: false }); result = (await deps.store.baselineDone()) ? await recomputeCustomer(ctx, prev.customerKey, { cause: event.type }) : { skipped: "sin_carga_inicial" }; }
       }
       await deps.store.finishEvent(event.id, result);
       return reply({ ok: true });
@@ -518,8 +532,8 @@ export function makeStore(sb: any): Store {
     const out: any[] = [];
     for (let from = 0; ; from += 1000) { const rows = check(await build(from, from + 999)) || []; out.push(...rows); if (rows.length < 1000) return out; }
   };
-  const toDoc = (r: any): SubDoc => ({ id: r.id, customerKey: r.customer_key, source: r.source, status: r.status, currency: r.currency, items: r.items, discount: r.discount, canceledAt: r.canceled_at, cancelReason: r.cancel_reason });
-  const toRow = (d: SubDoc) => ({ id: d.id, customer_key: d.customerKey, source: d.source, status: d.status, currency: d.currency, items: d.items, discount: d.discount, canceled_at: d.canceledAt || null, cancel_reason: d.cancelReason ?? null, updated_at: new Date().toISOString() });
+  const toDoc = (r: any): SubDoc => ({ id: r.id, customerKey: r.customer_key, source: r.source, status: r.status, currency: r.currency, items: r.items, discount: r.discount, canceledAt: r.canceled_at, cancelReason: r.cancel_reason, currentPeriodEnd: r.current_period_end ?? null, cancelAtPeriodEnd: !!r.cancel_at_period_end });
+  const toRow = (d: SubDoc) => ({ id: d.id, customer_key: d.customerKey, source: d.source, status: d.status, currency: d.currency, items: d.items, discount: d.discount, canceled_at: d.canceledAt || null, cancel_reason: d.cancelReason ?? null, current_period_end: d.currentPeriodEnd ?? null, cancel_at_period_end: !!d.cancelAtPeriodEnd, updated_at: new Date().toISOString() });
   return {
     async loadPlans() { return new Map((await fetchAll((a, b) => sb.from("rev_plans").select("price_id,counts_in_mrr").order("price_id").range(a, b))).map((p: any) => [p.price_id, { countsInMrr: p.counts_in_mrr }])); },
     async loadFx() { return new Map((check(await sb.from("rev_fx_rates").select("currency,rate")) || []).map((r: any) => [String(r.currency).toLowerCase(), Number(r.rate)])); },

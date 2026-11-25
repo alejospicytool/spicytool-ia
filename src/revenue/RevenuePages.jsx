@@ -51,6 +51,12 @@ export function Overview({ d, rows, seg, done, alerts, go, sb, reload, ro }) {
           </ol>
         </div>
       )}
+      {done && !ro && (
+        <div className="card" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", padding: "10px 14px" }}>
+          <div style={{ flex: 1, minWidth: 240, fontSize: 12.5, color: "#555" }}>Las suscripciones, incluida la fecha del próximo cobro, se actualizan solas con cada aviso de Stripe. Si querés forzar una actualización ahora (no cambia el MRR ni registra movimientos):</div>
+          <button className="btn-secondary" disabled={!!busy} onClick={() => run("pull")}>{busy === "pull" ? "Actualizando…" : "Actualizar desde Stripe"}</button>
+        </div>
+      )}
       {!k ? <div className="card"><div className="empty">Todavía no hay meses para mostrar. Cargá el histórico (scripts/revenue-import.py) o hacé la carga inicial.</div></div> : (
         <>
           <div className="kpi-grid">
