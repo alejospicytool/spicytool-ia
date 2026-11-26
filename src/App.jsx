@@ -94,14 +94,15 @@ function BrandStyles() {
         font-size: 13px; font-weight: 600; color: white; flex-shrink: 0;
       }
       .spicy-main { margin-left: 220px; padding: 28px 32px; }
-      .spicy-searchbar { position: sticky; top: 0; z-index: 60; display: flex; justify-content: center; margin: -10px 0 8px; padding: 10px 0 10px; background: linear-gradient(#F7F7F8 75%, rgba(247,247,248,0)); }
-      .spicy-search-wrap { position: relative; width: 100%; max-width: 560px; }
-      .spicy-search-field { display: flex; align-items: center; gap: 8px; background: white; border: 1px solid #E0E0E0; border-radius: 10px; padding: 0 12px; height: 40px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
-      .spicy-search-field:focus-within { border-color: #EF3E3E; box-shadow: 0 0 0 3px rgba(239,62,62,0.12); }
+      .spicy-timebar-center { flex: 1 1 300px; min-width: 220px; max-width: 520px; margin: 0 auto; }
+      .spicy-search-wrap { position: relative; width: 100%; }
+      .spicy-search-field { display: flex; align-items: center; gap: 8px; background: #F5F5F6; border: 1px solid transparent; border-radius: 999px; padding: 0 14px; height: 38px; }
+      .spicy-search-field:hover { background: #F0F0F2; }
+      .spicy-search-field:focus-within { background: white; border-color: #EF3E3E; box-shadow: 0 0 0 3px rgba(239,62,62,0.12); }
       .spicy-search-input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; font-size: 14px; font-family: inherit; color: #111; }
       .spicy-search-input::-webkit-search-cancel-button { display: none; }
       .spicy-search-kbd { font-size: 10px; color: #999; border: 1px solid #E5E5E5; border-radius: 4px; padding: 1px 5px; background: #FAFAFA; font-family: inherit; }
-      .spicy-search-panel { position: absolute; top: 46px; left: 0; right: 0; background: white; border: 1px solid #E0E0E0; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.14); max-height: min(70vh, 520px); overflow-y: auto; padding: 6px 0; }
+      .spicy-search-panel { position: absolute; top: 44px; left: 0; right: 0; background: white; border: 1px solid #E0E0E0; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.14); max-height: min(70vh, 520px); overflow-y: auto; padding: 6px 0; }
       .spicy-search-group { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #999; padding: 8px 14px 4px; }
       .spicy-search-item { display: flex; gap: 8px; align-items: center; width: 100%; text-align: left; border: none; background: none; cursor: pointer; padding: 7px 14px; font-family: inherit; }
       .spicy-search-item.active { background: #FEF0F0; }
@@ -128,7 +129,7 @@ function BrandStyles() {
         .spicy-topbar small { font-weight: 400; color: rgba(255,255,255,0.55); font-size: 12px; margin-left: 4px; }
         .spicy-backdrop { display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 95; }
         .spicy-main { margin-left: 0; padding: 62px 14px 24px; overflow-x: auto; }
-        .spicy-searchbar { top: 48px; }
+        .spicy-timebar-center { order: 3; flex-basis: 100%; max-width: none; margin: 4px 0 0; }
         .spicy-search-kbd { display: none; }
         .spicy-main [style*="grid-template-columns"] { grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)) !important; }
         .spicy-nav-btn, .spicy-menu-tools button, .spicy-sec-btn { min-height: 44px; }
@@ -4454,7 +4455,8 @@ function TaskTimeInfo({ entityType, entityId }) {
   );
 }
 
-function TimeTrackerBar() {
+// `center` = lo que va en el medio de la barra superior (hoy, el buscador global): así hay UNA sola barra fija arriba y nada se tapa.
+function TimeTrackerBar({ center = null }) {
   const [sessionId] = useState(getTimeSessionId);
   const { estado, receivedAt } = useTimeSnapshot();
   const [now, setNow] = useState(Date.now());
@@ -4609,6 +4611,7 @@ function TimeTrackerBar() {
             </span>
           )}
         </div>
+        {center && <div className="spicy-timebar-center">{center}</div>}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {error && <span style={{ fontSize: 12, color: ST_RED }}>{error}</span>}
           {otherSessionActive && (
@@ -6223,8 +6226,7 @@ export default function SpicyFinanzas() {
 
       {/* Main content */}
       <div className="spicy-main">
-        <div className="spicy-searchbar"><GlobalSearch data={searchData} canSpicy={canSeeSection("Admin Spicy")} onPick={openSearchResult}/></div>
-        <TimeTrackerBar/>
+        <TimeTrackerBar center={<GlobalSearch data={searchData} canSpicy={canSeeSection("Admin Spicy")} onPick={openSearchResult}/>}/>
         {role==="reader"&&<div role="status" style={{ fontSize:13,color:"#185FA5",marginBottom:16,padding:"10px 14px",background:"#EEF4FB",borderRadius:10,border:"1px solid #CFE0F3" }}>Tu usuario es de <b>solo lectura</b>: podés ver tickets, tareas y onboarding, pero no crearlos ni cambiarlos. Si necesitás editar, pedile a un admin que te pase a editor.</div>}
         {syncError&&<div style={{ fontSize:13,color:ST_RED,marginBottom:16,padding:"10px 14px",background:ST_RED_BG,borderRadius:10,border:`1px solid ${ST_RED}22` }}>{syncError}</div>}
 

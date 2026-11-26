@@ -100,7 +100,7 @@ export default function SendToCrmButton({ sb, user, companyName, actor, sent = n
   if (sent) return <span className="badge badge-green" title={`Ya está en el CRM: ${sent.empresa}`}>En el CRM{stageLabel ? " · " + stageLabel : ""}</span>;
   return (
     <>
-      <button type="button" className={className} onClick={(e) => { e.stopPropagation(); setOpen(true); }} title="Crear un deal en el CRM comercial para convertirlo a plan pago">Enviar al CRM</button>
+      <button type="button" className={className} style={{ whiteSpace: "nowrap" }} onClick={(e) => { e.stopPropagation(); setOpen(true); }} title="Crear un deal en el CRM comercial para convertirlo a plan pago">Enviar al CRM</button>
       {open && createPortal(<div onClick={(e) => e.stopPropagation()}><SendToCrmDialog sb={sb} user={user} companyName={companyName} actor={actor} onSent={(deal, stage) => onSent && onSent(deal, stage)} onClose={() => setOpen(false)} /></div>, document.querySelector(".rv") || document.body)}
     </>
   );
