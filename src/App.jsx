@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useSyncExternalStore, createContext, useContext } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { ONBOARDING_STAGES, ONBOARDING_LEAD_SOURCES, ONBOARDING_PAYMENT_STATUS, calcularEstado, calcularAvance, diasEntre, ESTADO_BADGE, companyOption, defaultCompanySearch } from "./onboardingLogic.js";
+import { ONBOARDING_STAGES, ONBOARDING_LEAD_SOURCES, ONBOARDING_PAYMENT_STATUS, calcularEstado, calcularAvance, diasEntre, ESTADO_BADGE, companyOption, defaultCompanySearch, pasosParaHacer, pasoParaHoy, esMio, notaPasoHecho, PASO_VACIO } from "./onboardingLogic.js";
+import { PasoLinea, PasoEditor, PasosHoyCard } from "./onboardingPaso.jsx";
 import {
   formatClock, formatHM, formatHours, formatDiffHours, baDateISO, addDaysISO, weekRangeISO, monthRangeISO,
   baTimeToISO, formatTimeBA, formatDateBA, formatDateTimeBA, formatISODateShort, weekdayShort, estadoUI, liveSeconds,
@@ -2264,7 +2265,7 @@ function fmtDuration(ms) {
 // ── Inicio (landing personal) ───────────────────────────────────────────────
 const INICIO_LAST_VISIT_KEY = "spicy_inicio_last_visit";
 
-function InicioView({ myOpenTickets, myOpenDevTasks, myOpenTasks, ticketHistory, devTaskHistory, comments, currentUserEmail, canSeeOperaciones, canSeeDevs, setView, followup=[], meId=null }) {
+function InicioView({ myOpenTickets, myOpenDevTasks, myOpenTasks, ticketHistory, devTaskHistory, comments, currentUserEmail, canSeeOperaciones, canSeeDevs, setView, followup=[], meId=null, onboarding=[], me=null, onOpenOnboarding=()=>{} }) {
   // Se lee la visita anterior UNA sola vez (antes de pisarla) para poder marcar
   // qué cambió desde la última vez que el usuario entró a Inicio.
   const [lastVisit] = useState(() => {
@@ -2311,6 +2312,10 @@ function InicioView({ myOpenTickets, myOpenDevTasks, myOpenTasks, ticketHistory,
       </div>
 
       {canSeeOperaciones && <SeguimientoBanner rows={followup} userId={meId} onOpen={()=>setView("seguimiento")}/>}
+      {canSeeOperaciones && (()=>{
+        const hoyD = new Date(), mios = pasosParaHacer(onboarding, hoyD, r=>esMio(r, me));
+        return <PasosHoyCard mios={mios} delEquipo={pasosParaHacer(onboarding, hoyD).length - mios.length} hoy={hoyD} onOpen={onOpenOnboarding} onOpenAll={()=>setView("onboarding")}/>;
+      })()}
 
       <div style={{ display:"flex",gap:16,flexWrap:"wrap" }}>
         {canSeeOperaciones && (
@@ -5447,6 +5452,7 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
   const [filterEstado, setFilterEstado] = useState("");
   const [filterResponsable, setFilterResponsable] = useState("");
   const [filterBloqueado, setFilterBloqueado] = useState(false);
+  const [filterPaso, setFilterPaso] = useState(false);   // solo clientes con el próximo paso para hoy o vencido
   const [showNew, setShowNew] = useState(false);
   const [detail, setDetail] = useState(null);
   const [dragOverEtapa, setDragOverEtapa] = useState(null);
@@ -5461,13 +5467,16 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
   const [form, setForm] = useState(emptyForm());
   const [saving, setSaving] = useState(false);
 
-  const withEstado = onboarding.map(r => ({ ...r, _estado: calcularEstado(r, new Date()) }));
+  const hoy = new Date();
+  const withEstado = onboarding.map(r => ({ ...r, _estado: calcularEstado(r, hoy) }));
   const visible = withEstado.filter(r =>
     (!filterEtapa || r.etapa_actual===filterEtapa) &&
     (!filterEstado || r._estado===filterEstado) &&
     (!filterResponsable || r.responsable===filterResponsable) &&
-    (!filterBloqueado || r.bloqueado)
+    (!filterBloqueado || r.bloqueado) &&
+    (!filterPaso || pasoParaHoy(r, hoy))
   );
+  const pasosHoy = onboarding.filter(r=>pasoParaHoy(r, hoy)).length;
   const responsables = [...new Set(onboarding.map(r=>r.responsable).filter(Boolean))];
 
   const getHistory = (id) => history.filter(h=>h.onboarding_id===id).sort((a,b)=>a.fecha_entrada.localeCompare(b.fecha_entrada));
@@ -5516,6 +5525,21 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
     onRefresh();
   }
 
+  // Próximo paso: guardar/quitar (patch con los tres campos) y marcar hecho (deja la nota en el cliente y vacía el paso).
+  async function savePaso(record, patch) {
+    const { data, error } = await sb.from("onboarding").update(patch).eq("id", record.id).select("id");
+    if (error) return { error: "No se pudo guardar el paso: " + error.message };
+    if (!data || !data.length) return { error: "No se pudo guardar el paso (sin permiso)." };
+    setDetail(d => d && d.id===record.id ? { ...d, ...patch } : d);
+    onRefresh();
+    return {};
+  }
+  async function completePaso(record) {
+    const { error } = await sb.from("comments").insert({ id:newLocalId("cm"), entity_type:"onboarding", entity_id:record.id, author_id:currentUserId, author_email:currentUserEmail, body:notaPasoHecho(record) });
+    if (error) return { error: "No se pudo anotar el paso: " + error.message };
+    return savePaso(record, PASO_VACIO);
+  }
+
   async function toggleLeadSource(record, source, checked) {
     const current = record.fuente_de_leads || [];
     const next = checked ? [...current, source] : current.filter(s=>s!==source);
@@ -5542,7 +5566,7 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,gap:12,flexWrap:"wrap" }}>
         <div>
           <div style={{ fontSize:20,fontWeight:700,color:"#111" }}>Onboarding</div>
-          <div style={{ fontSize:13,color:"#888",marginTop:4 }}>{visible.length} de {onboarding.length} clientes · Operaciones</div>
+          <div style={{ fontSize:13,color:"#888",marginTop:4 }}>{visible.length} de {onboarding.length} clientes · Operaciones{pasosHoy>0 && <span style={{ color:"#D97706",fontWeight:600 }}> · {pasosHoy} paso{pasosHoy===1?"":"s"} para hoy o vencido{pasosHoy===1?"":"s"}</span>}</div>
         </div>
         <div style={{ display:"flex",gap:8,alignItems:"center",flexWrap:"wrap" }}>
           <div style={{ display:"flex",border:"1px solid #E0E0E0",borderRadius:8,overflow:"hidden" }}>
@@ -5569,6 +5593,9 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
         </select>
         <label style={{ display:"flex",alignItems:"center",gap:6,fontSize:13,color:"#666" }}>
           <input type="checkbox" checked={filterBloqueado} onChange={e=>setFilterBloqueado(e.target.checked)}/> Solo bloqueados
+        </label>
+        <label style={{ display:"flex",alignItems:"center",gap:6,fontSize:13,color:"#666" }}>
+          <input type="checkbox" checked={filterPaso} onChange={e=>setFilterPaso(e.target.checked)}/> Con paso para hoy o vencido
         </label>
       </div>
 
@@ -5610,6 +5637,7 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
                         <div style={{ height:4,background:"#F3F3F3",borderRadius:2,overflow:"hidden",marginBottom:6 }}>
                           <div style={{ height:"100%",width:`${Math.round(calcularAvance(r.etapa_actual)*100)}%`,background:"#533AB7",borderRadius:2 }}/>
                         </div>
+                        <PasoLinea r={r} hoy={hoy}/>
                         <div style={{ fontSize:11,color:"#aaa",display:"flex",gap:6,alignItems:"center",flexWrap:"wrap" }}>
                           <span>{r.responsable||"Sin asignar"}</span>
                           {r.deal_id && <span title="Viene de un deal ganado del CRM" style={{ fontSize:9,fontWeight:700,color:"#533AB7",background:"#F1EEFB",borderRadius:4,padding:"1px 5px" }}>CRM</span>}
@@ -5628,10 +5656,10 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
       ) : (
         <div className="spicy-card" style={{ padding:0,overflow:"hidden" }}>
           <div style={{ overflowX:"auto" }}>
-            <table style={{ borderCollapse:"collapse",width:"100%",minWidth:1020 }}>
+            <table style={{ borderCollapse:"collapse",width:"100%",minWidth:1240 }}>
               <thead>
                 <tr style={{ background:"#FAFAFA" }}>
-                  {["Cliente","Etapa","Responsable","Estado","Avance","Días registro","Días etapa","Pago","Cuenta Spicy","Notas","Bloq."].map(h=>(
+                  {["Cliente","Etapa","Responsable","Estado","Próximo paso","Avance","Días registro","Días etapa","Pago","Cuenta Spicy","Notas","Bloq."].map(h=>(
                     <th key={h} style={{ textAlign:"left",fontSize:11,color:"#888",fontWeight:600,padding:"10px 12px",borderBottom:"1px solid #EBEBEB",whiteSpace:"nowrap" }}>{h}</th>
                   ))}
                 </tr>
@@ -5646,6 +5674,9 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
                       <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:"#555" }}>{r.responsable||"—"}</td>
                       <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5" }}>
                         <span style={{ fontSize:10,padding:"2px 7px",borderRadius:5,fontWeight:600,background:badge.bg,color:badge.color }}>{badge.label}</span>
+                      </td>
+                      <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:"#555",minWidth:200,maxWidth:280 }}>
+                        {r.proximo_paso ? <PasoLinea r={r} hoy={hoy}/> : "—"}
                       </td>
                       <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:"#555",minWidth:80 }}>
                         <div style={{ height:5,background:"#F3F3F3",borderRadius:3,overflow:"hidden" }}>
@@ -5662,7 +5693,7 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
                   );
                 })}
                 {visible.length===0 && (
-                  <tr><td colSpan={11} style={{ padding:"20px",textAlign:"center",color:"#ccc",fontSize:13 }}>Sin resultados.</td></tr>
+                  <tr><td colSpan={12} style={{ padding:"20px",textAlign:"center",color:"#ccc",fontSize:13 }}>Sin resultados.</td></tr>
                 )}
               </tbody>
             </table>
@@ -5759,6 +5790,8 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
                   </select>
                 </label>
               </div>
+
+              <PasoEditor key={detail.id} record={detail} team={TICKET_TEAM} canEdit={canCreate} onSave={(patch)=>savePaso(detail, patch)} onComplete={completePaso}/>
 
               {detail.deal_id && <div style={{ fontSize:11,color:"#533AB7",background:"#F1EEFB",border:"1px solid #DDD5F6",borderRadius:6,padding:"5px 9px" }}>Creado automáticamente desde el CRM al ganar el deal. El estado de pago se actualiza solo cuando cambia allá.</div>}
               <SpicyCompanyLink record={detail} canSearch={!!canSearchSpicy} canEdit={canCreate} onSave={(patch)=>updateRecord(detail, patch)}/>
@@ -6154,6 +6187,8 @@ export default function SpicyFinanzas() {
   const myOpenDevTasks = devTasks.filter(t=>myAssignedDevTaskIds.has(t.id) && !DEV_TASK_STAGES_CERRADOS.includes(t.stage));
   const myOpenTasks    = tasks.filter(t=>myAssignedTaskIds.has(t.id) && !["Finalizado","Archivado"].includes(t.stage));
   const myAssignedCount = myOpenTickets.length + myOpenDevTasks.length + myOpenTasks.length;
+  const meUser = allUsers.find(u=>u.user_id===session?.user?.id) || { email: session?.user?.email };
+  const onboardingDue = pasosParaHacer(onboarding, new Date(), r=>esMio(r, meUser)).length;
   const seguimientoDue = seguimientoResumen(followup, new Date().toLocaleDateString("en-CA",{timeZone:"America/Argentina/Buenos_Aires"}), session?.user?.id || null).toca;
 
   const sourceBadge=(t)=>{
@@ -6234,6 +6269,7 @@ export default function SpicyFinanzas() {
                     {v==="inicio"&&myAssignedCount>0&&<span className="spicy-nav-badge">{myAssignedCount}</span>}
                     {v==="tickets"&&urgentTicketsCount>0&&<span className="spicy-nav-badge">{urgentTicketsCount}</span>}
                     {v==="tasks"&&overdueTasksCount>0&&<span className="spicy-nav-badge">{overdueTasksCount}</span>}
+                    {v==="onboarding"&&onboardingDue>0&&<span className="spicy-nav-badge" title="Pasos de onboarding tuyos para hoy o vencidos">{onboardingDue}</span>}
                     {v==="seguimiento"&&seguimientoDue>0&&<span className="spicy-nav-badge" title="Clientes que te toca contactar esta semana">{seguimientoDue}</span>}
                   </button>
                 ))}
@@ -6420,7 +6456,7 @@ export default function SpicyFinanzas() {
       {view==="referrals"&&<ReferralDashboard txns={txns} referrers={referrers} referredClients={referredClients} payments={referredClientPayments} isAdmin={isAdmin} onRefresh={loadAll}/>}
       {view==="runway"&&<RunwayView txns={txns} accounts={accounts}/>}
       {view==="pnl"&&<PnLView txns={txns}/>}
-      {view==="inicio"&&<InicioView myOpenTickets={myOpenTickets} myOpenDevTasks={myOpenDevTasks} myOpenTasks={myOpenTasks} ticketHistory={ticketStatusHistory} devTaskHistory={devTaskStatusHistory} comments={comments} currentUserEmail={session.user.email} canSeeOperaciones={canSeeSection("Operaciones")} canSeeDevs={canSeeSection("Devs")} setView={setView} followup={followup} meId={session.user.id}/>}
+      {view==="inicio"&&<InicioView myOpenTickets={myOpenTickets} myOpenDevTasks={myOpenDevTasks} myOpenTasks={myOpenTasks} ticketHistory={ticketStatusHistory} devTaskHistory={devTaskStatusHistory} comments={comments} currentUserEmail={session.user.email} canSeeOperaciones={canSeeSection("Operaciones")} canSeeDevs={canSeeSection("Devs")} setView={setView} followup={followup} meId={session.user.id} onboarding={onboarding} me={meUser} onOpenOnboarding={(id)=>setPendingLink({ type:"onboarding", id })}/>}
       {view==="opsdash"&&<OperationsSummaryView tickets={tickets} tasks={tasks} statusHistory={ticketStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
       {view==="tickets"&&<TicketsView tickets={tickets} statusHistory={ticketStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} devTasks={devTasks} setView={setView} onRefresh={loadAll} openId={pendingLink?.type==="ticket"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)} followup={followup} clientLinks={clientLinks}/>}
       {view==="tasks"&&<TasksView tasks={tasks} allUsers={allUsers} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} currentUserEmail={session.user.email} currentUserId={session.user.id} onRefresh={loadAll} openId={pendingLink?.type==="task"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)}/>}

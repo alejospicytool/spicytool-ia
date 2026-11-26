@@ -49,7 +49,7 @@ export function searchAll(q, data = {}, { limit = 5 } = {}) {
     for (const r of data.followup || []) add("client", r.company_id, r.company_name, [r.contact_name, r.contact_email].filter(Boolean).join(" · ") + (r.baja_en ? " · de baja" : ""), [r.company_name, r.contact_name, r.contact_email, r.contact_phone, r.company_id], r.updated_at, { companyId: r.company_id });
     for (const t of data.tickets || []) add("ticket", t.id, t.title || t.client_name, [t.client_name, t.status].filter(Boolean).join(" · "), [t.title, t.client_name, t.message, t.category, t.status], t.created_at);
     for (const t of data.tasks || []) add("task", t.id, t.title, t.stage, [t.title, t.description, t.stage], t.created_at);
-    for (const o of data.onboarding || []) add("onboarding", o.id, o.client_name, [o.etapa_actual, o.responsable].filter(Boolean).join(" · "), [o.client_name, o.responsable, o.etapa_actual], o.created_at);
+    for (const o of data.onboarding || []) add("onboarding", o.id, o.client_name, [o.etapa_actual, o.responsable].filter(Boolean).join(" · "), [o.client_name, o.responsable, o.etapa_actual, o.proximo_paso], o.created_at);
   }
   if (can.devs) for (const t of data.devTasks || []) add("dev_task", t.id, t.title, t.stage, [t.title, t.description, t.stage], t.created_at);
   for (const n of data.notes || []) add("note", n.id, n.title, clip(n.content), [n.title, n.content], n.updated_at);
