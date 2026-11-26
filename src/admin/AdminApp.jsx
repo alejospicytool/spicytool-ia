@@ -11,7 +11,7 @@ import AdminCompaniesPage from "./AdminCompaniesPage.jsx";
 import AdminSupportPage from "./AdminSupportPage.jsx";
 import AdminWhatsappPage from "./AdminWhatsappPage.jsx";
 
-export default function AdminApp({ view, actor, crmSb = null }) {
+export default function AdminApp({ view, actor, crmSb = null, openUser = null, onOpenUserHandled = null }) {
   const probe = useAsync(() => probeAdminApi(), "probe");
   const real = probe.data === "real";
   const perms = useAsync(() => (real ? getMyPermissions() : Promise.resolve({ canAct: false })), "appperms:" + actor + ":" + probe.data);
@@ -30,7 +30,7 @@ export default function AdminApp({ view, actor, crmSb = null }) {
             {readOnly ? "Datos reales, en modo solo lectura: podés consultar usuarios, companies y auditoría, pero no hacer cambios. Si los necesitás, pedile a un admin que te habilite las acciones."
               : "Datos reales. Editar company, editar contacto y pausar/activar cambian la base real, y “Asignar plan” COBRA de verdad a la tarjeta del cliente."}
           </div>
-          {view === "adm_users" && <AdminUsersPage actor={actor} crmSb={crmSb} />}
+          {view === "adm_users" && <AdminUsersPage actor={actor} crmSb={crmSb} openUser={openUser} onOpenUserHandled={onOpenUserHandled} />}
           {view === "adm_companies" && <AdminCompaniesPage actor={actor} crmSb={crmSb} />}
           {view === "adm_whatsapp" && <AdminWhatsappPage actor={actor} />}
           {view === "adm_support" && <AdminSupportPage />}

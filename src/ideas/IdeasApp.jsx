@@ -231,9 +231,16 @@ function QuickCapture({ sb, me, onCreated }) {
 }
 
 // ── Pantalla principal ──────────────────────────────────────────────────────────────────────────────────────────────
-export default function IdeasApp({ sb, ideas, votes, images, devTasks, allUsers, me, canTriage, canDelete, canSeeDevs, onOpenDevTask, onRefresh, renderComments }) {
+export default function IdeasApp({ sb, ideas, votes, images, devTasks, allUsers, me, canTriage, canDelete, canSeeDevs, onOpenDevTask, onRefresh, renderComments, openId = null, onOpenHandled = null }) {
   const [fType, setFType] = useState(""), [mine, setMine] = useState(false), [q, setQ] = useState("");
   const [detailId, setDetailId] = useState(null);
+  // Abrir una idea pedida desde afuera (buscador global).
+  useEffect(() => {
+    if (!openId) return;
+    if (ideas.some((i) => i.id === openId)) setDetailId(openId);
+    if (onOpenHandled) onOpenHandled();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Solo debe correr cuando llega un pedido nuevo (openId): si dependiera de ideas reabriría la idea cada vez que cambian los datos.
+  }, [openId]);
   const [notice, setNotice] = useState("");
   const [busyId, setBusyId] = useState(null);
 

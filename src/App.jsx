@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useSyncExternalStore, createContext, useContext } from "react";
+import { useState, useEffect, useMemo, useRef, useSyncExternalStore, createContext, useContext } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { ONBOARDING_STAGES, ONBOARDING_LEAD_SOURCES, ONBOARDING_PAYMENT_STATUS, calcularEstado, calcularAvance, diasEntre, ESTADO_BADGE, companyOption, defaultCompanySearch } from "./onboardingLogic.js";
 import {
@@ -12,6 +12,7 @@ import CrmApp from "./crm/CrmApp.jsx";
 import RevenueApp from "./revenue/RevenueApp.jsx";
 import AdminApp from "./admin/AdminApp.jsx";
 import { UPCOMING_ENABLED } from "./revenue/proximoCobro.js";
+import GlobalSearch from "./globalSearch/GlobalSearch.jsx";
 import SeguimientoApp, { SeguimientoBanner } from "./seguimiento/SeguimientoApp.jsx";
 import IdeasApp from "./ideas/IdeasApp.jsx";
 import Cliente360 from "./cliente360/Cliente360.jsx";
@@ -93,6 +94,20 @@ function BrandStyles() {
         font-size: 13px; font-weight: 600; color: white; flex-shrink: 0;
       }
       .spicy-main { margin-left: 220px; padding: 28px 32px; }
+      .spicy-searchbar { position: sticky; top: 0; z-index: 60; display: flex; justify-content: center; margin: -10px 0 8px; padding: 10px 0 10px; background: linear-gradient(#F7F7F8 75%, rgba(247,247,248,0)); }
+      .spicy-search-wrap { position: relative; width: 100%; max-width: 560px; }
+      .spicy-search-field { display: flex; align-items: center; gap: 8px; background: white; border: 1px solid #E0E0E0; border-radius: 10px; padding: 0 12px; height: 40px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+      .spicy-search-field:focus-within { border-color: #EF3E3E; box-shadow: 0 0 0 3px rgba(239,62,62,0.12); }
+      .spicy-search-input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; font-size: 14px; font-family: inherit; color: #111; }
+      .spicy-search-input::-webkit-search-cancel-button { display: none; }
+      .spicy-search-kbd { font-size: 10px; color: #999; border: 1px solid #E5E5E5; border-radius: 4px; padding: 1px 5px; background: #FAFAFA; font-family: inherit; }
+      .spicy-search-panel { position: absolute; top: 46px; left: 0; right: 0; background: white; border: 1px solid #E0E0E0; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.14); max-height: min(70vh, 520px); overflow-y: auto; padding: 6px 0; }
+      .spicy-search-group { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #999; padding: 8px 14px 4px; }
+      .spicy-search-item { display: flex; gap: 8px; align-items: center; width: 100%; text-align: left; border: none; background: none; cursor: pointer; padding: 7px 14px; font-family: inherit; }
+      .spicy-search-item.active { background: #FEF0F0; }
+      .spicy-search-title { display: block; font-size: 13.5px; font-weight: 600; color: #111; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .spicy-search-sub { display: block; font-size: 11.5px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .spicy-search-more, .spicy-search-hint { font-size: 12px; color: #999; padding: 6px 14px; }
       .spicy-topbar, .spicy-backdrop { display: none; }
       .spicy-menu-btn { background: none; border: none; color: white; font-size: 22px; min-width: 44px; min-height: 44px; cursor: pointer; padding: 0; }
       .spicy-menu-tools { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 10px 0; }
@@ -113,6 +128,8 @@ function BrandStyles() {
         .spicy-topbar small { font-weight: 400; color: rgba(255,255,255,0.55); font-size: 12px; margin-left: 4px; }
         .spicy-backdrop { display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 95; }
         .spicy-main { margin-left: 0; padding: 62px 14px 24px; overflow-x: auto; }
+        .spicy-searchbar { top: 48px; }
+        .spicy-search-kbd { display: none; }
         .spicy-main [style*="grid-template-columns"] { grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)) !important; }
         .spicy-nav-btn, .spicy-menu-tools button, .spicy-sec-btn { min-height: 44px; }
         .spicy-sec-move button { width: 40px; height: 36px; }
@@ -4133,7 +4150,7 @@ function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks
 }
 
 // ── Notas ─────────────────────────────────────────────────────────────────
-function NotesView({ notes, currentUserId, currentUserEmail, isAdmin, onRefresh }) {
+function NotesView({ notes, currentUserId, currentUserEmail, isAdmin, onRefresh, openId, onOpenHandled }) {
   const [search, setSearch] = useState("");
   const [showNew, setShowNew] = useState(false);
   const [newForm, setNewForm] = useState({ title:"", content:"" });
@@ -4144,6 +4161,14 @@ function NotesView({ notes, currentUserId, currentUserEmail, isAdmin, onRefresh 
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({ title:"", content:"" });
   const [editWarned, setEditWarned] = useState(false);
+  // Abrir el detalle de una nota pedida desde afuera (buscador global).
+  useEffect(() => {
+    if (!openId) return;
+    const found = notes.find(x => x.id === openId);
+    if (found) openDetail(found);
+    if (onOpenHandled) onOpenHandled();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Solo debe correr cuando llega un pedido nuevo (openId): si dependiera de notes reabriría la nota cada vez que cambian los datos.
+  }, [openId]);
 
   const q = search.trim().toLowerCase();
   const visible = notes.filter(n => !q || n.title.toLowerCase().includes(q) || (n.content||"").toLowerCase().includes(q));
@@ -5374,7 +5399,7 @@ function SpicyCompanyLink({ record, canSearch, canEdit, onSave }) {
   );
 }
 
-function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, comments, currentUserId, currentUserEmail, onOpenCliente360 }) {
+function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, comments, currentUserId, currentUserEmail, onOpenCliente360, openId, onOpenHandled }) {
   const { canWriteOps: canCreate, canDeleteOps: canRemove } = useContext(RoleContext);
   const todayISO = new Date().toISOString().split("T")[0];
   const emptyForm = () => ({ client_name:"", fecha_registro:todayISO, responsable:"", fuente_de_leads:[], bloqueado:false });
@@ -5387,6 +5412,14 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
   const [showNew, setShowNew] = useState(false);
   const [detail, setDetail] = useState(null);
   const [dragOverEtapa, setDragOverEtapa] = useState(null);
+  // Abrir el detalle de un cliente pedido desde afuera (buscador global).
+  useEffect(() => {
+    if (!openId) return;
+    const found = onboarding.find(x => x.id === openId);
+    if (found) setDetail(found);
+    if (onOpenHandled) onOpenHandled();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Solo debe correr cuando llega un pedido nuevo (openId): si dependiera de onboarding reabriría el detalle cada vez que cambian los datos.
+  }, [openId]);
   const [form, setForm] = useState(emptyForm());
   const [saving, setSaving] = useState(false);
 
@@ -5403,7 +5436,6 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
   // Notas del seguimiento (tabla comments, entity_type 'onboarding'): cuántas hay y cuándo fue la última
   const notasDe = (id) => (comments||[]).filter(c=>c.entity_type==="onboarding" && c.entity_id===id);
   const ultimaNota = (id) => notasDe(id).reduce((m,c)=>c.created_at>m?c.created_at:m, "");
-  // eslint-disable-next-line react-hooks/purity -- Solo muestra "hace N días" con la hora de este render; no hace falta que sea exacto.
   const hace = (iso) => { const d = Math.floor((Date.now()-new Date(iso).getTime())/86400000); return d<=0 ? "hoy" : d===1 ? "ayer" : "hace "+d+" días"; };
 
   async function createRecord(e) {
@@ -5776,6 +5808,7 @@ export default function SpicyFinanzas() {
   const [onboardingHistory, setOnboardingHistory] = useState([]);
   const [followup,         setFollowup]         = useState([]);
   const [clientLinks,      setClientLinks]      = useState([]);
+  const [spicyOpen,        setSpicyOpen]        = useState(null);   // buscador global: usuario de Admin Spicy a abrir { id, token }
   const [cliente360Id,     setCliente360Id]     = useState(null);   // ficha 360: id de la cuenta de Spicytool abierta
   const [ideas,            setIdeas]            = useState([]);
   const [ideaVotes,        setIdeaVotes]        = useState([]);
@@ -5885,6 +5918,21 @@ export default function SpicyFinanzas() {
   const isAdmin = role==="admin";
   const myAllowedSections = new Set(session ? allowedSections.filter(a=>a.user_id===session.user.id).map(a=>a.section) : []);
   const canSeeSection = (label) => ALWAYS_VISIBLE_SECTIONS.includes(label) || isAdmin || myAllowedSections.has(label);
+  // Lo que busca el buscador global: lo que ya está cargado + las secciones del menú que esta persona puede ver (los permisos se aplican acá).
+  const searchData = useMemo(()=>{
+    const adm = role==="admin";
+    const mine = new Set(session ? allowedSections.filter(a=>a.user_id===session.user.id).map(a=>a.section) : []);
+    const see = (l)=> ALWAYS_VISIBLE_SECTIONS.includes(l) || adm || mine.has(l);
+    const views = NAV_SECTIONS.filter(s=>see(s.label)&&(!s.adminOnly||adm)).flatMap(s=>s.views.filter(v=>!ADMIN_ONLY_VIEWS.includes(v)||adm).map(v=>({ id:v, label:NAV_LABELS[v]||v, section:s.label })));
+    return { followup, tickets, tasks, devTasks, onboarding, notes, ideas, views, can:{ ops:see("Operaciones"), devs:see("Devs") } };
+  },[followup, tickets, tasks, devTasks, onboarding, notes, ideas, allowedSections, role, session]);
+  // Qué hace cada resultado del buscador: abrir la ficha, ir a una sección, abrir el usuario en Admin Spicy o abrir el detalle (con el mismo mecanismo de los links directos).
+  const openSearchResult = (item)=>{
+    if (item.type==="client") { setCliente360Id(item.companyId||item.id); return; }
+    if (item.type==="view") { setView(item.id); return; }
+    if (item.type==="spicy_user") { setSpicyOpen({ id:item.id, token:newLocalId("su") }); setView("adm_users"); return; }
+    setPendingLink({ type:item.type, id:item.id });
+  };
   const currentSection = NAV_SECTIONS.find(s=>s.views.includes(view));
   const currentViewBlocked = (currentSection && !canSeeSection(currentSection.label)) || (ADMIN_ONLY_VIEWS.includes(view) && !isAdmin);
 
@@ -6175,6 +6223,7 @@ export default function SpicyFinanzas() {
 
       {/* Main content */}
       <div className="spicy-main">
+        <div className="spicy-searchbar"><GlobalSearch data={searchData} canSpicy={canSeeSection("Admin Spicy")} onPick={openSearchResult}/></div>
         <TimeTrackerBar/>
         {role==="reader"&&<div role="status" style={{ fontSize:13,color:"#185FA5",marginBottom:16,padding:"10px 14px",background:"#EEF4FB",borderRadius:10,border:"1px solid #CFE0F3" }}>Tu usuario es de <b>solo lectura</b>: podés ver tickets, tareas y onboarding, pero no crearlos ni cambiarlos. Si necesitás editar, pedile a un admin que te pase a editor.</div>}
         {syncError&&<div style={{ fontSize:13,color:ST_RED,marginBottom:16,padding:"10px 14px",background:ST_RED_BG,borderRadius:10,border:`1px solid ${ST_RED}22` }}>{syncError}</div>}
@@ -6338,12 +6387,12 @@ export default function SpicyFinanzas() {
       {view==="opsdash"&&<OperationsSummaryView tickets={tickets} tasks={tasks} statusHistory={ticketStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
       {view==="tickets"&&<TicketsView tickets={tickets} statusHistory={ticketStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} devTasks={devTasks} setView={setView} onRefresh={loadAll} openId={pendingLink?.type==="ticket"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)} followup={followup} clientLinks={clientLinks}/>}
       {view==="tasks"&&<TasksView tasks={tasks} allUsers={allUsers} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} currentUserEmail={session.user.email} currentUserId={session.user.id} onRefresh={loadAll} openId={pendingLink?.type==="task"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)}/>}
-      {view==="ideas"&&<IdeasApp sb={sb} ideas={ideas} votes={ideaVotes} images={ideaImages} devTasks={devTasks} allUsers={allUsers} me={{ id:session.user.id, email:session.user.email }}
+      {view==="ideas"&&<IdeasApp openId={pendingLink?.type==="idea"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)} sb={sb} ideas={ideas} votes={ideaVotes} images={ideaImages} devTasks={devTasks} allUsers={allUsers} me={{ id:session.user.id, email:session.user.email }}
         canTriage={canWriteOps(role)} canDelete={canDeleteOps(role)} canSeeDevs={canSeeSection("Devs")} onRefresh={loadAll}
         onOpenDevTask={(id)=>{ setPendingLink({ type:"dev_task", id }); setView("devtasks"); }}
         renderComments={(ideaId)=><CommentsThread entityType="idea" entityId={ideaId} comments={comments} currentUserId={session.user.id} currentUserEmail={session.user.email} onChange={loadAll} multiline placeholder="Sumá un comentario o más contexto…" emptyText="Todavía no hay comentarios." sendLabel="Comentar"/>}/>}
       {view==="seguimiento"&&<SeguimientoApp sb={sb} rows={followup} allUsers={allUsers} me={{ id:session.user.id, email:session.user.email }} isAdmin={isAdmin} canWrite={canWriteOps(role)} canSearchSpicy={canSeeSection("Admin Spicy")} onRefresh={loadAll} onOpenCliente360={setCliente360Id}/>}
-      {view==="onboarding"&&<OnboardingView onboarding={onboarding} history={onboardingHistory} onRefresh={loadAll} canSearchSpicy={canSeeSection("Admin Spicy")} comments={comments} currentUserId={session.user.id} currentUserEmail={session.user.email} onOpenCliente360={setCliente360Id}/>}
+      {view==="onboarding"&&<OnboardingView openId={pendingLink?.type==="onboarding"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)} onboarding={onboarding} history={onboardingHistory} onRefresh={loadAll} canSearchSpicy={canSeeSection("Admin Spicy")} comments={comments} currentUserId={session.user.id} currentUserEmail={session.user.email} onOpenCliente360={setCliente360Id}/>}
       {view==="devdash"&&<DevsMetricsView tickets={tickets} ticketHistory={ticketStatusHistory} devTasks={devTasks} devTaskHistory={devTaskStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
       {view==="devtasks"&&<DevTasksView devTasks={devTasks} statusHistory={devTaskStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} tickets={tickets} onRefresh={loadAll} openId={pendingLink?.type==="dev_task"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)} setView={setView}/>}
       {view==="services"&&<ServicesView/>}
@@ -6353,8 +6402,8 @@ export default function SpicyFinanzas() {
       {view==="timeadmin"&&isAdmin&&<ControlJornadaView allUsers={allUsers}/>}
       {view==="crm"&&<CrmApp sb={sb}/>}
       {canSeeSection("Métricas")&&view.startsWith("metrics")&&<RevenueApp sb={sb} view={view} setView={setView} readOnly={!isAdmin} canSegment={canWriteOps(role)} canSpicy={canSeeSection("Admin Spicy")} onOpenFicha={setCliente360Id}/>}
-      {canSeeSection("Admin Spicy")&&view.startsWith("adm_")&&<AdminApp view={view} actor={session.user.email} crmSb={canSeeSection("CRM")?sb:null}/>}
-      {view==="notes"&&<NotesView notes={notes} currentUserId={session.user.id} currentUserEmail={session.user.email} isAdmin={isAdmin} onRefresh={loadAll}/>}
+      {canSeeSection("Admin Spicy")&&view.startsWith("adm_")&&<AdminApp view={view} actor={session.user.email} crmSb={canSeeSection("CRM")?sb:null} openUser={spicyOpen} onOpenUserHandled={()=>setSpicyOpen(null)}/>}
+      {view==="notes"&&<NotesView openId={pendingLink?.type==="note"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)} notes={notes} currentUserId={session.user.id} currentUserEmail={session.user.email} isAdmin={isAdmin} onRefresh={loadAll}/>}
 
       {/* ADD */}
       {view==="add"&&isAdmin&&(

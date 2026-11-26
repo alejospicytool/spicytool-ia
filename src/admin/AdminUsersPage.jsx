@@ -1,6 +1,6 @@
 // Pantalla principal de "Admin Spicy": tabla de usuarios (más recientes primero) con buscador y paginación.
 // Al elegir un usuario se abre su detalle (company, campañas, créditos, etc.).
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { listUsers, listAudit } from "./adminApi.js";
 import { userFullName, planOf, planLabel, planOptions, whatsappProvider, kapsoStatusInfo } from "./adminLogic.js";
 import { DataTable, StatusBadge, Pager, AuditList, PhoneLink } from "./adminUi.jsx";
@@ -11,8 +11,12 @@ import { canSendToCrm, sentDealOf, loadCrmContext } from "./crmSend.js";
 
 const PAGE_SIZE = 8;
 
-export default function AdminUsersPage({ actor, crmSb = null }) {
-  const [search, setSearch] = useState(""), [page, setPage] = useState(1), [selected, setSelected] = useState(null), [version, setVersion] = useState(0);
+export default function AdminUsersPage({ actor, crmSb = null, openUser = null, onOpenUserHandled = null }) {
+  // openUser = { id, token }: pedido desde afuera (buscador global) para abrir el detalle de un usuario. Se atiende una sola vez por pedido.
+  const [seenOpen, setSeenOpen] = useState(openUser);
+  const [search, setSearch] = useState(""), [page, setPage] = useState(1), [selected, setSelected] = useState(openUser ? openUser.id : null), [version, setVersion] = useState(0);
+  if (openUser && openUser !== seenOpen) { setSeenOpen(openUser); setSelected(openUser.id); }
+  useEffect(() => { if (openUser && onOpenUserHandled) onOpenUserHandled(); }, [openUser]); // eslint-disable-line react-hooks/exhaustive-deps -- Avisa una vez por pedido que ya se atendió (el padre lo borra).
   const [owners, setOwners] = useState(false), [activeOnly, setActiveOnly] = useState(false), [plan, setPlan] = useState("");
   const users = useAsync(() => listUsers({ search, page, pageSize: PAGE_SIZE, owners, activeOnly, plan }), `users:${search}:${page}:${owners}:${activeOnly}:${plan}:${version}`);
   // Deals del CRM (solo si el usuario tiene acceso al CRM): para marcar a quién ya se envió.

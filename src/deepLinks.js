@@ -8,6 +8,10 @@ export const LINK_TARGETS = {
   ticket:   { view: "tickets",  section: "Operaciones" },
   task:     { view: "tasks",    section: "Operaciones" },
   dev_task: { view: "devtasks", section: "Devs" },
+  // Sin link en la dirección: los usa el buscador global para abrir el detalle (no tienen parámetro en LINK_PARAMS).
+  onboarding: { view: "onboarding", section: "Operaciones" },
+  note:       { view: "notes",      section: "Notas" },
+  idea:       { view: "ideas",      section: "Ideas" },
 };
 
 export function entitySearch(type, id) {
