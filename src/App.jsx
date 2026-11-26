@@ -95,6 +95,8 @@ function BrandStyles() {
       }
       .spicy-main { margin-left: 220px; padding: 28px 32px; }
       .spicy-timebar-center { flex: 1 1 300px; min-width: 220px; max-width: 520px; margin: 0 auto; }
+      .spicy-done-btn { flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid #D1D5DB; background: white; color: #D1D5DB; font-size: 12px; line-height: 1; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; transition: all 0.12s; }
+      .spicy-done-btn:hover, .spicy-done-btn:focus-visible { background: #16A34A; border-color: #16A34A; color: white; outline: none; }
       .spicy-search-wrap { position: relative; width: 100%; }
       .spicy-search-field { display: flex; align-items: center; gap: 8px; background: #F5F5F6; border: 1px solid transparent; border-radius: 999px; padding: 0 14px; height: 38px; }
       .spicy-search-field:hover { background: #F0F0F2; }
@@ -3808,6 +3810,8 @@ function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks
   const emptyForm = () => ({ title:"", start_date:todayISO, end_date:todayISO, assigneeIds:currentUserId?[currentUserId]:[], priority:"Media", description:"" }); // quien crea la tarea queda como responsable
 
   const [mode, setMode] = useState("kanban"); // 'kanban' | 'calendar'
+  const [undo, setUndo] = useState(null);     // última tarea finalizada con el botón rápido: { id, title, prev } (para poder deshacer)
+  const undoTimer = useRef(null);
   const [calMode, setCalMode] = useState("month"); // 'month' | 'week'
   const [calCursor, setCalCursor] = useState(new Date());
   const [filterAssigned, setFilterAssigned] = useState(currentUserId || ""); // por defecto: mis tareas
@@ -3868,6 +3872,24 @@ function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks
     await sb.from("tasks").update(patch).eq("id", task.id);
     setDetail(d => d && d.id===task.id ? { ...d, ...patch } : d);
     onRefresh();
+  }
+
+  // Finalizar con un solo clic. Si tiene subtareas sin completar se pregunta antes; después queda un aviso con "Deshacer" unos segundos.
+  async function completeTask(task) {
+    const open = subtasks.filter(s=>s.entity_type==="task" && s.entity_id===task.id && !s.done).length;
+    if (open>0 && !(await askConfirm({ title:"Finalizar tarea", message:`"${task.title||"Sin título"}" tiene ${open} subtarea${open===1?"":"s"} sin completar. ¿La finalizás igual?`, confirmLabel:"Finalizar", danger:false }))) return;
+    await updateTask(task, { stage:"Finalizado" });
+    setUndo({ id:task.id, title:task.title, prev:task.stage });
+    clearTimeout(undoTimer.current);
+    undoTimer.current = setTimeout(()=>setUndo(null), 8000);
+  }
+  async function undoComplete() {
+    const u = undo;
+    if (!u) return;
+    clearTimeout(undoTimer.current);
+    setUndo(null);
+    const t = tasks.find(x=>x.id===u.id);
+    if (t) await updateTask(t, { stage:u.prev });
   }
 
   async function deleteTask(task) {
@@ -3969,7 +3991,11 @@ function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks
                       onClick={()=>openDetail(t)}
                       style={{ background:"white",border:"1px solid #EBEBEB",borderRadius:10,padding:"10px 12px",marginBottom:8,cursor:"grab",boxShadow:"0 1px 2px rgba(0,0,0,0.03)" }}>
                       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,gap:6 }}>
-                        <span style={{ fontSize:13,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{t.title}</span>
+                        {canCreate && !["Finalizado","Archivado"].includes(t.stage) && (
+                          <button type="button" className="spicy-done-btn" title="Marcar como finalizada" aria-label={`Marcar como finalizada: ${t.title}`} draggable={false}
+                            onClick={e=>{ e.stopPropagation(); completeTask(t); }}>✓</button>
+                        )}
+                        <span style={{ flex:1,minWidth:0,fontSize:13,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{t.title}</span>
                         <span className={prioClass(t.priority)}>{t.priority}</span>
                       </div>
                       <div style={{ fontSize:11,color:"#999",marginBottom:4 }}>{fmtRange(t)}</div>
@@ -4102,6 +4128,9 @@ function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks
               </label>
             </div>
 
+            {canCreate && !["Finalizado","Archivado"].includes(detail.stage) && (
+              <button type="button" className="spicy-btn-primary" style={{ background:"#16A34A",borderColor:"#16A34A" }} onClick={()=>completeTask(detail)}>✓ Marcar como finalizada</button>
+            )}
             <div style={{ display:"flex",gap:12 }}>
               <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Etapa
                 <select className="spicy-select" value={detail.stage} onChange={e=>updateTask(detail,{stage:e.target.value})} style={{ width:"100%",marginTop:4 }}>
@@ -4144,6 +4173,12 @@ function TasksView({ tasks, allUsers, assignees, comments, attachments, subtasks
               <button className="spicy-btn-primary" onClick={()=>setDetail(null)}>Listo</button>
             </div>
           </div>
+        </div>
+      )}
+      {undo && (
+        <div role="status" style={{ position:"fixed", left:"50%", bottom:24, transform:"translateX(-50%)", zIndex:320, display:"flex", alignItems:"center", gap:14, background:"#1A1A2E", color:"white", padding:"10px 16px", borderRadius:10, boxShadow:"0 8px 24px rgba(0,0,0,0.25)", fontSize:13, maxWidth:"calc(100vw - 32px)" }}>
+          <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>✓ «{undo.title||"Sin título"}» finalizada</span>
+          <button type="button" onClick={undoComplete} style={{ background:"none", border:"none", color:"#FCA5A5", fontWeight:700, cursor:"pointer", fontSize:13, flexShrink:0 }}>Deshacer</button>
         </div>
       )}
     </>
