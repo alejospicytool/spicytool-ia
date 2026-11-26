@@ -6439,7 +6439,7 @@ export default function SpicyFinanzas() {
       {view==="timeadmin"&&isAdmin&&<ControlJornadaView allUsers={allUsers}/>}
       {view==="crm"&&<CrmApp sb={sb}/>}
       {canSeeSection("Métricas")&&view.startsWith("metrics")&&<RevenueApp sb={sb} view={view} setView={setView} readOnly={!isAdmin} canSegment={canWriteOps(role)} canSpicy={canSeeSection("Admin Spicy")} onOpenFicha={setCliente360Id}/>}
-      {canSeeSection("Admin Spicy")&&view.startsWith("adm_")&&<AdminApp view={view} actor={session.user.email} crmSb={canSeeSection("CRM")?sb:null} openUser={spicyOpen} onOpenUserHandled={()=>setSpicyOpen(null)}/>}
+      {canSeeSection("Admin Spicy")&&view.startsWith("adm_")&&<AdminApp view={view} actor={session.user.email} crmSb={canSeeSection("CRM")?sb:null} openUser={spicyOpen} onOpenUserHandled={()=>setSpicyOpen(null)} onOpenFicha={canSeeSection("Operaciones")?setCliente360Id:null}/>}
       {view==="notes"&&<NotesView openId={pendingLink?.type==="note"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)} notes={notes} currentUserId={session.user.id} currentUserEmail={session.user.email} isAdmin={isAdmin} onRefresh={loadAll}/>}
 
       {/* ADD */}
@@ -6495,7 +6495,8 @@ export default function SpicyFinanzas() {
       </div>{/* end spicy-main */}
     {cliente360Id&&<Cliente360 isAdmin={isAdmin} sb={sb} companyId={cliente360Id} followup={followup} onboarding={onboarding} tickets={tickets} allUsers={allUsers} me={{ id:session.user.id, email:session.user.email }}
       canWrite={canWriteOps(role)} canSearchSpicy={canSeeSection("Admin Spicy")} canSeeMetrics={canSeeSection("Métricas")} onClose={()=>setCliente360Id(null)} onRefresh={loadAll}
-      onGoSeguimiento={()=>{ setCliente360Id(null); setView("seguimiento"); }} onGoOnboarding={()=>{ setCliente360Id(null); setView("onboarding"); }}/>}
+      onGoSeguimiento={()=>{ setCliente360Id(null); setView("seguimiento"); }} onGoOnboarding={()=>{ setCliente360Id(null); setView("onboarding"); }}
+      onOpenAdmin={(userId)=>{ setCliente360Id(null); setSpicyOpen({ id:userId, token:newLocalId("su") }); setView("adm_users"); }}/>}
     <ConfirmHost/>
     </div>
     </RoleContext.Provider>

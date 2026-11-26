@@ -10,7 +10,7 @@ import AdminCompanyDetail from "./AdminCompanyDetail.jsx";
 
 const PAGE_SIZE = 8;
 
-export default function AdminCompaniesPage({ actor, crmSb = null }) {
+export default function AdminCompaniesPage({ actor, crmSb = null, onOpenFicha = null }) {
   const [status, setStatus] = useState("active"), [search, setSearch] = useState(""), [plan, setPlan] = useState(""), [page, setPage] = useState(1), [company, setCompany] = useState(null), [userId, setUserId] = useState(null), [version, setVersion] = useState(0);
   const list = useAsync(() => listCompanies({ status, search, plan, page, pageSize: PAGE_SIZE }), `companies:${status}:${search}:${plan}:${page}:${version}`);
   const users = useAsync(() => (company ? listCompanyUsers(company._id) : Promise.resolve([])), `cusers:${company?._id}:${version}`);
@@ -18,7 +18,7 @@ export default function AdminCompaniesPage({ actor, crmSb = null }) {
   const [planCounts, setPlanCounts] = useState(null);
   if (list.data && list.data.planCounts && list.data.planCounts !== planCounts) setPlanCounts(list.data.planCounts);
 
-  if (userId) return <AdminCompanyDetail userId={userId} actor={actor} crmSb={crmSb} onBack={() => setUserId(null)} onChanged={() => setVersion((v) => v + 1)} />;
+  if (userId) return <AdminCompanyDetail userId={userId} actor={actor} crmSb={crmSb} onOpenFicha={onOpenFicha} onBack={() => setUserId(null)} onChanged={() => setVersion((v) => v + 1)} />;
 
   const r = list.data, counts = r?.counts || { active: 0, paused: 0 };
   const change = (fn) => (...a) => { fn(...a); setPage(1); setCompany(null); };

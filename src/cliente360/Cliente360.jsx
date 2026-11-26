@@ -65,7 +65,21 @@ function LinkBox({ kind, linked, suggestions, canWrite, busy, onLink, onUnlink, 
   );
 }
 
-export default function Cliente360({ sb, companyId, followup, onboarding, tickets, allUsers, me, isAdmin, canWrite, canSearchSpicy, canSeeMetrics, onClose, onRefresh, onGoSeguimiento, onGoOnboarding }) {
+// Un ID corto con un botón para copiarlo completo (para pegarlo en Mongo, en Stripe, en un ticket…).
+function CopyId({ label, value }) {
+  const [state, setState] = useState("");
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(String(value)); setState("ok"); } catch { setState("fail"); }
+    setTimeout(() => setState(""), 2000);
+  };
+  return (
+    <button type="button" onClick={copy} title={`${label}: ${value}. Clic para copiarlo.`} style={{ background: "#F7F7F8", border: "1px solid #EBEBEB", borderRadius: 6, padding: "3px 9px", fontSize: 11, color: "#666", cursor: "pointer", fontFamily: "inherit" }}>
+      {label}: <code style={{ fontSize: 11 }}>{String(value).length > 12 ? "…" + String(value).slice(-8) : value}</code> {state === "ok" ? "✓ copiado" : state === "fail" ? "copialo a mano" : "📋"}
+    </button>
+  );
+}
+
+export default function Cliente360({ sb, companyId, followup, onboarding, tickets, allUsers, me, isAdmin, canWrite, canSearchSpicy, canSeeMetrics, onClose, onRefresh, onGoSeguimiento, onGoOnboarding, onOpenAdmin }) {
   const today = baDateISO();
   const [tab, setTab] = useState("resumen");
   const [toque, setToque] = useState(false);
@@ -98,6 +112,8 @@ export default function Cliente360({ sb, companyId, followup, onboarding, ticket
   const company = bundle.data && bundle.data.company;
   const spicyUsers = (bundle.data && bundle.data.users) || [];
   const owner = company ? spicyUsers.find((u) => isOwner(u, company)) : null;
+  // Usuario con el que se abre el perfil de Admin Spicy: el dueño, o cualquiera que tenga esta company como propia.
+  const adminUser = owner || (company ? spicyUsers.find((u) => Array.isArray(u.companies) && u.companies.includes(companyId)) : null) || null;
   const name = (row && row.company_name) || (company && company.name) || (onboarding.find((o) => o.spicy_company_id === companyId) || {}).spicy_company_name || "Cuenta de Spicytool";
   const plan = (owner && planOf(owner)) || (row && row.plan) || null;
   // "Fila" para sugerir vínculos: lo que sabemos del contacto, venga de la cartera o de Spicytool.
@@ -157,6 +173,13 @@ export default function Cliente360({ sb, companyId, followup, onboarding, ticket
               {plan && <Chip>{planLabel(plan)}</Chip>}
             </div>
             <div style={{ fontSize: 12, color: "#999", marginTop: 3 }}>Ficha 360 · todo lo que sabemos de este cliente{row && row.baja_en ? " · de baja de la cartera" : ""}</div>
+            {canSearchSpicy && company && (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
+                {adminUser && onOpenAdmin && <button type="button" className="spicy-btn-secondary" style={{ padding: "4px 12px", fontSize: 12 }} onClick={() => onOpenAdmin(adminUser._id)} title="Abrir su perfil en Admin Spicy: entrar como usuario, ver los IDs, cambiar el plan…">🌶️ Ver perfil en Admin Spicy →</button>}
+                <CopyId label="ID de la cuenta" value={company._id} />
+                {adminUser && <CopyId label="ID del usuario" value={adminUser._id} />}
+              </div>
+            )}
           </div>
           <button onClick={onClose} aria-label="Cerrar" style={{ background: "none", border: "none", cursor: "pointer", fontSize: 24, color: "#ccc", lineHeight: 1 }}>×</button>
         </div>

@@ -189,7 +189,7 @@ function NoCompanyView({ user, actor, onBack, refresh, dialog, setDialog, acts, 
   );
 }
 
-export default function AdminCompanyDetail({ userId, actor, crmSb = null, onBack, onChanged }) {
+export default function AdminCompanyDetail({ userId, actor, crmSb = null, onOpenFicha = null, onBack, onChanged }) {
   const [version, setVersion] = useState(0), [tab, setTab] = useState("resumen"), [dialog, setDialog] = useState(null), [confirm, setConfirm] = useState(null);
   const [confirmBusy, setConfirmBusy] = useState(false), [confirmError, setConfirmError] = useState("");
   const perms = useAsync(() => getMyPermissions(), "perms:" + actor), cant = cantAct(perms);
@@ -246,6 +246,7 @@ export default function AdminCompanyDetail({ userId, actor, crmSb = null, onBack
             <button className="btn-secondary" {...billActs} onClick={() => setDialog("card")}>Link de tarjeta</button>
           </ActGroup>
           <ActGroup label="Cuenta">
+            {onOpenFicha && co && <button className="btn-secondary" onClick={() => onOpenFicha(co._id)} title="Ver la ficha 360 de este cliente: seguimiento, pagos, comercial y tickets">Ver ficha 360</button>}
             <button className="btn-access" disabled={!perms.data || !perms.data.support} title={perms.data && !perms.data.support ? (perms.data.disabledReason || "Tu usuario no tiene permiso de soporte. Pedile a un admin que te habilite.") : "Generar un link para entrar a la cuenta de este usuario"} onClick={() => setDialog("support")}>Entrar como usuario</button>
             {paused
               ? <button className="btn-primary" {...acts} onClick={() => ask({ title: "Activar company", label: "Activar", text: <>Vas a <b>activar</b> la company <b>{co.name}</b>. Sus usuarios vuelven a poder usar la cuenta.</>, action: () => setCompanyStatus(co._id, "active") })}>Activar company</button>

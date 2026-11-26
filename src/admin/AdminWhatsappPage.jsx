@@ -14,13 +14,13 @@ const PAGE_SIZE = 10;
 const TABS = [["pending", "Pendientes"], ["connected", "Conectadas"], ["all", "Todas"]];
 const TONE = { green: "badge-green", amber: "badge-yellow", muted: "badge-muted" };
 
-export default function AdminWhatsappPage({ actor }) {
+export default function AdminWhatsappPage({ actor, onOpenFicha = null }) {
   const [status, setStatus] = useState("pending"), [search, setSearch] = useState(""), [activeOnly, setActiveOnly] = useState(true), [page, setPage] = useState(1);
   const [selected, setSelected] = useState(null), [version, setVersion] = useState(0);
   const perms = useAsync(() => getMyPermissions(), "wperms:" + actor);
   const list = useAsync(() => listKapsoApps({ status, search, activeOnly, page, pageSize: PAGE_SIZE }), `kapso:${status}:${search}:${activeOnly}:${page}:${version}`);
 
-  if (selected) return <AdminCompanyDetail userId={selected} actor={actor} onBack={() => setSelected(null)} onChanged={() => setVersion((v) => v + 1)} />;
+  if (selected) return <AdminCompanyDetail userId={selected} actor={actor} onOpenFicha={onOpenFicha} onBack={() => setSelected(null)} onChanged={() => setVersion((v) => v + 1)} />;
 
   const r = list.data;
   const change = (fn) => (v) => { fn(v); setPage(1); };

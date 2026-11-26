@@ -11,7 +11,7 @@ import { canSendToCrm, sentDealOf, loadCrmContext } from "./crmSend.js";
 
 const PAGE_SIZE = 8;
 
-export default function AdminUsersPage({ actor, crmSb = null, openUser = null, onOpenUserHandled = null }) {
+export default function AdminUsersPage({ actor, crmSb = null, openUser = null, onOpenUserHandled = null, onOpenFicha = null }) {
   // openUser = { id, token }: pedido desde afuera (buscador global) para abrir el detalle de un usuario. Se atiende una sola vez por pedido.
   const [seenOpen, setSeenOpen] = useState(openUser);
   const [search, setSearch] = useState(""), [page, setPage] = useState(1), [selected, setSelected] = useState(openUser ? openUser.id : null), [version, setVersion] = useState(0);
@@ -29,7 +29,7 @@ export default function AdminUsersPage({ actor, crmSb = null, openUser = null, o
   const [counts, setCounts] = useState(null);
   if (r && r.planCounts && r.planCounts !== counts) setCounts(r.planCounts);
 
-  if (selected) return <AdminCompanyDetail userId={selected} actor={actor} crmSb={crmSb} onBack={() => setSelected(null)} onChanged={() => setVersion((v) => v + 1)} />;
+  if (selected) return <AdminCompanyDetail userId={selected} actor={actor} crmSb={crmSb} onOpenFicha={onOpenFicha} onBack={() => setSelected(null)} onChanged={() => setVersion((v) => v + 1)} />;
 
   return (
     <div>
