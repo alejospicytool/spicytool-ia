@@ -6,6 +6,7 @@ describe("links directos", () => {
     expect(buildEntityLink("https://backoffice.wearespicy.net", "ticket", "tk_1790782282727")).toBe("https://backoffice.wearespicy.net/?ticket=tk_1790782282727");
     expect(entitySearch("dev_task", "dt_1")).toBe("?devtask=dt_1");
     expect(entitySearch("task", "task_9")).toBe("?task=task_9");
+    expect(entitySearch("onboarding", "ob_1")).toBe("?onboarding=ob_1"); // el que llevan los eventos de Google Calendar
   });
   it("codifica ids raros y no arma links sin id o de tipos desconocidos", () => {
     expect(entitySearch("ticket", "a b&c")).toBe("?ticket=a%20b%26c");
@@ -16,6 +17,7 @@ describe("links directos", () => {
     expect(parseEntityLink("?ticket=tk_1")).toEqual({ type: "ticket", id: "tk_1" });
     expect(parseEntityLink("?devtask=dt_1")).toEqual({ type: "dev_task", id: "dt_1" });
     expect(parseEntityLink(entitySearch("task", "a b&c"))).toEqual({ type: "task", id: "a b&c" });
+    expect(parseEntityLink("?onboarding=ob_1")).toEqual({ type: "onboarding", id: "ob_1" });
   });
   it("ignora URLs sin link", () => {
     expect(parseEntityLink("")).toBeNull();
@@ -32,5 +34,6 @@ describe("links directos", () => {
     expect(LINK_TARGETS.ticket).toEqual({ view: "tickets", section: "Operaciones" });
     expect(LINK_TARGETS.dev_task).toEqual({ view: "devtasks", section: "Devs" });
     expect(LINK_TARGETS.task).toEqual({ view: "tasks", section: "Operaciones" });
+    expect(LINK_TARGETS.onboarding).toEqual({ view: "onboarding", section: "Operaciones" });
   });
 });

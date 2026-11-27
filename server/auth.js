@@ -49,3 +49,23 @@ export function makeAuthenticator({ fetchImpl = globalThis.fetch, now = () => Da
     return admin;
   };
 }
+
+// Igual que arriba pero SOLO comprueba que el token sea de una persona con sesión en el backoffice (sin pedir ser admin ni tener la sección Admin Spicy).
+// Lo usa Google Calendar: cualquiera del equipo conecta su propio calendario.
+export function makeUserAuthenticator({ fetchImpl = globalThis.fetch, now = () => Date.now(), ttlMs = 60_000 } = {}) {
+  const cache = new Map();
+  return async function authenticateUser(authorizationHeader) {
+    const m = /^Bearer\s+([A-Za-z0-9._~+/=-]+)$/.exec(String(authorizationHeader || "").trim());
+    if (!m) return null;
+    const hit = cache.get(m[1]);
+    if (hit && now() - hit.at < ttlMs) return hit.user;
+    const who = await fetchImpl(`${SUPABASE_URL}/auth/v1/user`, { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${m[1]}` } });
+    if (!who.ok) return null;
+    const u = await who.json();
+    if (!u || !u.id || !u.email) return null;
+    const user = { id: u.id, email: u.email };
+    cache.set(m[1], { user, at: now() });
+    if (cache.size > 200) for (const [k, v] of cache) if (now() - v.at >= ttlMs) cache.delete(k);
+    return user;
+  };
+}

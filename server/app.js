@@ -8,10 +8,41 @@ const int = (v, def, min, max) => { const n = Math.floor(Number(v)); return Numb
 const text = (v) => String(v ?? "").slice(0, 100);
 const flag = (v) => v === "1" || v === "true";
 
-export function createApp({ queries, authenticate, billing, companies, users, audit, kapso = null, support = null, prices = [], log = console.error }) {
+export function createApp({ queries, authenticate, authenticateUser = null, calendar = null, appUrl = "https://backoffice.wearespicy.net", billing, companies, users, audit, kapso = null, support = null, prices = [], log = console.error }) {
   const app = express();
   app.disable("x-powered-by");
   app.use((req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
+
+  // Google Calendar: lo usa cualquier persona con sesión del backoffice (no hace falta ser admin de Admin Spicy), por eso va ANTES del control de admin.
+  // La vuelta de Google (/callback) no trae sesión: se identifica con el "state" firmado que se armó al empezar.
+  if (calendar) {
+    const cal = express.Router();
+    cal.use(express.json({ limit: "2kb" }));
+    cal.get("/callback", async (req, res, next) => {
+      try {
+        const base = String(appUrl).replace(/\/+$/, "");
+        // Si la persona canceló en la pantalla de Google, vuelve con ?error=…: no hay nada que guardar.
+        if (req.query.error) return res.redirect(302, `${base}/?calendar=denegado`);
+        const r = await calendar.finishConnect({ code: String(req.query.code || ""), state: String(req.query.state || "") });
+        res.redirect(302, `${base}/?calendar=${r.ok ? "ok" : encodeURIComponent(r.error || "error")}`);
+      } catch (e) { next(e); }
+    });
+    cal.use(async (req, res, next) => {
+      try {
+        const user = authenticateUser ? await authenticateUser(req.headers.authorization) : null;
+        if (!user) return res.status(401).json({ error: "No autorizado" });
+        req.calUser = user;
+        next();
+      } catch (e) { next(e); }
+    });
+    const wrap = (h) => async (req, res, next) => { try { await h(req, res); } catch (e) { next(e); } };
+    cal.get("/status", wrap(async (req, res) => res.json(await calendar.status(req.calUser.id))));
+    cal.post("/connect", wrap(async (req, res) => { const r = calendar.startConnect(req.calUser); res.status(r.status).json(r.body); }));
+    cal.post("/disconnect", wrap(async (req, res) => res.json(await calendar.disconnect(req.calUser.id))));
+    // Concilia todo (tareas y pasos de todas las personas conectadas). El front lo pide después de guardar; no espera el resultado.
+    cal.post("/sync", wrap(async (req, res) => { const s = await calendar.reconcile(); res.json({ ok: true, ...s }); }));
+    app.use("/api/admin/calendar", cal);
+  }
 
   app.use("/api/admin", async (req, res, next) => {
     try {

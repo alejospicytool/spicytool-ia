@@ -2,7 +2,7 @@
 // Solo escucha en 127.0.0.1: nginx lo expone en /api/admin/ y el resto de internet no llega directo.
 import { MongoClient } from "mongodb";
 import { createApp } from "./app.js";
-import { makeAuthenticator } from "./auth.js";
+import { makeAuthenticator, makeUserAuthenticator } from "./auth.js";
 import { makeQueries } from "./queries.js";
 import { makeAudit } from "./audit.js";
 import { makeBilling } from "./billing.js";
@@ -11,6 +11,9 @@ import { makeUserAdmin } from "./users.js";
 import { makeWebhookClient } from "./webhooks.js";
 import { makeSupport } from "./support.js";
 import { makeKapsoAdmin } from "./kapso.js";
+import { makeGoogle } from "./googleCalendar.js";
+import { makeCalendarStore } from "./calendarStore.js";
+import { makeCalendarSync } from "./calendarSync.js";
 import { STANDARD_PRICES } from "./prices.js";
 import { COUPONS } from "./coupons.js";
 
@@ -50,4 +53,14 @@ const port = Number(process.env.PORT || 3100);
 const support = makeSupport({ getUser: queries.getUser, audit, apiBase: process.env.SPICY_API_BASE || undefined });
 console.log(`Soporte (entrar como usuario): activo · API ${process.env.SPICY_API_BASE || "https://api.spicytool.net/api"}`);
 
-createApp({ queries, authenticate: makeAuthenticator(), billing, companies, users, audit, kapso, support, prices: STANDARD_PRICES }).listen(port, "127.0.0.1", () => console.log(`Backoffice API escuchando en 127.0.0.1:${port}`));
+// Google Calendar (tareas y próximos pasos de Onboarding → calendario de cada persona). Necesita estas variables en /etc/spicytool-backoffice.env:
+// GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_TOKEN_KEY (una frase larga inventada, para cifrar los permisos) y SUPABASE_SERVICE_ROLE_KEY.
+// Opcionales: APP_URL (por defecto https://backoffice.wearespicy.net) y GOOGLE_REDIRECT_URI (por defecto APP_URL + /api/admin/calendar/callback).
+// Si falta alguna, la sección avisa "no configurado" y el resto del backoffice funciona igual.
+const appUrl = String(process.env.APP_URL || "https://backoffice.wearespicy.net").replace(/\/+$/, "");
+const google = makeGoogle({ clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET, redirectUri: process.env.GOOGLE_REDIRECT_URI || `${appUrl}/api/admin/calendar/callback` });
+const calendar = makeCalendarSync({ store: makeCalendarStore({ serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY }), google, secret: process.env.GOOGLE_TOKEN_KEY, appUrl });
+if (calendar.configured) { calendar.startSchedule(); calendar.reconcile().catch((e) => console.error("Calendar (arranque):", e && e.message)); }
+console.log(`Google Calendar: ${calendar.configured ? "activo" : "SIN configurar (faltan variables)"}`);
+
+createApp({ queries, authenticate: makeAuthenticator(), authenticateUser: makeUserAuthenticator(), calendar, appUrl, billing, companies, users, audit, kapso, support, prices: STANDARD_PRICES }).listen(port, "127.0.0.1", () => console.log(`Backoffice API escuchando en 127.0.0.1:${port}`));

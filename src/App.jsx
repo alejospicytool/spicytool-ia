@@ -23,6 +23,8 @@ import { resumen as seguimientoResumen } from "./seguimiento/seguimientoLogic.js
 import { configureAdminApi, probeAdminApi, listCompanies } from "./admin/adminApi.js";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import ConfirmHost from "./ConfirmHost.jsx";
+import CalendarConnect from "./calendar/CalendarConnect.jsx";
+import { configureCalendarApi, requestCalendarSync } from "./calendar/calendarApi.js";
 import { askConfirm } from "./confirmStore.js";
 import { canWriteOps, canDeleteOps, ROLE_HELP } from "./roles.js";
 
@@ -39,6 +41,7 @@ const SUPABASE_KEY = "sb_publishable_O8UPfP8BYLWhlIg0Fv45Gg_coidezqc";
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 // Admin Spicy habla con el backend del servidor usando el token de esta sesión.
 configureAdminApi(async () => (await sb.auth.getSession()).data.session?.access_token || null);
+configureCalendarApi(async () => (await sb.auth.getSession()).data.session?.access_token || null);
 
 // ── SpicyTool Brand ────────────────────────────────────────────────────────
 const ST_RED    = "#EF3E3E";
@@ -4496,7 +4499,7 @@ function TaskTimeInfo({ entityType, entityId }) {
 }
 
 // `center` = lo que va en el medio de la barra superior (hoy, el buscador global): así hay UNA sola barra fija arriba y nada se tapa.
-function TimeTrackerBar({ center = null }) {
+function TimeTrackerBar({ center = null, actions = null }) {
   const [sessionId] = useState(getTimeSessionId);
   const { estado, receivedAt } = useTimeSnapshot();
   const [now, setNow] = useState(Date.now());
@@ -4654,6 +4657,7 @@ function TimeTrackerBar({ center = null }) {
         {center && <div className="spicy-timebar-center">{center}</div>}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {error && <span style={{ fontSize: 12, color: ST_RED }}>{error}</span>}
+          {actions}
           {otherSessionActive && (
             <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#92400E", background: "#FEF3C7", borderRadius: 8, padding: "5px 10px" }}>
               Tu jornada está siendo seguida desde otra pestaña
@@ -5455,6 +5459,7 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
   const [filterPaso, setFilterPaso] = useState(false);   // solo clientes con el próximo paso para hoy o vencido
   const [showNew, setShowNew] = useState(false);
   const [detail, setDetail] = useState(null);
+  useEntityUrlSync("onboarding", detail?.id);
   const [dragOverEtapa, setDragOverEtapa] = useState(null);
   // Abrir el detalle de un cliente pedido desde afuera (buscador global).
   useEffect(() => {
@@ -5944,6 +5949,9 @@ export default function SpicyFinanzas() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- Carga los datos una vez por sesión: si dependiera de loadAll (que se recrea en cada render) recargaría todo sin parar.
   },[session]);
 
+  // Tareas y Onboarding: después de guardar, además de recargar, se pide conciliar con Google Calendar (junta pedidos seguidos y nunca molesta si falla).
+  function refreshAndSyncCalendar() { loadAll(); requestCalendarSync(); }
+
   async function loadAll() {
     // No reseteamos dataLoaded a false acá: este refresh se llama después de
     // cada acción chica (agregar un asignado, comentar, etc.) y si tira abajo
@@ -6318,7 +6326,7 @@ export default function SpicyFinanzas() {
 
       {/* Main content */}
       <div className="spicy-main">
-        <TimeTrackerBar center={<GlobalSearch data={searchData} canSpicy={canSeeSection("Admin Spicy")} onPick={openSearchResult}/>}/>
+        <TimeTrackerBar center={<GlobalSearch data={searchData} canSpicy={canSeeSection("Admin Spicy")} onPick={openSearchResult}/>} actions={<CalendarConnect/>}/>
         {role==="reader"&&<div role="status" style={{ fontSize:13,color:"#185FA5",marginBottom:16,padding:"10px 14px",background:"#EEF4FB",borderRadius:10,border:"1px solid #CFE0F3" }}>Tu usuario es de <b>solo lectura</b>: podés ver tickets, tareas y onboarding, pero no crearlos ni cambiarlos. Si necesitás editar, pedile a un admin que te pase a editor.</div>}
         {syncError&&<div style={{ fontSize:13,color:ST_RED,marginBottom:16,padding:"10px 14px",background:ST_RED_BG,borderRadius:10,border:`1px solid ${ST_RED}22` }}>{syncError}</div>}
 
@@ -6480,13 +6488,13 @@ export default function SpicyFinanzas() {
       {view==="inicio"&&<InicioView myOpenTickets={myOpenTickets} myOpenDevTasks={myOpenDevTasks} myOpenTasks={myOpenTasks} ticketHistory={ticketStatusHistory} devTaskHistory={devTaskStatusHistory} comments={comments} currentUserEmail={session.user.email} canSeeOperaciones={canSeeSection("Operaciones")} canSeeDevs={canSeeSection("Devs")} setView={setView} followup={followup} meId={session.user.id} onboarding={onboarding} me={meUser} onOpenOnboarding={(id)=>setPendingLink({ type:"onboarding", id })}/>}
       {view==="opsdash"&&<OperationsSummaryView tickets={tickets} tasks={tasks} statusHistory={ticketStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
       {view==="tickets"&&<TicketsView tickets={tickets} statusHistory={ticketStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} devTasks={devTasks} setView={setView} onRefresh={loadAll} openId={pendingLink?.type==="ticket"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)} followup={followup} clientLinks={clientLinks}/>}
-      {view==="tasks"&&<TasksView tasks={tasks} allUsers={allUsers} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} currentUserEmail={session.user.email} currentUserId={session.user.id} onRefresh={loadAll} openId={pendingLink?.type==="task"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)}/>}
+      {view==="tasks"&&<TasksView tasks={tasks} allUsers={allUsers} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} currentUserEmail={session.user.email} currentUserId={session.user.id} onRefresh={refreshAndSyncCalendar} openId={pendingLink?.type==="task"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)}/>}
       {view==="ideas"&&<IdeasApp openId={pendingLink?.type==="idea"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)} sb={sb} ideas={ideas} votes={ideaVotes} images={ideaImages} devTasks={devTasks} allUsers={allUsers} me={{ id:session.user.id, email:session.user.email }}
         canTriage={canWriteOps(role)} canDelete={canDeleteOps(role)} canSeeDevs={canSeeSection("Devs")} onRefresh={loadAll}
         onOpenDevTask={(id)=>{ setPendingLink({ type:"dev_task", id }); setView("devtasks"); }}
         renderComments={(ideaId)=><CommentsThread entityType="idea" entityId={ideaId} comments={comments} currentUserId={session.user.id} currentUserEmail={session.user.email} onChange={loadAll} multiline placeholder="Sumá un comentario o más contexto…" emptyText="Todavía no hay comentarios." sendLabel="Comentar"/>}/>}
       {view==="seguimiento"&&<SeguimientoApp sb={sb} rows={followup} allUsers={allUsers} me={{ id:session.user.id, email:session.user.email }} isAdmin={isAdmin} canWrite={canWriteOps(role)} canSearchSpicy={canSeeSection("Admin Spicy")} onRefresh={loadAll} onOpenCliente360={setCliente360Id}/>}
-      {view==="onboarding"&&<OnboardingView openId={pendingLink?.type==="onboarding"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)} onboarding={onboarding} history={onboardingHistory} onRefresh={loadAll} canSearchSpicy={canSeeSection("Admin Spicy")} comments={comments} currentUserId={session.user.id} currentUserEmail={session.user.email} onOpenCliente360={setCliente360Id}/>}
+      {view==="onboarding"&&<OnboardingView openId={pendingLink?.type==="onboarding"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)} onboarding={onboarding} history={onboardingHistory} onRefresh={refreshAndSyncCalendar} canSearchSpicy={canSeeSection("Admin Spicy")} comments={comments} currentUserId={session.user.id} currentUserEmail={session.user.email} onOpenCliente360={setCliente360Id}/>}
       {view==="devdash"&&<DevsMetricsView tickets={tickets} ticketHistory={ticketStatusHistory} devTasks={devTasks} devTaskHistory={devTaskStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
       {view==="devtasks"&&<DevTasksView devTasks={devTasks} statusHistory={devTaskStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} tickets={tickets} onRefresh={loadAll} openId={pendingLink?.type==="dev_task"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)} setView={setView}/>}
       {view==="services"&&<ServicesView/>}
