@@ -152,10 +152,10 @@ describe("crmEvent (CRM comercial)", () => {
     expect(e.description).toContain(`${APP}/?crm=d1`);
     expect(e.extendedProperties.private.spicytool).toBe("crm_task:k1");
   });
-  it("las reuniones duran 60 minutos y BLOQUEAN el horario", () => {
+  it("las reuniones duran 30 minutos (como dice el formulario del CRM) y BLOQUEAN el horario", () => {
     const e = crmEvent(item({ tipo: "reunion", titulo: "Demo", hora: "13:30" }), { appUrl: APP, today: TODAY });
     expect(e.summary).toBe("Reunión · Ngr inmobiliaria: Demo");
-    expect(e.end.dateTime).toBe("2026-12-01T14:30:00");
+    expect(e.end.dateTime).toBe("2026-12-01T14:00:00");
     expect(e.transparency).toBe("opaque");
   });
   it("la próxima acción de un deal tiene su propia marca", () => {

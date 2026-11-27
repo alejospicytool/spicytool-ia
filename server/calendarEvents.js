@@ -70,7 +70,7 @@ export function onboardingEvent(row, { appUrl, today = null } = {}) {
 
 // ── CRM comercial ───────────────────────────────────────────────────────────────────────────────
 // Dos fuentes, igual que la pestaña "Tareas" del CRM: las tareas (crm_tasks) y la "próxima acción" de cada deal.
-// Tienen hora, así que son eventos con horario (hora de Argentina). Las reuniones duran 60 min y BLOQUEAN el horario; el resto dura 15 min y no bloquea.
+// Tienen hora, así que son eventos con horario (hora de Argentina). Duraciones como en el formulario del CRM ("Tarea 15 min", "Follow-up 15 min", "Reunión 30 min"): las reuniones BLOQUEAN el horario; el resto no.
 // No se arrastra lo vencido. Una tarea hecha solo queda (con ✓) si ya tenía evento; las que vencieron hace más de 14 días y nunca se agendaron no se crean.
 const TZ = "America/Argentina/Buenos_Aires";
 const HM_RE = /^\d{2}:\d{2}$/;
@@ -100,7 +100,7 @@ export function crmEvent(item, { appUrl, hasLink = false, today = null } = {}) {
     summary: `${done ? "✓ " : ""}${CRM_TIPO[tipo]} · ${item.empresa ? clip(item.empresa, 60) + ": " : ""}${title}`,
     description: [...[item.empresa ? `Empresa: ${item.empresa}` : "", `Tipo: ${CRM_TIPO[tipo]}`, item.vendedor ? `Vendedor: ${item.vendedor}` : "", item.notas ? clip(item.notas, 600) : ""].filter(Boolean), "", `Abrir en el backoffice: ${url}`].join("\n"),
     start: { dateTime: `${item.fecha}T${hora}:00`, timeZone: TZ },
-    end: { dateTime: addMinutesLocal(item.fecha, hora, meeting ? 60 : 15), timeZone: TZ },
+    end: { dateTime: addMinutesLocal(item.fecha, hora, meeting ? 30 : 15), timeZone: TZ },
     transparency: meeting && !done ? "opaque" : "transparent", // las reuniones ocupan el horario; todo lo demás no
     reminders: { useDefault: true },
     colorId: done ? "8" : meeting ? "9" : "10",

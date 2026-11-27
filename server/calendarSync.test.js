@@ -243,6 +243,7 @@ describe("CRM comercial", () => {
     expect(w.links.map((l) => [l.entity_type, l.user_id]).sort()).toEqual([["crm_deal", HERNAN], ["crm_task", HERNAN]]);
     const reunion = [...w.events.values()].find((e) => /^Reunión/.test(e.summary));
     expect(reunion.transparency).toBe("opaque");
+    expect(reunion.end.dateTime).toBe("2026-12-01T15:30:00");
     expect(reunion.start.dateTime).toBe("2026-12-01T15:00:00");
     expect(w.google.accessToken).toHaveBeenCalledWith("R-hernan");
   });
@@ -280,6 +281,23 @@ describe("CRM comercial", () => {
     await w.sync.reconcile();
     const k = [...w.events.values()].find((e) => /Tarea CRM/.test(e.summary));
     expect(k.start.dateTime).toBe("2026-12-02T16:30:00");
+  });
+
+  it("si el CRM viejo ya había creado el evento (calEventId) y sigue en el calendario, se adopta en vez de duplicarlo", async () => {
+    w.events.set("viejo123", { summary: "evento del CRM viejo" });
+    w.crmTasks[0].calEventId = "viejo123";
+    const s = await w.sync.reconcile();
+    expect(s).toMatchObject({ created: 1, updated: 1 }); // la próxima acción del deal se crea; la tarea adopta el viejo
+    expect(w.links.find((l) => l.entity_type === "crm_task").google_event_id).toBe("viejo123");
+    expect(w.events.get("viejo123").summary).toBe("Tarea CRM · Ngr inmobiliaria: COBRAR");
+    expect(w.events.size).toBe(2);
+  });
+
+  it("si el evento viejo ya no existe (o es de otra cuenta), se crea uno nuevo", async () => {
+    w.crmTasks[0].calEventId = "no-existe";
+    const s = await w.sync.reconcile();
+    expect(s).toMatchObject({ created: 2, errors: 0 });
+    expect(w.links.find((l) => l.entity_type === "crm_task").google_event_id).not.toBe("no-existe");
   });
 
   it("un vendedor que no conectó su calendario no genera nada", async () => {

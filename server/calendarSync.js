@@ -42,7 +42,7 @@ export function makeCalendarSync({ store, google, secret, appUrl = "https://back
     // 1) Lo que tiene que haber: clave → { type, id, userId, event }
     const today = todayInBA(now()); // lo vencido se arrastra hasta hoy (ver calendarEvents.js)
     const wanted = new Map();
-    const want = (type, id, userId, event) => { if (event) wanted.set(keyOf(type, id, userId), { type, id, userId, event }); };
+    const want = (type, id, userId, event, adopt = "") => { if (event) wanted.set(keyOf(type, id, userId), { type, id, userId, event, adopt }); };
     for (const t of tasks) {
       for (const a of taskAsg.filter((x) => x.entity_id === t.id)) if (connOf.has(a.user_id)) want("task", t.id, a.user_id, taskEvent(t, { appUrl, hasLink: linkOf.has(keyOf("task", t.id, a.user_id)), today }));
     }
@@ -57,15 +57,15 @@ export function makeCalendarSync({ store, google, secret, appUrl = "https://back
     const dealOf = new Map(crmDeals.map((d) => [d.id, d]));
     const stageKind = new Map(crmStages.map((st) => [st.id, st.kind]));
     const crmItems = [
-      ...crmTasks.map((t) => ({ k: "task", id: t.id, titulo: t.titulo, fecha: t.fecha, hora: t.hora, tipo: t.tipo, done: !!t.hecha, calOn: t.calOn, dealId: t.dealId, empresa: (dealOf.get(t.dealId) || {}).empresa, vendedor: t.vendedor, notas: t.notas })),
-      ...crmDeals.filter((d) => d.proxima && d.proximaFecha && stageKind.get(d.stage) !== "lost").map((d) => ({ k: "deal", id: d.id, titulo: d.proxima, fecha: d.proximaFecha, hora: d.proximaHora, tipo: d.proximaTipo === "reunion" ? "reunion" : "followup", done: false, calOn: d.calOn, dealId: d.id, empresa: d.empresa, vendedor: d.vendedor, notas: "" })),
+      ...crmTasks.map((t) => ({ k: "task", id: t.id, titulo: t.titulo, fecha: t.fecha, hora: t.hora, tipo: t.tipo, done: !!t.hecha, calOn: t.calOn, dealId: t.dealId, empresa: (dealOf.get(t.dealId) || {}).empresa, vendedor: t.vendedor, notas: t.notas, oldEventId: t.calEventId })),
+      ...crmDeals.filter((d) => d.proxima && d.proximaFecha && stageKind.get(d.stage) !== "lost").map((d) => ({ k: "deal", id: d.id, titulo: d.proxima, fecha: d.proximaFecha, hora: d.proximaHora, tipo: d.proximaTipo === "reunion" ? "reunion" : "followup", done: false, calOn: d.calOn, dealId: d.id, empresa: d.empresa, vendedor: d.vendedor, notas: "", oldEventId: d.calEventId })),
     ];
     for (const it of crmItems) {
       if (!it.vendedor) continue;
       const type = it.k === "deal" ? "crm_deal" : "crm_task";
       const r = usersForName(it.vendedor, people);
       if (r.ambiguous) { stats.skipped.push(`CRM ${it.empresa || it.titulo}: "${it.vendedor}" coincide con más de una persona`); continue; }
-      for (const u of r.users) if (connOf.has(u.user_id)) want(type, it.id, u.user_id, crmEvent(it, { appUrl, today, hasLink: linkOf.has(keyOf(type, it.id, u.user_id)) }));
+      for (const u of r.users) if (connOf.has(u.user_id)) want(type, it.id, u.user_id, crmEvent(it, { appUrl, today, hasLink: linkOf.has(keyOf(type, it.id, u.user_id)) }), it.oldEventId || "");
     }
 
     const token = tokenCache();
@@ -83,6 +83,12 @@ export function makeCalendarSync({ store, google, secret, appUrl = "https://back
         if (link) {
           try { await google.updateEvent(at, link.google_event_id, w.event); }
           catch (e) { if (e instanceof GoogleError && (e.status === 404 || e.status === 410)) created = true; else throw e; } // lo borraron a mano en Google: se vuelve a crear
+        }
+        // El CRM viejo ya había creado un evento para esta tarea y guardó su id (calEventId): si sigue existiendo en el calendario de esta persona se ADOPTA
+        // (se actualiza ese mismo evento) en vez de crear uno repetido. Si no existe o no se puede tocar, se crea uno nuevo.
+        if (created && w.adopt) {
+          try { await google.updateEvent(at, w.adopt, w.event); eventId = w.adopt; created = false; }
+          catch (e) { if (!(e instanceof GoogleError)) throw e; }
         }
         if (created) eventId = (await google.insertEvent(at, w.event)).id;
         await store.saveLink({ entityType: w.type, entityId: w.id, userId: w.userId, eventId, hash });
