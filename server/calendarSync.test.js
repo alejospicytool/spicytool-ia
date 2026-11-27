@@ -14,6 +14,7 @@ function world(over = {}) {
     links: [],
     tasks: [{ id: "t1", title: "Armar portfolio", start_date: "2026-12-01", end_date: "2026-12-03", priority: "Alta", stage: "En Curso", description: null }],
     asg: [{ entity_id: "t1", user_id: NICO }],
+    crmTasks: [], crmDeals: [], crmStages: [{ id: "lead", kind: "open" }, { id: "won", kind: "won" }, { id: "lost", kind: "lost" }],
     onboarding: [{ id: "ob1", client_name: "Miraglia", etapa_actual: "Conectar WhatsApp", proximo_paso: "Llamar", proximo_paso_fecha: "2026-12-04", proximo_paso_quien: "Nico" }],
     people: [{ user_id: NICO, email: "nicolas@spicytool.net", first_name: "Nicolás" }, { user_id: TICI, email: "ticiana@spicytool.net", first_name: "Ticiana" }],
     events: new Map(), nextId: 1, calls: [], revoked: [], synced: [], now: Date.parse("2026-11-27T15:00:00Z"),
@@ -25,6 +26,7 @@ function world(over = {}) {
     getConnection: async (id) => w.conns.find((c) => c.user_id === id) || null,
     listLinks: async () => w.links.map((l) => ({ ...l })),
     listLinksOfUser: async (id) => w.links.filter((l) => l.user_id === id).map((l) => ({ ...l })),
+    listCrmTasks: async () => w.crmTasks, listCrmDeals: async () => w.crmDeals, getCrmStages: async () => w.crmStages,
     listTasks: async () => w.tasks, listTaskAssignees: async () => w.asg, listOnboarding: async () => w.onboarding, listPeople: async () => w.people,
     saveLink: async (l) => { w.links = w.links.filter((x) => !(x.entity_type === l.entityType && x.entity_id === l.entityId && x.user_id === l.userId)); w.links.push({ entity_type: l.entityType, entity_id: l.entityId, user_id: l.userId, google_event_id: l.eventId, payload_hash: l.hash }); },
     deleteLink: async (l) => { w.links = w.links.filter((x) => !(x.entity_type === l.entityType && x.entity_id === l.entityId && x.user_id === l.userId)); },
@@ -220,6 +222,69 @@ describe("conciliar", () => {
     const off = makeCalendarSync({ store: { configured: false }, google: { configured: true }, secret: SECRET });
     expect(off.configured).toBe(false);
     expect(await off.reconcile()).toEqual({ skipped: "no configurado" });
+  });
+});
+
+describe("CRM comercial", () => {
+  let w;
+  const HERNAN = "44444444-4444-4444-4444-444444444444";
+  beforeEach(() => {
+    w = world();
+    w.conns.push({ user_id: HERNAN, email: "hernan@spicytool.net", refresh_token_enc: encryptToken("R-hernan", SECRET), status: "active" });
+    w.people.push({ user_id: HERNAN, email: "hernan@spicytool.net", first_name: "Hernan" });
+    w.tasks = []; w.onboarding = [];
+    w.crmDeals = [{ id: "d1", empresa: "Ngr inmobiliaria", stage: "lead", vendedor: "Hernán", proxima: "Agendar demo", proximaFecha: "2026-12-01", proximaHora: "15:00", proximaTipo: "reunion" }];
+    w.crmTasks = [{ id: "k1", titulo: "COBRAR", tipo: "tarea", fecha: "2026-12-02", hora: "12:00", vendedor: "Hernán", dealId: "d1", calOn: true, hecha: false }];
+  });
+
+  it("agenda las tareas y la próxima acción del deal en el calendario del vendedor (con y sin tilde)", async () => {
+    const s = await w.sync.reconcile();
+    expect(s).toMatchObject({ created: 2, errors: 0 });
+    expect(w.links.map((l) => [l.entity_type, l.user_id]).sort()).toEqual([["crm_deal", HERNAN], ["crm_task", HERNAN]]);
+    const reunion = [...w.events.values()].find((e) => /^Reunión/.test(e.summary));
+    expect(reunion.transparency).toBe("opaque");
+    expect(reunion.start.dateTime).toBe("2026-12-01T15:00:00");
+    expect(w.google.accessToken).toHaveBeenCalledWith("R-hernan");
+  });
+
+  it("lo del CRM NO va al calendario de otra persona (Nico no recibe lo de Hernán)", async () => {
+    await w.sync.reconcile();
+    expect(w.links.some((l) => l.user_id === NICO)).toBe(false);
+  });
+
+  it("al hacer la tarea queda con ✓; al borrarla o apagar calOn, el evento se va; al cerrar la próxima acción del deal, también", async () => {
+    await w.sync.reconcile();
+    w.crmTasks[0].hecha = true;
+    await w.sync.reconcile();
+    expect([...w.events.values()].some((e) => e.summary.startsWith("✓ Tarea CRM"))).toBe(true);
+    w.crmTasks = [];
+    w.crmDeals[0].proxima = "";
+    const s = await w.sync.reconcile();
+    expect(s.deleted).toBe(2);
+    expect(w.events.size).toBe(0);
+  });
+
+  it("calOn apagado: no se agenda; deals perdidos: tampoco", async () => {
+    w.crmTasks[0].calOn = false;
+    w.crmDeals[0].stage = "lost";
+    const s = await w.sync.reconcile();
+    expect(s.created).toBe(0);
+  });
+
+  it("si cambia la hora se actualiza el mismo evento; y no hay arrastre de vencidas", async () => {
+    await w.sync.reconcile();
+    w.crmTasks[0].hora = "16:30";
+    const s = await w.sync.reconcile();
+    expect(s).toMatchObject({ updated: 1, created: 0 });
+    w.now = Date.parse("2026-12-15T15:00:00Z"); // pasaron los días: sigue en su fecha original
+    await w.sync.reconcile();
+    const k = [...w.events.values()].find((e) => /Tarea CRM/.test(e.summary));
+    expect(k.start.dateTime).toBe("2026-12-02T16:30:00");
+  });
+
+  it("un vendedor que no conectó su calendario no genera nada", async () => {
+    w.conns = w.conns.filter((c) => c.user_id !== HERNAN);
+    expect((await w.sync.reconcile()).created).toBe(0);
   });
 });
 

@@ -1,7 +1,7 @@
 // Links directos a un ticket / tarea de dev / tarea / cliente de onboarding: https://<dominio>/?ticket=<id>
 // Se usa query string (no hash ni rutas) para que funcione con cualquier servidor estático.
 
-export const LINK_PARAMS = { ticket: "ticket", dev_task: "devtask", task: "task", onboarding: "onboarding" };
+export const LINK_PARAMS = { ticket: "ticket", dev_task: "devtask", task: "task", onboarding: "onboarding", crm: "crm" };
 
 // Qué vista abre cada tipo y qué sección hace falta tener habilitada para verla.
 export const LINK_TARGETS = {
@@ -9,6 +9,7 @@ export const LINK_TARGETS = {
   task:     { view: "tasks",    section: "Operaciones" },
   dev_task: { view: "devtasks", section: "Devs" },
   onboarding: { view: "onboarding", section: "Operaciones" },
+  crm:      { view: "crm",        section: "CRM" }, // ?crm=<id del deal> abre el deal; ?crm=tareas abre la pestaña Tareas
   // Sin link en la dirección: los usa el buscador global para abrir el detalle (no tienen parámetro en LINK_PARAMS).
   note:       { view: "notes",      section: "Notas" },
   idea:       { view: "ideas",      section: "Ideas" },

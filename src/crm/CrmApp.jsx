@@ -10,6 +10,8 @@ import { DealDialog, TaskDialog, NextDialog, BajaDialog, WeeklyDialog, PasteDial
 import CrmAssistant from "./CrmAssistant.jsx";
 import { AI_ENABLED } from "./crmAi.js";
 import { formatTimeBA } from "../timeTracking.js";
+import { requestCalendarSync } from "../calendar/calendarApi.js";
+import { clearedSearch } from "../deepLinks.js";
 
 const VIEW_KEY = "crm-view";
 const loadView = () => { try { return { tab: "hoy", q: "", seller: "", tag: "", country: "", flag: "", tkind: "", tseller: "", tdone: false, ...(JSON.parse(sessionStorage.getItem(VIEW_KEY) || "null") || {}) }; } catch { return { tab: "hoy", q: "", seller: "", tag: "", country: "", flag: "", tkind: "", tseller: "", tdone: false }; } };
@@ -61,7 +63,7 @@ function useCrmData(sb, onToast) {
         try {
           const r = await persist(sb, diff, cur.versions);
           if (r.conflict) { cur.epoch++; onToast("Alguien guardó cambios antes: cargando la última versión"); await load(); }
-          else cur.versions = r.versions;
+          else { cur.versions = r.versions; requestCalendarSync(); } // lo guardado se refleja en Google Calendar (si el vendedor lo conectó)
         } catch (e) { setSaveState("error"); onToast("No se pudo guardar: " + (e.message || e)); }
       }).finally(() => { cur.pending--; if (!cur.pending) setSaveState((s) => (s === "error" ? "error" : "saved")); });
     }
@@ -71,7 +73,7 @@ function useCrmData(sb, onToast) {
   return { S, status, loadError, saveState, commit };
 }
 
-export default function CrmApp({ sb }) {
+export default function CrmApp({ sb, openId = null, onOpenHandled = null }) {
   const [toastMsg, setToastMsg] = useState("");
   const toastTimer = useRef(null);
   const toast = useCallback((m) => { setToastMsg(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToastMsg(""), 2800); }, []);
@@ -115,6 +117,17 @@ export default function CrmApp({ sb }) {
     const c = crm.dueCounts();
     try { if ((c.v || c.h) && sessionStorage.getItem("crm-due-shown") !== crm.today) { sessionStorage.setItem("crm-due-shown", crm.today); toast("Hoy: " + c.h + (c.h === 1 ? " tarea" : " tareas") + (c.v ? ", " + c.v + (c.v === 1 ? " vencida" : " vencidas") : "")); } } catch { /* sin storage */ }
   }, [crm]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Link de un evento de Google Calendar (?crm=<deal> o ?crm=tareas): abre ese deal, o la pestaña de tareas si no hay deal.
+  useEffect(() => {
+    if (!openId || !crm) return;
+    const t = setTimeout(() => {
+      if (crm.dealById(openId)) open.deal(openId); else setTab("tareas");
+      try { window.history.replaceState(null, "", window.location.pathname + clearedSearch(window.location.search)); } catch { /* sin historial */ }
+      if (onOpenHandled) onOpenHandled();
+    }, 0);
+    return () => clearTimeout(t);
+  }, [openId, crm]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (status === "loading") return <div style={{ padding: "4rem 1rem", textAlign: "center", color: "#888", fontSize: 14 }}>Cargando el CRM...</div>;
   if (status === "error") return <div style={{ padding: "4rem 1rem", textAlign: "center", color: "#EF3E3E", fontSize: 14 }}>No se pudo cargar el CRM{loadError ? ": " + loadError : ""}. Si no tenés acceso, pedile a un admin que habilite la sección CRM.</div>;

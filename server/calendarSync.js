@@ -4,7 +4,7 @@
 // falta sin duplicar nada. Nunca toca los eventos que no creó él (solo los que tiene vinculados en calendar_links).
 import { decryptToken, encryptToken, signState, verifyState } from "./calendarCrypto.js";
 import { GoogleError } from "./googleCalendar.js";
-import { taskEvent, onboardingEvent, usersForName, eventHash, todayInBA } from "./calendarEvents.js";
+import { taskEvent, onboardingEvent, crmEvent, usersForName, eventHash, todayInBA } from "./calendarEvents.js";
 
 const keyOf = (type, id, userId) => `${type}|${id}|${userId}`;
 const NEEDS_CAL = "https://www.googleapis.com/auth/calendar.events";
@@ -36,7 +36,7 @@ export function makeCalendarSync({ store, google, secret, appUrl = "https://back
     stats.users = conns.length;
     if (!conns.length) return stats;
     const connOf = new Map(conns.map((c) => [c.user_id, c]));
-    const [tasks, taskAsg, onboarding, people, links] = await Promise.all([store.listTasks(), store.listTaskAssignees(), store.listOnboarding(), store.listPeople(), store.listLinks()]);
+    const [tasks, taskAsg, onboarding, people, links, crmTasks, crmDeals, crmStages] = await Promise.all([store.listTasks(), store.listTaskAssignees(), store.listOnboarding(), store.listPeople(), store.listLinks(), store.listCrmTasks(), store.listCrmDeals(), store.getCrmStages()]);
     const linkOf = new Map(links.map((l) => [keyOf(l.entity_type, l.entity_id, l.user_id), l]));
 
     // 1) Lo que tiene que haber: clave → { type, id, userId, event }
@@ -51,6 +51,21 @@ export function makeCalendarSync({ store, google, secret, appUrl = "https://back
       const r = usersForName(o.proximo_paso_quien, people);
       if (r.ambiguous) { stats.skipped.push(`Onboarding ${o.client_name}: "${o.proximo_paso_quien}" coincide con más de una persona`); continue; }
       for (const u of r.users) if (connOf.has(u.user_id)) want("onboarding", o.id, u.user_id, onboardingEvent(o, { appUrl, today }));
+    }
+
+    // CRM comercial: tareas + próxima acción de cada deal (como la pestaña "Tareas" del CRM). Van al calendario del vendedor.
+    const dealOf = new Map(crmDeals.map((d) => [d.id, d]));
+    const stageKind = new Map(crmStages.map((st) => [st.id, st.kind]));
+    const crmItems = [
+      ...crmTasks.map((t) => ({ k: "task", id: t.id, titulo: t.titulo, fecha: t.fecha, hora: t.hora, tipo: t.tipo, done: !!t.hecha, calOn: t.calOn, dealId: t.dealId, empresa: (dealOf.get(t.dealId) || {}).empresa, vendedor: t.vendedor, notas: t.notas })),
+      ...crmDeals.filter((d) => d.proxima && d.proximaFecha && stageKind.get(d.stage) !== "lost").map((d) => ({ k: "deal", id: d.id, titulo: d.proxima, fecha: d.proximaFecha, hora: d.proximaHora, tipo: d.proximaTipo === "reunion" ? "reunion" : "followup", done: false, calOn: d.calOn, dealId: d.id, empresa: d.empresa, vendedor: d.vendedor, notas: "" })),
+    ];
+    for (const it of crmItems) {
+      if (!it.vendedor) continue;
+      const type = it.k === "deal" ? "crm_deal" : "crm_task";
+      const r = usersForName(it.vendedor, people);
+      if (r.ambiguous) { stats.skipped.push(`CRM ${it.empresa || it.titulo}: "${it.vendedor}" coincide con más de una persona`); continue; }
+      for (const u of r.users) if (connOf.has(u.user_id)) want(type, it.id, u.user_id, crmEvent(it, { appUrl, today, hasLink: linkOf.has(keyOf(type, it.id, u.user_id)) }));
     }
 
     const token = tokenCache();

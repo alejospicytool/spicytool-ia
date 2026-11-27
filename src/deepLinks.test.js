@@ -18,6 +18,8 @@ describe("links directos", () => {
     expect(parseEntityLink("?devtask=dt_1")).toEqual({ type: "dev_task", id: "dt_1" });
     expect(parseEntityLink(entitySearch("task", "a b&c"))).toEqual({ type: "task", id: "a b&c" });
     expect(parseEntityLink("?onboarding=ob_1")).toEqual({ type: "onboarding", id: "ob_1" });
+    expect(parseEntityLink("?crm=dmvvpg9wx")).toEqual({ type: "crm", id: "dmvvpg9wx" });
+    expect(parseEntityLink("?crm=tareas")).toEqual({ type: "crm", id: "tareas" });
   });
   it("ignora URLs sin link", () => {
     expect(parseEntityLink("")).toBeNull();
@@ -35,5 +37,6 @@ describe("links directos", () => {
     expect(LINK_TARGETS.dev_task).toEqual({ view: "devtasks", section: "Devs" });
     expect(LINK_TARGETS.task).toEqual({ view: "tasks", section: "Operaciones" });
     expect(LINK_TARGETS.onboarding).toEqual({ view: "onboarding", section: "Operaciones" });
+    expect(LINK_TARGETS.crm).toEqual({ view: "crm", section: "CRM" });
   });
 });

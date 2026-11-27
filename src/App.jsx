@@ -6502,7 +6502,7 @@ export default function SpicyFinanzas() {
       {view==="usuarios"&&isAdmin&&<UserPermissionsPanel users={allUsers} allowedSections={allowedSections} onRefresh={loadAll}/>}
       {view==="mytime"&&<MiTiempoView currentUserId={session.user.id}/>}
       {view==="timeadmin"&&isAdmin&&<ControlJornadaView allUsers={allUsers}/>}
-      {view==="crm"&&<CrmApp sb={sb}/>}
+      {view==="crm"&&<CrmApp sb={sb} openId={pendingLink?.type==="crm"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)}/>}
       {canSeeSection("Métricas")&&view.startsWith("metrics")&&<RevenueApp sb={sb} view={view} setView={setView} readOnly={!isAdmin} canSegment={canWriteOps(role)} canSpicy={canSeeSection("Admin Spicy")} onOpenFicha={setCliente360Id}/>}
       {canSeeSection("Admin Spicy")&&view.startsWith("adm_")&&<AdminApp view={view} actor={session.user.email} crmSb={canSeeSection("CRM")?sb:null} openUser={spicyOpen} onOpenUserHandled={()=>setSpicyOpen(null)} onOpenFicha={canSeeSection("Operaciones")?setCliente360Id:null}/>}
       {view==="notes"&&<NotesView openId={pendingLink?.type==="note"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)} notes={notes} currentUserId={session.user.id} currentUserEmail={session.user.email} isAdmin={isAdmin} onRefresh={loadAll}/>}

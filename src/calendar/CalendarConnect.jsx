@@ -63,6 +63,7 @@ export default function CalendarConnect() {
                     <li>tus <b>tareas</b> de Operaciones (del inicio al fin)</li>
                     <li>los <b>próximos pasos de Onboarding</b> que tengan tu nombre</li>
                   </ul>
+                  Las <b>tareas del CRM comercial</b> y la próxima acción de tus deals van con su <b>hora</b> (las reuniones duran 1 hora y ocupan ese horario; el resto son avisos cortos que no bloquean).
                   Si cambiás una fecha, el evento se actualiza; si finalizás, borrás o hacés el paso, se saca o queda con ✓. Lo vencido (pasos de Onboarding y tareas de prioridad Alta) se va estirando hasta hoy con “Vencido/a” en el título. Cada evento trae el link para volver acá.
                 </div>
 

@@ -42,6 +42,9 @@ export function makeCalendarStore({ serviceKey, url = SUPABASE_URL, fetchImpl = 
     async listTasks() { return (await rest("GET", "tasks?select=id,title,start_date,end_date,priority,stage,description")) || []; },
     async listTaskAssignees() { return (await rest("GET", "entity_assignees?select=entity_id,user_id&entity_type=eq.task")) || []; },
     async listOnboarding() { return (await rest("GET", "onboarding?select=id,client_name,etapa_actual,proximo_paso,proximo_paso_fecha,proximo_paso_quien&proximo_paso=not.is.null")) || []; },
+    async listCrmTasks() { return ((await rest("GET", "crm_tasks?select=id,data")) || []).map((r) => r.data); },
+    async listCrmDeals() { return ((await rest("GET", "crm_deals?select=id,data")) || []).map((r) => r.data); },
+    async getCrmStages() { const r = await rest("GET", "crm_config?select=data&id=eq.1"); return ((r && r[0] && r[0].data && r[0].data.stages) || []); },
     async listPeople() { return (await rest("GET", "user_roles?select=user_id,email,first_name")) || []; },
   };
 }
