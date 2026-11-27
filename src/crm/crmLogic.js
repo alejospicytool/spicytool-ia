@@ -258,9 +258,9 @@ export function createCrm(S, opts = {}) {
     if (!all && seller) out = out.filter((x) => x.vendedor === seller);
     return out.sort((a, b) => { const x = a.fecha + a.hora, y = b.fecha + b.hora; return x < y ? -1 : x > y ? 1 : 0; });
   }
-  function dueCounts() {
+  function dueCounts(seller) {
     let v = 0, hh = 0;
-    taskItems(true).forEach((x) => { if (x.done) return; if (x.fecha < today) v++; else if (x.fecha === today) hh++; });
+    taskItems(!seller, seller).forEach((x) => { if (x.done) return; if (x.fecha < today) v++; else if (x.fecha === today) hh++; });
     return { v, h: hh };
   }
   const fmtStampDate = (t) => fmtDate(baDateISO(new Date(t)));
@@ -293,15 +293,17 @@ export function createCrm(S, opts = {}) {
     return { groups, cnt, missingDemo };
   }
   // Los 5 bloques de la pestaña "Hoy"
-  function hoyData() {
-    const tm = isoPlus(1), cm = curMonth(), items = taskItems(true).filter((x) => !x.done);
+  // seller (opcional): solo lo de esa persona (tareas, demos, deals frenados, firmados sin pagar y hitos). El MRR y el forecast son de todo el equipo.
+  function hoyData(seller) {
+    const tm = isoPlus(1), cm = curMonth(), items = taskItems(!seller, seller).filter((x) => !x.done);
     const ag = (x) => /agendar|coordinar/i.test(x.titulo || "");
+    const mine = (d) => !seller || d.vendedor === seller;
     const demos = items.filter((x) => kindOf(x) === "demo" && !ag(x) && (x.fecha === today || x.fecha === tm));
     const todo = items.filter((x) => x.fecha <= today && demos.indexOf(x) < 0);
-    const frenados = S.deals.filter((d) => rotLevel(d) === "red").sort((a, b) => daysIn(b) - daysIn(a));
-    const unpaid = S.deals.filter((d) => isActiveClient(d) && isUnpaid(d));
+    const frenados = S.deals.filter((d) => mine(d) && rotLevel(d) === "red").sort((a, b) => daysIn(b) - daysIn(a));
+    const unpaid = S.deals.filter((d) => mine(d) && isActiveClient(d) && isUnpaid(d));
     const hitos = [];
-    S.deals.filter(isActiveClient).forEach((d) => {
+    S.deals.filter((d) => mine(d) && isActiveClient(d)).forEach((d) => {
       if (d.estado === "agendado" || d.estado === "onboarding") hitos.push({ d, t: estLabel(d.estado) });
       else {
         if (hasPromo(d)) { const st = addMonths(d.cierre, +d.promoMeses); if (st > cm && st <= addMonths(cm, 1)) hitos.push({ d, t: "Sube a " + money(d.mrr) + " en " + monthLabel(st) }); }

@@ -26,8 +26,8 @@ export function useTaskToggle({ commit, open }) {
 const logWa = (commit, dealId, text) => commit((crm) => { const d = crm.dealById(dealId); if (d) A.logH(crm, d, "WhatsApp: " + text); });
 
 // ── HOY ─────────────────────────────────────────────────────────────────────
-export function HoyView({ crm, commit, open, sb }) {
-  const h = crm.hoyData();
+export function HoyView({ crm, commit, open, sb, view, setView }) {
+  const h = crm.hoyData(view && view.tseller);
   const toggle = useTaskToggle({ commit, open });
   const S = crm.S;
   const dn = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"][new Date(crm.today + "T12:00:00").getDay()];
@@ -65,6 +65,7 @@ export function HoyView({ crm, commit, open, sb }) {
   const mr = h.mr, meta = h.meta;
   return (
     <>
+      <div className="crm-toolbar" style={{ marginBottom: 8 }}><select className="spicy-select" aria-label="Vendedor" value={(view && view.tseller) || ""} onChange={(e) => setView({ tseller: e.target.value })}><option value="">Todos los vendedores</option>{S.config.sellers.map((x) => <option key={x}>{x}</option>)}</select></div>
       <div className="crm-hoy-h"><h1>Hoy, {dn} {fmtDate(crm.today)}</h1><span>MRR real <b>{money(S.config.mrrActual)}</b></span>
         <span>Proyectado a {monthLabel(mr.m)} <b>{money(mr.proj)}</b>{meta ? (mr.proj >= meta ? ", supera la meta" : ", faltan " + money(meta - mr.proj) + " para la meta") : ""}</span></div>
       {AI_ENABLED && <div className="crm-brief">
@@ -140,10 +141,11 @@ export function PipelineView({ crm, view, setView, commit, open, toast, setTab }
     if (view.flag === "frenados" && crm.rotLevel(d) !== "red") return false;
     return true;
   });
-  const nV = S.deals.filter(crm.overdue).length, nS = S.deals.filter((d) => crm.isOpen(d) && !d.proxima).length, nF = S.deals.filter((d) => crm.rotLevel(d) === "red").length;
+  const mine = view.seller ? S.deals.filter((d) => d.vendedor === view.seller) : S.deals; // los contadores de arriba también son de la persona filtrada
+  const nV = mine.filter(crm.overdue).length, nS = mine.filter((d) => crm.isOpen(d) && !d.proxima).length, nF = mine.filter((d) => crm.rotLevel(d) === "red").length;
   const flag = (k, l, n, cls) => <button className={"crm-flag " + (cls || "")} aria-pressed={view.flag === k} onClick={() => setView({ flag: view.flag === k ? "" : k })}>{l}<b>{n}</b></button>;
   const groups = []; c.tags.forEach((t) => { if (groups.indexOf(t.group) < 0) groups.push(t.group); });
-  const dc = crm.dueCounts();
+  const dc = crm.dueCounts(view.seller);
   const sort = (a, b) => { const x = crm.dealKey(a), y = crm.dealKey(b); return x < y ? -1 : x > y ? 1 : (b.mrr || 0) - (a.mrr || 0); };
 
   function drop(stageId) {

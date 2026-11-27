@@ -211,6 +211,30 @@ describe("tareas, hoy y alertas", () => {
   });
 });
 
+describe("Hoy filtrado por vendedor", () => {
+  const crm = make();
+  it("con vendedor solo trae sus tareas, demos, deals frenados, firmados sin pagar y hitos; sin vendedor trae todo como antes", () => {
+    const all = crm.hoyData();
+    expect(all).toEqual(crm.hoyData(""));
+    for (const s of crm.S.config.sellers) {
+      const h = crm.hoyData(s);
+      expect(h.todo.every((x) => x.vendedor === s)).toBe(true);
+      expect(h.demos.every((x) => x.vendedor === s)).toBe(true);
+      expect(h.frenados.every((d) => d.vendedor === s)).toBe(true);
+      expect(h.unpaid.every((d) => d.vendedor === s)).toBe(true);
+      expect(h.hitos.every((x) => x.d.vendedor === s)).toBe(true);
+      expect(h.todo.length).toBeLessThanOrEqual(all.todo.length);
+      expect(h.F).toEqual(all.F); // el forecast y el MRR son de todo el equipo
+    }
+  });
+  it("lo de un vendedor y lo de otro no se mezclan (la suma no pasa del total)", () => {
+    const [a, b] = crm.S.config.sellers;
+    const all = crm.hoyData();
+    expect(crm.hoyData(a).todo.length + crm.hoyData(b).todo.length).toBeLessThanOrEqual(all.todo.length);
+    expect(crm.hoyData(a).unpaid.length + crm.hoyData(b).unpaid.length).toBeLessThanOrEqual(all.unpaid.length);
+  });
+});
+
 describe("calificación de la demo y WhatsApp", () => {
   const crm = make();
   it("puntaje 0 a 4", () => {

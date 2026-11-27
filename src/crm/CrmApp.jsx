@@ -12,9 +12,10 @@ import { AI_ENABLED } from "./crmAi.js";
 import { formatTimeBA } from "../timeTracking.js";
 import { requestCalendarSync } from "../calendar/calendarApi.js";
 import { clearedSearch } from "../deepLinks.js";
+import { sellerOfUser, effectiveSeller } from "./crmMe.js";
 
 const VIEW_KEY = "crm-view";
-const loadView = () => { try { return { tab: "hoy", q: "", seller: "", tag: "", country: "", flag: "", tkind: "", tseller: "", tdone: false, ...(JSON.parse(sessionStorage.getItem(VIEW_KEY) || "null") || {}) }; } catch { return { tab: "hoy", q: "", seller: "", tag: "", country: "", flag: "", tkind: "", tseller: "", tdone: false }; } };
+const loadView = () => { try { return { tab: "hoy", q: "", seller: null, tag: "", country: "", flag: "", tkind: "", tseller: null, tdone: false, ...(JSON.parse(sessionStorage.getItem(VIEW_KEY) || "null") || {}) }; } catch { return { tab: "hoy", q: "", seller: null, tag: "", country: "", flag: "", tkind: "", tseller: null, tdone: false }; } };
 
 // Estado del CRM + guardado de lo que cambia (con control de versión)
 function useCrmData(sb, onToast) {
@@ -73,7 +74,9 @@ function useCrmData(sb, onToast) {
   return { S, status, loadError, saveState, commit };
 }
 
-export default function CrmApp({ sb, openId = null, onOpenHandled = null }) {
+// me: { email, first_name } de la persona logueada. Si es uno de los vendedores del CRM, Hoy, Tareas y Pipeline se abren filtrados por sus cosas
+// (puede elegir "Todos los vendedores" y esa elección se respeta durante la sesión).
+export default function CrmApp({ sb, me = null, openId = null, onOpenHandled = null }) {
   const [toastMsg, setToastMsg] = useState("");
   const toastTimer = useRef(null);
   const toast = useCallback((m) => { setToastMsg(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToastMsg(""), 2800); }, []);
@@ -84,6 +87,8 @@ export default function CrmApp({ sb, openId = null, onOpenHandled = null }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 60000); return () => clearInterval(t); }, []);
   const crm = useMemo(() => (S && S.config ? createCrm(S, { now }) : null), [S, now]);
+  const mySeller = useMemo(() => sellerOfUser(me, S && S.config ? S.config.sellers : []), [me, S]);
+  const viewEff = useMemo(() => ({ ...view, seller: effectiveSeller(view.seller, mySeller), tseller: effectiveSeller(view.tseller, mySeller) }), [view, mySeller]);
   const [stack, setStack] = useState([]); // diálogos abiertos (uno encima del otro)
   const [aiOpen, setAiOpen] = useState(() => { try { return sessionStorage.getItem("crm-ai-open") === "1"; } catch { return false; } });
   const [nudge, setNudge] = useState(null);
@@ -104,17 +109,17 @@ export default function CrmApp({ sb, openId = null, onOpenHandled = null }) {
     const check = () => {
       const c2 = createCrm(S, { now: new Date() }), d = new Date(), hm = formatTimeBA(d), prev = formatTimeBA(new Date(d.getTime() - 3 * 60000));
       let seen = {}; try { seen = JSON.parse(sessionStorage.getItem("crm-nudged") || "{}"); } catch { /* sin storage */ }
-      c2.taskItems(true).forEach((x) => { if (x.done || x.fecha !== c2.today) return; const key = x.k + x.id + x.fecha + x.hora; if (seen[key]) return; if (x.hora <= hm && x.hora > prev) { seen[key] = 1; setNudge(x); } });
+      c2.taskItems(!mySeller, mySeller).forEach((x) => { if (x.done || x.fecha !== c2.today) return; const key = x.k + x.id + x.fecha + x.hora; if (seen[key]) return; if (x.hora <= hm && x.hora > prev) { seen[key] = 1; setNudge(x); } });
       try { sessionStorage.setItem("crm-nudged", JSON.stringify(seen)); } catch { /* sin storage */ }
     };
     const t = setInterval(check, 30000);
     return () => clearInterval(t);
-  }, [S]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [S, mySeller]); // eslint-disable-line react-hooks/exhaustive-deps
   const shownDue = useRef(false);
   useEffect(() => {
     if (!crm || shownDue.current) return;
     shownDue.current = true;
-    const c = crm.dueCounts();
+    const c = crm.dueCounts(mySeller);
     try { if ((c.v || c.h) && sessionStorage.getItem("crm-due-shown") !== crm.today) { sessionStorage.setItem("crm-due-shown", crm.today); toast("Hoy: " + c.h + (c.h === 1 ? " tarea" : " tareas") + (c.v ? ", " + c.v + (c.v === 1 ? " vencida" : " vencidas") : "")); } } catch { /* sin storage */ }
   }, [crm]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -133,7 +138,7 @@ export default function CrmApp({ sb, openId = null, onOpenHandled = null }) {
   if (status === "error") return <div style={{ padding: "4rem 1rem", textAlign: "center", color: "#EF3E3E", fontSize: 14 }}>No se pudo cargar el CRM{loadError ? ": " + loadError : ""}. Si no tenés acceso, pedile a un admin que habilite la sección CRM.</div>;
   if (status === "empty") return <div style={{ padding: "4rem 1rem", textAlign: "center", color: "#888", fontSize: 14 }}>Todavía no hay datos cargados en el CRM. Hay que importarlos (scripts/crm-import.py).</div>;
 
-  const dc = crm.dueCounts(), n = dc.v + dc.h;
+  const dc = crm.dueCounts(viewEff.tseller), n = dc.v + dc.h;
   const tabs = [["hoy", "Hoy"], ["pipeline", "Pipeline"], ["tareas", "Tareas"], ["clientes", "Clientes"], ["forecast", "Forecast"], ["config", "Configuración"]];
   const chip = saveState === "saving" ? ["busy", "Guardando…"] : saveState === "error" ? ["err", "No se pudo guardar"] : ["ok", "Guardado"];
   const common = { crm, commit, open, toast, sb };
@@ -150,9 +155,9 @@ export default function CrmApp({ sb, openId = null, onOpenHandled = null }) {
         {AI_ENABLED && <button className="crm-ai-btn" onClick={() => { setAiOpen(true); try { sessionStorage.setItem("crm-ai-open", "1"); } catch { /* sin storage */ } }}><i>✦</i>Asistente</button>}
       </div>
 
-      {view.tab === "hoy" && <HoyView {...common} />}
-      {view.tab === "pipeline" && <PipelineView {...common} view={view} setView={setView} setTab={setTab} />}
-      {view.tab === "tareas" && <TasksView {...common} view={view} setView={setView} />}
+      {view.tab === "hoy" && <HoyView {...common} view={viewEff} setView={setView} />}
+      {view.tab === "pipeline" && <PipelineView {...common} view={viewEff} setView={setView} setTab={setTab} />}
+      {view.tab === "tareas" && <TasksView {...common} view={viewEff} setView={setView} />}
       {view.tab === "clientes" && <ClientsView {...common} />}
       {view.tab === "forecast" && <ForecastView {...common} setTab={setTab} />}
       {view.tab === "config" && <ConfigView {...common} />}
