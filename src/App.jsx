@@ -6210,9 +6210,11 @@ export default function SpicyFinanzas() {
   const todayISOForTasks = new Date().toISOString().split("T")[0];
   const overdueTasksCount = tasks.filter(t=>t.end_date<todayISOForTasks && !["Finalizado","Archivado"].includes(t.stage)).length;
 
-  const myAssignedTicketIds = new Set(entityAssignees.filter(a=>a.entity_type==="ticket" && a.user_id===session.user.id).map(a=>a.entity_id));
-  const myAssignedDevTaskIds = new Set(entityAssignees.filter(a=>a.entity_type==="dev_task" && a.user_id===session.user.id).map(a=>a.entity_id));
-  const myAssignedTaskIds = new Set(entityAssignees.filter(a=>a.entity_type==="task" && a.user_id===session.user.id).map(a=>a.entity_id));
+  // Al cerrar sesión, `session` pasa a null y esta parte todavía se ejecuta antes de mostrar el login: por eso se lee con ?. (si no, tira error).
+  const myUid = session?.user?.id;
+  const myAssignedTicketIds = new Set(entityAssignees.filter(a=>a.entity_type==="ticket" && a.user_id===myUid).map(a=>a.entity_id));
+  const myAssignedDevTaskIds = new Set(entityAssignees.filter(a=>a.entity_type==="dev_task" && a.user_id===myUid).map(a=>a.entity_id));
+  const myAssignedTaskIds = new Set(entityAssignees.filter(a=>a.entity_type==="task" && a.user_id===myUid).map(a=>a.entity_id));
   const myOpenTickets  = tickets.filter(t=>myAssignedTicketIds.has(t.id) && statusGroup(t.status)!=="Cerrados");
   const myOpenDevTasks = devTasks.filter(t=>myAssignedDevTaskIds.has(t.id) && !DEV_TASK_STAGES_CERRADOS.includes(t.stage));
   const myOpenTasks    = tasks.filter(t=>myAssignedTaskIds.has(t.id) && !["Finalizado","Archivado"].includes(t.stage));
