@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { subscriptionMrr, normalizeStripeSub, periodEndOf, verifyStripeSignature, handle, monthsOf, saveManualSubscription, reconcile, mergeFailure, invoiceSubscriptionId } from "./index.ts";
+import { subscriptionMrr, normalizeStripeSub, periodEndOf, verifyStripeSignature, handle, monthsOf, saveManualSubscription, reconcile, mergeFailure, invoiceSubscriptionId, addMonthsISO, todayBA } from "./index.ts";
 
 // ── Base y Stripe en memoria ───────────────────────────────────────────────────────────────────────────
 function fakeStore(over = {}) {
@@ -378,6 +378,109 @@ describe("carga manual", () => {
     const bad = await handle(adminReq("manual", manual({ amount: -5 })), deps(store, fakeStripe(), { isAdmin: async () => true }));
     expect(bad.status).toBe(400);
     expect(await bad.json()).toEqual({ error: "monto_invalido" });
+  });
+});
+
+describe("cobro manual por período (un año o un semestre pagado por fuera)", () => {
+  const NOW = new Date("2026-11-27T15:00:00Z"); // 27/11 12:00 en Buenos Aires
+  const ctxOf = (store, now = NOW) => ({ store, stripe: fakeStripe(), now: () => now, coupons: new Map(), known: null });
+  const ids = () => { let i = 0; return () => "id" + ++i; };
+  const KEY = "stripe:cus_greco";
+  const cobro = (over = {}) => ({ customerKey: KEY, planPriceId: "pa", amount: 720, currency: "usd", months: 12, ...over });
+  const setup = () => { const store = fakeStore(); store.st.plans.set("pa", { countsInMrr: true }); store.st.customers.set(KEY, { key: KEY, source: "stripe", name: "Alvaro Greco" }); return store; };
+
+  it("un año pagado con descuento: MRR = monto ÷ 12, para un cliente de Stripe, con vencimiento a los 12 meses", async () => {
+    const store = setup();
+    const r = await saveManualSubscription(ctxOf(store), cobro(), "u1", ids());
+    expect(r.customerKey).toBe(KEY);
+    const sub = store.st.subs.get(r.subscriptionId);
+    expect(sub).toMatchObject({ customerKey: KEY, source: "manual", status: "active", currentPeriodEnd: "2027-11-27T03:00:00.000Z" });
+    expect(sub.items[0]).toMatchObject({ unitAmount: 72000, interval: "month", intervalCount: 12 });
+    expect(store.st.apply).toEqual([{ key: KEY, after: 60, cause: "manual_cobro", baseline: false }]);
+    expect(store.st.customers.get(KEY)).toMatchObject({ source: "stripe", name: "Alvaro Greco" }); // sigue siendo el MISMO cliente
+    expect(store.st.audit[0].userId).toBe("u1");
+  });
+  it("semestral u otro plazo: el monto se reparte en los meses que cubre", async () => {
+    const store = setup();
+    await saveManualSubscription(ctxOf(store), cobro({ amount: 300, months: 6 }), "u", ids());
+    expect(store.st.apply.at(-1).after).toBe(50);
+    await saveManualSubscription(ctxOf(store), cobro({ customerKey: "stripe:cus_otro", amount: 100, months: 4 }), "u", ids());
+    expect(store.st.apply.at(-1).after).toBe(25);
+  });
+  it("la fecha de pago corre el vencimiento (pagó hace 2 meses → vence antes)", async () => {
+    const store = setup();
+    const r = await saveManualSubscription(ctxOf(store), cobro({ paidAt: "2026-09-27" }), "u", ids());
+    expect(store.st.subs.get(r.subscriptionId).currentPeriodEnd).toBe("2027-09-27T03:00:00.000Z");
+  });
+  it("vence solo: cuando pasa la fecha deja de sumar (y lo manuales mensuales sin fecha no vencen nunca)", () => {
+    const plans = new Map([["pa", { countsInMrr: true }]]);
+    const sub = { status: "active", currency: "usd", discount: null, source: "manual", currentPeriodEnd: "2027-11-27T03:00:00.000Z", items: [{ priceId: "pa", unitAmount: 72000, quantity: 1, interval: "month", intervalCount: 12 }] };
+    expect(subscriptionMrr(sub, plans, new Map(), new Date("2027-11-26T20:00:00Z"))).toBe(60);
+    expect(subscriptionMrr(sub, plans, new Map(), new Date("2027-11-27T03:00:00Z"))).toBe(0);
+    expect(subscriptionMrr(sub, plans, new Map(), new Date("2028-03-01T00:00:00Z"))).toBe(0);
+    expect(subscriptionMrr({ ...sub, currentPeriodEnd: null, items: [{ ...sub.items[0], intervalCount: 1, unitAmount: 6000 }] }, plans, new Map(), new Date("2030-01-01T00:00:00Z"))).toBe(60);
+    // una suscripción de Stripe nunca vence por esta regla (su fecha es la de renovación)
+    expect(subscriptionMrr({ ...sub, source: "stripe", items: [{ ...sub.items[0], intervalCount: 1, unitAmount: 6000 }] }, plans, new Map(), new Date("2030-01-01T00:00:00Z"))).toBe(60);
+  });
+  it("el recálculo después del vencimiento deja al cliente en 0 (baja registrada por el motor)", async () => {
+    const store = setup();
+    await saveManualSubscription(ctxOf(store), cobro(), "u", ids());
+    const after = await handle(adminReq("recompute"), { ...deps(store, fakeStripe(), { isAdmin: async () => true }), now: () => new Date("2027-12-01T15:00:00Z") });
+    expect(after.status).toBe(200);
+    expect(store.st.apply.at(-1)).toMatchObject({ key: KEY, after: 0 });
+  });
+  it("renovación: reemplaza al cobro anterior (queda dado de baja) y suma una sola vez", async () => {
+    const store = setup(), nid = ids();
+    const a = await saveManualSubscription(ctxOf(store), cobro(), "u", nid);
+    const b = await saveManualSubscription(ctxOf(store), cobro({ amount: 840, replaceSubscriptionId: a.subscriptionId }), "u2", nid);
+    expect(store.st.subs.get(a.subscriptionId)).toMatchObject({ status: "canceled", cancelReason: "reemplazado", currentPeriodEnd: null });
+    expect(store.st.subs.get(b.subscriptionId).status).toBe("active");
+    expect(store.st.apply.at(-1).after).toBe(70); // solo el nuevo: 840 ÷ 12
+    expect(store.st.audit.map((x) => x.subscriptionId)).toEqual([a.subscriptionId, b.subscriptionId, a.subscriptionId]);
+  });
+  it("editar el mismo cobro actualiza monto y meses sin crear otro", async () => {
+    const store = setup();
+    const a = await saveManualSubscription(ctxOf(store), cobro(), "u", ids());
+    await saveManualSubscription(ctxOf(store), cobro({ subscriptionId: a.subscriptionId, amount: 600, months: 6 }), "u", ids());
+    expect([...store.st.subs.values()].filter((s) => s.source === "manual")).toHaveLength(1);
+    expect(store.st.apply.at(-1)).toMatchObject({ after: 100, cause: "manual_cobro" });
+  });
+  it("quitar un cobro ya vencido sí se puede (no se rechaza por vencido)", async () => {
+    const store = setup();
+    const a = await saveManualSubscription(ctxOf(store, new Date("2026-01-10T15:00:00Z")), cobro({ paidAt: "2026-01-10" }), "u", ids());
+    await saveManualSubscription(ctxOf(store), cobro({ subscriptionId: a.subscriptionId, paidAt: "2026-01-10", status: "canceled" }), "u", ids());
+    expect(store.st.subs.get(a.subscriptionId)).toMatchObject({ status: "canceled", currentPeriodEnd: null });
+    expect(store.st.apply.at(-1).after).toBe(0);
+  });
+  it("valida: meses, monto, fecha (no futura), cobro ya vencido y reemplazo de otro cliente o de Stripe", async () => {
+    const store = setup();
+    const go = (o) => saveManualSubscription(ctxOf(store), cobro(o), "u", ids());
+    for (const m of [0, 37, 1.5, "abc", -3]) await expect(go({ months: m })).rejects.toThrow("meses_invalidos");
+    await expect(go({ amount: 0 })).rejects.toThrow("monto_invalido");
+    await expect(go({ paidAt: "2026-12-01" })).rejects.toThrow("fecha_invalida"); // futura
+    await expect(go({ paidAt: "basura" })).rejects.toThrow("fecha_invalida");
+    await expect(go({ paidAt: "2026-01-01", months: 6 })).rejects.toThrow("cobro_vencido");
+    const other = await saveManualSubscription(ctxOf(store), cobro({ customerKey: "stripe:cus_otro" }), "u", ids());
+    await expect(go({ replaceSubscriptionId: other.subscriptionId })).rejects.toThrow("reemplazo_invalido");
+    store.st.subs.set("stripe:sub_1", { id: "stripe:sub_1", customerKey: KEY, source: "stripe", status: "active", currency: "usd", items: [], discount: null });
+    await expect(go({ replaceSubscriptionId: "stripe:sub_1" })).rejects.toThrow("reemplazo_invalido");
+    await expect(go({ replaceSubscriptionId: "manual:no-existe" })).rejects.toThrow("reemplazo_invalido");
+  });
+  it("HTTP: errores de validación del cobro son 400 con su código", async () => {
+    const store = setup();
+    const r = await handle(adminReq("manual", cobro({ months: 99 })), deps(store, fakeStripe(), { isAdmin: async () => true }));
+    expect(r.status).toBe(400);
+    expect(await r.json()).toEqual({ error: "meses_invalidos" });
+    const ok = await handle(adminReq("manual", cobro()), { ...deps(store, fakeStripe(), { isAdmin: async () => true }), now: () => NOW });
+    expect(ok.status).toBe(200);
+  });
+  it("addMonthsISO y todayBA", () => {
+    expect(addMonthsISO("2026-11-27", 12)).toBe("2027-11-27");
+    expect(addMonthsISO("2026-08-31", 6)).toBe("2027-02-28");
+    expect(addMonthsISO("2027-08-31", 6)).toBe("2028-02-29");
+    expect(addMonthsISO("2026-12-15", 1)).toBe("2027-01-15");
+    expect(todayBA(new Date("2026-11-27T01:30:00Z"))).toBe("2026-11-26");
+    expect(todayBA(new Date("2026-11-27T15:00:00Z"))).toBe("2026-11-27");
   });
 });
 

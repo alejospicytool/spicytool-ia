@@ -7,6 +7,7 @@ import { monthlyRows, periodRows, healthAlerts, PERIODS, SEGMENTS } from "./reve
 import { fetchAll } from "./revenueApi.js";
 import { RvStyles } from "./revenueUi.jsx";
 import { UPCOMING_ENABLED } from "./proximoCobro.js";
+import { cobroAlerts } from "./cobroManual.js";
 import { Overview, MrrPage, ChurnPage, RetentionPage, FailedPage, CustomersPage, UpcomingPage, ProjectionPage, PlansPage } from "./RevenuePages.jsx";
 
 function useRevenueData(sb) {
@@ -59,8 +60,8 @@ export default function RevenueApp({ sb, view, setView, readOnly = false, canSeg
 
   const allRows = useMemo(() => (data ? monthlyRows({ history: data.history, customers: data.customers, events: data.events, now }) : []), [data, now]);
   const rows = useMemo(() => periodRows(allRows, period, now), [allRows, period, now]);
-  const alerts = useMemo(() => (data ? healthAlerts({ plans: data.plans, runs: data.runs, events: data.events, now }) : []), [data, now]);
-  const go = (tab) => setView(tab === "planes" ? "metrics_plans" : "metrics");
+  const alerts = useMemo(() => (data ? [...healthAlerts({ plans: data.plans, runs: data.runs, events: data.events, now }), ...cobroAlerts({ subs: data.subs, customers: data.customers, now })] : []), [data, now]);
+  const go = (tab) => setView(tab === "planes" ? "metrics_plans" : tab === "clientes" ? "metrics_customers" : "metrics");
 
   if (error) return <div style={{ padding: "3rem 1rem", textAlign: "center", color: "#EF3E3E", fontSize: 14 }}>No se pudieron cargar las métricas: {error}. Si es la primera vez, falta aplicar supabase_revenue.sql en Supabase.</div>;
   if (!data) return <div style={{ padding: "3rem 1rem", textAlign: "center", color: "#888", fontSize: 14 }}>Cargando métricas...</div>;

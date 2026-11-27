@@ -7,6 +7,8 @@ import { nextCharge, chargeText, upcomingCharges, groupByDay, dayLabel, fmtDiaCo
 import { periodKpis, customerMonthly, segmentSummary, matchSegment, projectionMonths, projectionDefaults, computeProjection, failuresSummary, liveCustomerKeys, planUsage, movementsFor } from "./revenueMetrics.js";
 import { Kpi, PageHeader, Notice, Alerts, Modal, MonthBars, money, signed, pct, monthLabel, monthShort, fmtDate, fmtDateTime, initials } from "./revenueUi.jsx";
 import { callFn } from "./revenueApi.js";
+import { previewCobro, liveCobros, isCobro, cobroText, coverageEnd, monthsOfCobro, addMonthsISO, fmtDia, COBRO_ATAJOS, COBRO_MESES_MAX } from "./cobroManual.js";
+import { baDateISO } from "../timeTracking.js";
 import { askConfirm } from "../confirmStore.js";
 
 const SEG_LABEL = { inmobiliaria: "🏠 Inmobiliaria", otro: "◎ Otro" };
@@ -306,7 +308,7 @@ export function UpcomingPage({ d, now, sb, canSpicy = false, onOpenFicha = null 
 // ── Clientes ─────────────────────────────────────────────────────────────────────────────────────────
 const EMPTY = { customerKey: "", customerName: "", email: "", planPriceId: "", newPlanName: "", amount: "", currency: "usd", interval: "month", status: "active", subscriptionId: "", segment: "" };
 export function CustomersPage({ d, rows, seg, now, sb, reload, ro, roSeg = ro, canSpicy = false, onOpenFicha = null }) {
-  const [q, setQ] = useState(""), [onlyActive, setOnlyActive] = useState(true), [form, setForm] = useState(null), [busy, setBusy] = useState(false), [notice, setNotice] = useState(null);
+  const [q, setQ] = useState(""), [onlyActive, setOnlyActive] = useState(true), [form, setForm] = useState(null), [busy, setBusy] = useState(false), [notice, setNotice] = useState(null), [cobro, setCobro] = useState(null);
   const customers = useMemo(() => d.customers.filter((c) => matchSegment(c, seg) && (!onlyActive || Number(c.mrr) > 0) && (!q || ((c.name || "") + " " + (c.email || "") + " " + c.key).toLowerCase().includes(q.toLowerCase()))).sort((a, b) => Number(b.mrr) - Number(a.mrr) || String(a.name).localeCompare(String(b.name))), [d.customers, seg, onlyActive, q]);
   const summary = useMemo(() => segmentSummary(d.customers), [d.customers]);
   const { accountOf, spicyData } = useAccountLinks(sb, canSpicy);
@@ -317,6 +319,42 @@ export function CustomersPage({ d, rows, seg, now, sb, reload, ro, roSeg = ro, c
   const subOf = useMemo(() => { const m = {}; for (const s of d.subs) { const cur = m[s.customer_key]; const live = ["active", "past_due", "trialing"].includes(s.status); if (!cur || (live && !cur.live)) m[s.customer_key] = { ...s, live }; } return m; }, [d.subs]);
   const counted = d.plans.filter((p) => p.counts_in_mrr);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const setC = (k) => (e) => setCobro({ ...cobro, [k]: e.target.value });
+  const cobros = useMemo(() => liveCobros(d.subs, now), [d.subs, now]);
+  const liveStripeOf = (key) => d.subs.some((x) => x.customer_key === key && x.source === "stripe" && ["active", "past_due"].includes(x.status));
+
+  // Cobro manual por período: el cliente pagó N meses por adelantado fuera de la suscripción (ej. un año con descuento). MRR = monto ÷ meses; vence solo.
+  function openCobro(c, sub = null) {
+    setNotice(null);
+    const live = cobros[c.key], last = subOf[c.key], lastItem = (last && last.items && last.items[0]) || {};
+    const planPriceId = sub ? sub.items[0].priceId : (counted.some((p) => p.price_id === lastItem.priceId) ? lastItem.priceId : (counted[0] ? counted[0].price_id : ""));
+    if (sub) { const m = monthsOfCobro(sub); setCobro({ customerKey: c.key, customerName: c.name || c.email || c.key, subscriptionId: sub.id, amount: String(sub.items[0].unitAmount / 100), currency: sub.currency, months: String(m), paidAt: addMonthsISO(coverageEnd(sub), -m), planPriceId, replaceId: "" }); return; }
+    setCobro({ customerKey: c.key, customerName: c.name || c.email || c.key, subscriptionId: "", amount: "", currency: "usd", months: live ? String(monthsOfCobro(live)) : "12", paidAt: baDateISO(now), planPriceId, replaceId: live ? live.id : "" });
+  }
+  async function saveCobro() {
+    const pv = previewCobro(cobro, now);
+    if (!pv.ok) { setNotice({ ok: false, text: pv.error }); return; }
+    if (!cobro.planPriceId) { setNotice({ ok: false, text: "Elegí el plan del cobro." }); return; }
+    setBusy(true); setNotice(null);
+    try {
+      const body = { customerKey: cobro.customerKey, amount: pv.amount, currency: cobro.currency, months: pv.months, paidAt: pv.paidAt, planPriceId: cobro.planPriceId };
+      if (cobro.subscriptionId) body.subscriptionId = cobro.subscriptionId; else if (cobro.replaceId) body.replaceSubscriptionId = cobro.replaceId;
+      await callFn(sb, "manual", body);
+      setNotice({ ok: true, text: `Cobro cargado: ${cobro.customerName} suma ${money(pv.mrr)}/mes hasta el ${fmtDia(pv.end)}.` });
+      setCobro(null); await reload();
+    } catch (err) { setNotice({ ok: false, text: err.message }); }
+    setBusy(false);
+  }
+  async function quitarCobro(c, sub) {
+    if (!(await askConfirm({ title: "Quitar el cobro manual", message: `Se quita el cobro manual de ${c.name || c.key}. Su MRR baja y queda registrado como baja.`, confirmLabel: "Quitar el cobro" }))) return;
+    setBusy(true); setNotice(null);
+    try {
+      const it = sub.items[0];
+      await callFn(sb, "manual", { customerKey: c.key, subscriptionId: sub.id, planPriceId: it.priceId, amount: it.unitAmount / 100, currency: sub.currency, months: monthsOfCobro(sub), paidAt: addMonthsISO(coverageEnd(sub), -monthsOfCobro(sub)), status: "canceled" });
+      setNotice({ ok: true, text: "Cobro manual quitado." }); await reload();
+    } catch (err) { setNotice({ ok: false, text: err.message }); }
+    setBusy(false);
+  }
 
   async function setSegment(c, segment) {
     setNotice(null);
@@ -327,6 +365,7 @@ export function CustomersPage({ d, rows, seg, now, sb, reload, ro, roSeg = ro, c
   }
   function edit(c) {
     const s = subOf[c.key], it = (s && s.items[0]) || {};
+    if (isCobro(s)) { openCobro(c, s); return; } // un cobro por período se edita con su propio formulario (si no, se guardaría como mensual)
     setNotice(null);
     setForm({ customerKey: c.key, customerName: c.name || "", email: c.email || "", planPriceId: it.priceId || "", newPlanName: "", amount: s ? String((it.unitAmount || 0) / 100) : "", currency: s ? s.currency : "usd", interval: it.interval || "month", status: s ? s.status : "active", subscriptionId: s ? s.id : "", segment: c.segment || "" });
   }
@@ -345,6 +384,7 @@ export function CustomersPage({ d, rows, seg, now, sb, reload, ro, roSeg = ro, c
   }
   function toggleStatus(c, status) {
     const s = subOf[c.key]; if (!s) return;
+    if (isCobro(s)) { if (status === "canceled") quitarCobro(c, s); else openCobro(c); return; }
     if (status === "canceled" && !window.confirm("¿Dar de baja a " + (c.name || c.key) + "? Queda registrado como churn.")) return;
     const it = s.items[0] || {};
     save({ customerKey: c.key, customerName: c.name || "", email: c.email || "", planPriceId: it.priceId, amount: (it.unitAmount || 0) / 100, currency: s.currency, interval: it.interval || "month", status, subscriptionId: s.id, segment: undefined });
@@ -371,7 +411,8 @@ export function CustomersPage({ d, rows, seg, now, sb, reload, ro, roSeg = ro, c
         {accountSummary && customers.length > 0 && <div style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 8px" }}>Con cuenta de Spicytool: <b style={{ color: "var(--text)" }}>{accountSummary.auto + accountSummary.manual} de {customers.length}</b> ({accountSummary.auto} {accountSummary.auto === 1 ? "unido solo" : "unidos solos"} por Stripe{accountSummary.manual ? `, ${accountSummary.manual} ${accountSummary.manual === 1 ? "vinculado" : "vinculados"} a mano` : ""}). {accountSummary.sin ? `${accountSummary.sin} sin cuenta encontrada (clientes manuales o que pagan con otro Stripe).` : ""}</div>}
         {customers.length === 0 && <div className="empty">Sin clientes para mostrar.</div>}
         {customers.map((c) => {
-          const s = subOf[c.key], it = (s && s.items[0]) || {}, active = Number(c.mrr) > 0, m = monthly[c.key] || {}, acc = accountOf(c.key), nc = chargeText(nextCharge(s, now));
+          const s = subOf[c.key], it = (s && s.items[0]) || {}, active = Number(c.mrr) > 0, m = monthly[c.key] || {}, acc = accountOf(c.key), liveCobro = cobros[c.key] || null;
+          const nc = isCobro(liveCobro || s) ? cobroText(liveCobro || s, now) : chargeText(nextCharge(s, now));
           const chips = liveMonths.filter((k) => m[k]);
           return (
             <div key={c.key} className="customer-row">
@@ -387,9 +428,15 @@ export function CustomersPage({ d, rows, seg, now, sb, reload, ro, roSeg = ro, c
                 <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                   {onOpenFicha && acc && <button className="btn-sm" title={acc.via === "auto" ? "Cuenta unida por el cliente de Stripe" : "Cuenta vinculada a mano"} onClick={() => onOpenFicha(acc.companyId)}>Ver ficha 360</button>}
                   {c.source === "manual" ? (<>
-                    <button className="btn-sm" disabled={ro} onClick={() => edit(c)}>Editar</button>
+                    <button className="btn-sm" disabled={ro} onClick={() => edit(c)}>{isCobro(s) ? "Editar cobro" : "Editar"}</button>
+                    {isCobro(s) && <button className="btn-sm" disabled={busy || ro} title="Cargar el cobro del próximo período (reemplaza al anterior)" onClick={() => openCobro(c)}>Renovar cobro</button>}
                     {active ? <button className="btn-sm danger" disabled={busy || ro} onClick={() => toggleStatus(c, "canceled")}>Dar de baja</button> : <button className="btn-sm" disabled={busy || ro} onClick={() => toggleStatus(c, "active")}>Reactivar</button>}
-                  </>) : <span style={{ fontSize: 11, color: "#aaa" }}>se gestiona en Stripe</span>}
+                  </>) : (<>
+                    <button className="btn-sm" disabled={busy || ro} title="El cliente pagó varios meses por adelantado fuera de la suscripción (ej. un año con descuento): cargalo acá para que su MRR no desaparezca" onClick={() => openCobro(c)}>{liveCobro ? "Renovar cobro" : "Agregar cobro"}</button>
+                    {liveCobro && <button className="btn-sm" disabled={ro} onClick={() => openCobro(c, liveCobro)}>Editar cobro</button>}
+                    {liveCobro && <button className="btn-sm danger" disabled={busy || ro} onClick={() => quitarCobro(c, liveCobro)}>Quitar cobro</button>}
+                    {!liveCobro && <span style={{ fontSize: 11, color: "#aaa" }}>suscripción en Stripe</span>}
+                  </>)}
                 </div>
               </div>
               {chips.length > 1 && <div className="chips">{chips.map((k) => <span key={k} className="chip">{monthShort(k)}: <b>{money(m[k])}</b></span>)}</div>}
@@ -403,6 +450,29 @@ export function CustomersPage({ d, rows, seg, now, sb, reload, ro, roSeg = ro, c
           <div key={a.id} className="movement-row" style={{ fontSize: 12 }}><span style={{ width: 110, color: "#888" }}>{fmtDateTime(a.at)}</span><span style={{ flex: 1 }}>{(c && (c.name || c.email)) || (a.after && a.after.customerKey)}</span><span className="mono">{b ? `${(b.unitAmount / 100).toLocaleString("es-AR")} → ` : "Alta: "}{n ? (n.unitAmount / 100).toLocaleString("es-AR") : "—"} · {a.after && a.after.status}</span></div>); })}
       </div>
 
+      {cobro && (() => {
+        const pv = previewCobro(cobro, now), edit = !!cobro.subscriptionId, live = cobros[cobro.customerKey];
+        return (
+          <Modal title={(edit ? "Editar cobro: " : "Agregar cobro: ") + cobro.customerName} onClose={() => setCobro(null)}
+            footer={<><button className="btn-secondary" onClick={() => setCobro(null)}>Cancelar</button><button className="btn-primary" disabled={busy || !pv.ok} onClick={saveCobro}>{busy ? "Guardando…" : "Guardar cobro"}</button></>}>
+            <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 12 }}>Para cuando el cliente <b>pagó varios meses por adelantado</b> fuera de su suscripción (por ejemplo un año o un semestre, con descuento). Cargá lo que pagó <b>en total</b> y cuántos meses cubre: el MRR es el monto dividido esos meses, y <b>vence solo</b> cuando termina el período.</div>
+            <div className="grid2">
+              <div className="field"><label className="field-label" htmlFor="c-amount">Monto pagado (total)</label><input id="c-amount" className="inp" inputMode="decimal" autoFocus value={cobro.amount} onChange={setC("amount")} placeholder="Ej: 720" /></div>
+              <div className="field"><label className="field-label" htmlFor="c-cur">Moneda</label><input id="c-cur" className="inp" maxLength={3} value={cobro.currency} onChange={setC("currency")} /></div>
+              <div className="field"><label className="field-label" htmlFor="c-paid">Fecha de pago</label><input id="c-paid" className="inp" type="date" max={baDateISO(now)} value={cobro.paidAt} onChange={setC("paidAt")} /></div>
+              <div className="field"><label className="field-label" htmlFor="c-months">Meses que cubre (1 a {COBRO_MESES_MAX})</label><input id="c-months" className="inp" inputMode="numeric" value={cobro.months} onChange={setC("months")} />
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>{COBRO_ATAJOS.map(([m, l]) => <button key={m} type="button" className={"pill" + (String(cobro.months) === String(m) ? " on" : "")} onClick={() => setCobro({ ...cobro, months: String(m) })}>{l}</button>)}</div></div>
+              <div className="field" style={{ gridColumn: "1 / -1" }}><label className="field-label" htmlFor="c-plan">Plan</label>
+                <select id="c-plan" className="inp" value={cobro.planPriceId} onChange={setC("planPriceId")}><option value="">Elegí un plan…</option>{counted.map((p) => <option key={p.price_id} value={p.price_id}>{p.name || p.price_id}</option>)}</select></div>
+            </div>
+            <div role="status" style={{ fontSize: 13, borderRadius: 10, padding: "9px 12px", margin: "4px 0 8px", background: pv.ok ? "var(--green-bg, #EDFAF3)" : "#F4F4F5", color: pv.ok ? "var(--green, #166534)" : "var(--muted)" }}>
+              {pv.ok ? <>Va a sumar <b>{money(pv.mrr)}/mes</b> de MRR, desde hoy hasta el <b>{fmtDia(pv.end)}</b> (después baja solo, salvo que cargues la renovación).</> : pv.error}
+            </div>
+            {!edit && live && <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 8 }}><input type="checkbox" checked={!!cobro.replaceId} onChange={(e) => setCobro({ ...cobro, replaceId: e.target.checked ? live.id : "" })} />Reemplaza al cobro anterior (que cubría hasta el {fmtDia(coverageEnd(live))}), para no sumar dos veces</label>}
+            {liveStripeOf(cobro.customerKey) && <div className="notice" style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #FCE4A0" }}>Este cliente <b>todavía tiene una suscripción activa en Stripe</b>: si cargás también este cobro, su MRR se suma dos veces. Cargalo solo si esa suscripción ya no cobra.</div>}
+          </Modal>
+        );
+      })()}
       {form && (
         <Modal title={form.subscriptionId ? "Editar: " + (form.customerName || "cliente") : "Nuevo cliente por fuera"} onClose={() => setForm(null)}
           footer={<><button className="btn-secondary" onClick={() => setForm(null)}>Cancelar</button><button className="btn-primary" disabled={busy} onClick={() => save()}>{busy ? "Guardando…" : "Guardar"}</button></>}>

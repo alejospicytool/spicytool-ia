@@ -5,6 +5,7 @@ const ERRORS = {
   baseline_ya_hecho: "La carga inicial ya se hizo (es de una sola vez).",
   sin_carga_inicial: "Primero hay que hacer la carga inicial.",
   monto_invalido: "El monto no es válido.", intervalo_invalido: "El intervalo no es válido.", estado_invalido: "El estado no es válido.",
+  meses_invalidos: "Los meses tienen que ser un número entero entre 1 y 36.", fecha_invalida: "La fecha de pago no es válida (no puede ser futura).", cobro_vencido: "Ese cobro ya venció: no suma al MRR de hoy.", reemplazo_invalido: "No se puede reemplazar ese cobro (ya no corresponde a este cliente).",
   cliente_requerido: "Falta el nombre del cliente.", cliente_invalido: "Cliente inválido.", plan_inexistente: "Elegí un plan válido.", suscripcion_invalida: "Esa suscripción no se puede editar a mano.",
 };
 

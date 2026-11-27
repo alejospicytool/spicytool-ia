@@ -9,7 +9,8 @@
 //   POST …/revenue-sync/pull       Trae las suscripciones de Stripe a la base SIN calcular MRR (primer paso de la puesta en marcha).
 //   POST …/revenue-sync/recompute  Recalcula el MRR de todos con lo que ya hay en la base (sin llamar a Stripe).
 //                                  Se usa después de clasificar planes o cargar tipos de cambio. Solo admin o cron.
-//   POST …/revenue-sync/manual     Alta / edición de suscripciones de clientes que pagan por fuera de Stripe. Solo admin.
+//   POST …/revenue-sync/manual     Alta / edición de suscripciones de clientes que pagan por fuera de Stripe, y cobros por período
+//                                  (ej. un año pagado aparte: months + paidAt, para cualquier cliente, también los de Stripe; vencen solos). Solo admin.
 //
 // DEPLOY (Supabase Dashboard → Edge Functions → Create function → "revenue-sync" → pegar este archivo):
 //   1. En los Settings de la función, DESACTIVAR "Enforce JWT Verification": Stripe y pg_cron no mandan un JWT de
@@ -45,9 +46,11 @@ export function monthsOf(interval: string, count = 1): number {
 }
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-export function subscriptionMrr(sub: Pick<SubDoc, "status" | "currency" | "items" | "discount">,
+export function subscriptionMrr(sub: Pick<SubDoc, "status" | "currency" | "items" | "discount"> & Partial<Pick<SubDoc, "source" | "currentPeriodEnd">>,
   plans: Map<string, PlanInfo>, fx: Map<string, number>, now = new Date()): number {
   if (!COUNTED_STATUSES.includes(sub.status)) return 0;
+  // Cobro manual por período (ej. un año pagado por fuera de la suscripción): suma hasta que vence la cobertura. Los manuales sin fecha (mensuales) no vencen.
+  if (sub.source === "manual" && sub.currentPeriodEnd && new Date(sub.currentPeriodEnd) <= now) return 0;
   let mrr = 0;
   for (const it of sub.items) {
     const plan = plans.get(it.priceId);
@@ -360,9 +363,25 @@ export type ManualInput = {
   amount: number; currency?: string; interval?: string; status?: string;
   discount?: { percentOff?: number; amountOff?: number; endsAt?: string } | null;
   subscriptionId?: string;
+  // Cobro por período: lo que el cliente pagó (con descuentos) y cuántos meses cubre. MRR = amount / months. Vence solo (ver subscriptionMrr).
+  months?: number; paidAt?: string; replaceSubscriptionId?: string;
 };
+
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+// "2026-11-27" + 12 meses → "2027-11-27". Si el día no existe en el mes de destino queda el último (31/08 + 6 meses = 28/02).
+export function addMonthsISO(iso: string, n: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const t = new Date(Date.UTC(y, m - 1 + n, 1));
+  const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate();
+  t.setUTCDate(Math.min(d, last));
+  return t.toISOString().slice(0, 10);
+}
+// "Hoy" en Argentina: el equipo carga los cobros con esa fecha aunque el servidor esté en otra zona.
+export const todayBA = (now: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Argentina/Buenos_Aires", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+
 export async function saveManualSubscription(ctx: Ctx, data: ManualInput, userId: string | null, newId: () => string = () => crypto.randomUUID()) {
   if (!Number.isFinite(data.amount) || data.amount < 0) throw new Error("monto_invalido");
+  const byPeriod = data.months !== undefined && data.months !== null;
   const interval = data.interval || "month";
   if (!["month", "year"].includes(interval)) throw new Error("intervalo_invalido");
   const status = data.status || "active";
@@ -370,11 +389,31 @@ export async function saveManualSubscription(ctx: Ctx, data: ManualInput, userId
   if (!data.customerKey && !String(data.customerName || "").trim()) throw new Error("cliente_requerido");
   if (data.customerKey && !/^(manual|stripe):/.test(data.customerKey)) throw new Error("cliente_invalido");
 
+  // Cobro por período: meses cubiertos y fecha de pago (hoy por defecto; no puede ser futura ni estar ya vencida)
+  let months = 1, periodEnd: string | null = null;
+  if (byPeriod) {
+    months = Number(data.months);
+    if (!Number.isInteger(months) || months < 1 || months > 36) throw new Error("meses_invalidos");
+    if (!(data.amount > 0)) throw new Error("monto_invalido");
+    const today = todayBA(ctx.now());
+    const paidAt = data.paidAt || today;
+    if (!DAY_RE.test(paidAt) || Number.isNaN(Date.parse(paidAt + "T00:00:00Z")) || paidAt > today) throw new Error("fecha_invalida");
+    const end = addMonthsISO(paidAt, months);
+    if (end <= today && status !== "canceled") throw new Error("cobro_vencido"); // dar de baja un cobro ya vencido sí se puede
+    periodEnd = `${end}T03:00:00.000Z`; // medianoche de Buenos Aires: el día de vencimiento ya no cuenta
+  }
+
   let priceId = data.planPriceId;
   if (!priceId && data.newPlan?.name) priceId = await ctx.store.createManualPlan(data.newPlan.name, data.newPlan.category || "saas", data.newPlan.countsInMrr ?? true);
   if (!priceId || !(await ctx.store.planExists(priceId))) throw new Error("plan_inexistente");
 
   const customerKey = data.customerKey || `manual:${newId()}`;
+  // Un cobro nuevo puede REEMPLAZAR al cobro manual anterior del mismo cliente (renovación): se da de baja ese para no sumar dos veces
+  let replaced: SubDoc | null = null;
+  if (byPeriod && data.replaceSubscriptionId) {
+    replaced = await ctx.store.getSubscription(data.replaceSubscriptionId);
+    if (!replaced || replaced.source !== "manual" || !replaced.id.startsWith("manual:") || replaced.customerKey !== customerKey) throw new Error("reemplazo_invalido");
+  }
   await ctx.store.upsertCustomer({ key: customerKey, source: customerKey.startsWith("stripe:") ? "stripe" : "manual",
     name: data.customerName?.trim() || undefined, email: data.email || undefined, companyId: data.companyId || undefined });
 
@@ -383,13 +422,20 @@ export async function saveManualSubscription(ctx: Ctx, data: ManualInput, userId
   const prev = await ctx.store.getSubscription(id);
   const doc: SubDoc = {
     id, customerKey, source: "manual", status, currency: (data.currency || "usd").toLowerCase(),
-    items: [{ priceId, unitAmount: Math.round(data.amount * 100), quantity: 1, interval, intervalCount: 1 }],
+    items: [{ priceId, unitAmount: Math.round(data.amount * 100), quantity: 1, interval: byPeriod ? "month" : interval, intervalCount: byPeriod ? months : 1 }],
     discount: data.discount || null, canceledAt: status === "canceled" ? ctx.now().toISOString() : null,
+    currentPeriodEnd: byPeriod && status === "active" ? periodEnd : null,
   };
   await ctx.store.upsertSubscription(doc);
   await ctx.store.audit({ subscriptionId: id, before: prev, after: doc, userId });
+  if (replaced && replaced.status !== "canceled" && replaced.id !== id) {
+    const closed: SubDoc = { ...replaced, status: "canceled", canceledAt: ctx.now().toISOString(), cancelReason: "reemplazado", currentPeriodEnd: null };
+    await ctx.store.upsertSubscription(closed);
+    await ctx.store.audit({ subscriptionId: replaced.id, before: replaced, after: closed, userId });
+  }
   // Antes de la carga inicial se guarda pero no se registra movimiento (la carga inicial lo va a incluir como base)
-  const result = (await ctx.store.baselineDone()) ? await recomputeCustomer(ctx, customerKey, { cause: prev ? "manual_edicion" : "manual_alta" }) : null;
+  const cause = byPeriod ? "manual_cobro" : prev ? "manual_edicion" : "manual_alta";
+  const result = (await ctx.store.baselineDone()) ? await recomputeCustomer(ctx, customerKey, { cause }) : null;
   return { customerKey, subscriptionId: id, result };
 }
 
@@ -483,7 +529,7 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
     }
   } catch (e) {
     const msg = String((e as Error).message || e);
-    const known = /^(monto_invalido|intervalo_invalido|estado_invalido|cliente_requerido|cliente_invalido|plan_inexistente|suscripcion_invalida|planes_sin_clasificar|baseline_ya_hecho)$/.test(msg);
+    const known = /^(monto_invalido|intervalo_invalido|estado_invalido|cliente_requerido|cliente_invalido|plan_inexistente|suscripcion_invalida|meses_invalidos|fecha_invalida|cobro_vencido|reemplazo_invalido|planes_sin_clasificar|baseline_ya_hecho)$/.test(msg);
     if (!known) console.error("revenue-sync", route, e);
     return reply({ error: known ? msg : "error", detail: known ? undefined : msg }, /^(planes_sin_clasificar|baseline_ya_hecho)$/.test(msg) ? 409 : known ? 400 : 500);
   }
