@@ -4,13 +4,15 @@ import { SUPABASE_URL } from "./auth.js";
 
 export function makeCalendarStore({ serviceKey, url = SUPABASE_URL, fetchImpl = globalThis.fetch, timeoutMs = 15_000 } = {}) {
   const configured = !!serviceKey;
+  const isJwt = /^eyJ/.test(String(serviceKey || ""));
   const enc = encodeURIComponent;
 
   async function rest(method, path, { body, prefer } = {}) {
     if (!configured) throw new Error("Falta SUPABASE_SERVICE_ROLE_KEY en el servidor.");
     const res = await fetchImpl(`${url}/rest/v1/${path}`, {
       method, signal: AbortSignal.timeout(timeoutMs),
-      headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, ...(body !== undefined ? { "Content-Type": "application/json" } : {}), ...(prefer ? { Prefer: prefer } : {}) },
+      // Las claves nuevas de Supabase ("sb_secret_…") no son JWT: van solo en apikey. Las viejas (service_role, "eyJ…") van también como Bearer.
+      headers: { apikey: serviceKey, ...(isJwt ? { Authorization: `Bearer ${serviceKey}` } : {}), ...(body !== undefined ? { "Content-Type": "application/json" } : {}), ...(prefer ? { Prefer: prefer } : {}) },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) throw new Error(`Supabase ${method} ${path.split("?")[0]} → ${res.status}`);
