@@ -1,7 +1,7 @@
 // Pantallas del "próximo paso" de Onboarding: el chip (Hoy / Vencido…), la sección del detalle del cliente (agregar, editar, marcar hecho)
 // y la tarjeta de Inicio con lo que hay que hacer hoy. La lógica (fechas, validación, quién es "mío") está en onboardingLogic.js.
 import { useState } from "react";
-import { atajosFecha, validarPaso, tienePaso, quienDelPaso, chipPaso, sinPaso, PASO_MAX, PASO_VACIO, PASO_TONOS } from "./onboardingLogic.js";
+import { atajosFecha, validarPaso, tienePaso, quienDelPaso, chipPaso, sinPaso, enPausa, textoPausa, PASO_MAX, PASO_VACIO, PASO_TONOS, PAUSA_MAX } from "./onboardingLogic.js";
 
 // Chip de color con la etiqueta ("Vencido hace 2 días", "Hoy", "Mañana", "En 3 días", "El 12/12").
 export function PasoChip({ r, hoy = new Date(), style = {} }) {
@@ -23,6 +23,16 @@ export function PasoLinea({ r, hoy = new Date(), conTexto = true }) {
   }
   if (conTexto && sinPaso(r)) return <div style={{ fontSize: 11, color: "#C4C4CA", marginBottom: 6 }}>Sin próximo paso</div>;
   return null;
+}
+
+// Motivo de la pausa en la tarjeta del Kanban / la tabla (una línea, el texto completo en el tooltip). Nada si no está en pausa.
+export function PausaLinea({ r, hoy = new Date() }) {
+  if (!enPausa(r)) return null;
+  return (
+    <div title={`${textoPausa(r, hoy)}: ${r.pausa_motivo}`} style={{ fontSize: 11, color: "#533AB7", background: "#F1EEFB", borderRadius: 6, padding: "3px 7px", marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      ⏸ {r.pausa_motivo}
+    </div>
+  );
 }
 
 const lbl = { fontSize: 12, color: "#666", fontWeight: 500 };
@@ -145,6 +155,100 @@ export function PasosHoyCard({ mios, delEquipo = 0, hoy = new Date(), onOpen, on
       ))}
       {mios.length > max && <div style={{ fontSize: 12, color: "#999", marginTop: 6 }}>Y {mios.length - max} más en Onboarding.</div>}
       {delEquipo > 0 && <div style={{ fontSize: 12, color: "#999", marginTop: 8 }}>El resto del equipo tiene {delEquipo} paso{delEquipo === 1 ? "" : "s"} más para hoy o vencido{delEquipo === 1 ? "" : "s"}.</div>}
+    </div>
+  );
+}
+
+// Sección del detalle: poner en pausa (esperando al cliente), editar el motivo o retomar. Usarla con key={cliente.id}.
+// onPausar({ motivo, revisar, quien }) y onRetomar() devuelven una promesa con { error } si algo falló.
+export function PausaEditor({ record, team, canEdit, onPausar, onRetomar }) {
+  const [form, setForm] = useState(null);   // null = no se está editando
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const hoy = new Date();
+  const atajos = atajosFecha(hoy);
+  const pausado = enPausa(record);
+
+  const abrir = () => { setError(""); setForm({ motivo: pausado ? record.pausa_motivo : "", revisar: pausado ? "" : atajos[4].iso, quien: record.proximo_paso_quien || record.responsable || "" }); };
+  async function guardar(e) {
+    e.preventDefault();
+    setBusy(true); setError("");
+    const r = await onPausar(form);
+    setBusy(false);
+    if (r && r.error) setError(r.error); else setForm(null);
+  }
+  async function retomar() { setBusy(true); setError(""); const r = await onRetomar(); setBusy(false); if (r && r.error) setError(r.error); }
+
+  const box = { borderTop: "1px solid #EEE", paddingTop: 12 };
+  const titulo = <div style={{ fontSize: 13, fontWeight: 700, color: "#111", marginBottom: 6 }}>Pausa (esperando al cliente)</div>;
+
+  if (form) {
+    const reemplaza = !!form.revisar && tienePaso(record) && !(record.proximo_paso || "").startsWith("Revisar pausa:");
+    return (
+      <div style={box}>
+        {titulo}
+        <form onSubmit={guardar} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <label style={lbl}>Por qué está en pausa
+            <input autoFocus className="spicy-input" maxLength={PAUSA_MAX} value={form.motivo} onChange={(e) => setForm({ ...form, motivo: e.target.value })} placeholder="Ej: Cambió el nombre de la inmobiliaria: redes, dominio y mail nuevos" style={{ width: "100%", marginTop: 4 }} />
+          </label>
+          {!pausado && (
+            <div style={lbl}>¿Cuándo lo revisamos? (opcional: ese día aparece en Inicio como recordatorio)
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "4px 0" }}>
+                {[...atajos.slice(2), { label: "Sin fecha", iso: "" }].map((a) => (
+                  <button key={a.label} type="button" className="spicy-btn-secondary" onClick={() => setForm({ ...form, revisar: a.iso })}
+                    style={{ padding: "4px 10px", fontSize: 12, ...(form.revisar === a.iso ? { borderColor: "#533AB7", color: "#533AB7", background: "#F1EEFB" } : {}) }}>{a.label}</button>
+                ))}
+              </div>
+              <input type="date" aria-label="Fecha para revisar la pausa" className="spicy-input" value={form.revisar} onChange={(e) => setForm({ ...form, revisar: e.target.value })} />
+            </div>
+          )}
+          {!pausado && form.revisar && (
+            <label style={lbl}>Quién lo revisa
+              <select className="spicy-select" value={form.quien} onChange={(e) => setForm({ ...form, quien: e.target.value })} style={{ width: "100%", marginTop: 4 }}>
+                <option value="">{record.responsable ? `Responsable del cliente (${record.responsable})` : "Sin asignar"}</option>
+                {team.map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </label>
+          )}
+          {reemplaza && <div style={{ fontSize: 12, color: "#92400E", background: "#FEF3C7", borderRadius: 6, padding: "6px 9px" }}>El recordatorio de revisión reemplaza el próximo paso actual («{record.proximo_paso}»). Si no querés eso, elegí "Sin fecha".</div>}
+          {error && <div role="alert" style={{ fontSize: 12, color: "#EF3E3E" }}>{error}</div>}
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button type="button" className="spicy-btn-secondary" disabled={busy} onClick={() => { setForm(null); setError(""); }}>Cancelar</button>
+            <button type="submit" className="spicy-btn-primary" disabled={busy}>{busy ? "Guardando…" : pausado ? "Guardar motivo" : "Poner en pausa"}</button>
+          </div>
+        </form>
+      </div>
+    );
+  }
+
+  if (!pausado) {
+    return (
+      <div style={box}>
+        {titulo}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12, color: "#AAA" }}>Si la demora depende del cliente, no figura como atrasado.</span>
+          {canEdit && <button type="button" className="spicy-btn-secondary" onClick={abrir}>⏸ Poner en pausa</button>}
+        </div>
+        {error && <div role="alert" style={{ fontSize: 12, color: "#EF3E3E", marginTop: 6 }}>{error}</div>}
+      </div>
+    );
+  }
+
+  return (
+    <div style={box}>
+      {titulo}
+      <div style={{ background: "#F1EEFB", border: "1px solid #DDD5F6", borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ fontSize: 11, color: "#533AB7", fontWeight: 700 }}>{textoPausa(record, hoy)} · desde el {record.pausa_desde.split("-").reverse().join("/")}</div>
+        <div style={{ fontSize: 13, color: "#111", overflowWrap: "anywhere" }}>{record.pausa_motivo}</div>
+        <div style={{ fontSize: 11, color: "#888" }}>Mientras está en pausa no figura como atrasado y estos días no cuentan.</div>
+        {canEdit && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" className="spicy-btn-primary" disabled={busy} onClick={retomar} title="Lo saca de pausa y deja una nota con los días que estuvo así">▶ Retomar</button>
+            <button type="button" className="spicy-btn-secondary" disabled={busy} onClick={abrir}>Editar motivo</button>
+          </div>
+        )}
+      </div>
+      {error && <div role="alert" style={{ fontSize: 12, color: "#EF3E3E", marginTop: 6 }}>{error}</div>}
     </div>
   );
 }

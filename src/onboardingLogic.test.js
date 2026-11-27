@@ -190,3 +190,97 @@ describe("próximo paso", () => {
     expect(notaPasoHecho(r("2026-11-24"))).toBe("✓ Paso hecho: Pedir acceso a Tokko (era para el 24/11)");
   });
 });
+
+// ── En pausa ──
+import { enPausa, diasEnPausa, diasRegistroActivos, armarPausa, armarRetomar, textoPausa } from "./onboardingLogic.js";
+
+describe("en pausa", () => {
+  const H = new Date("2026-11-27T10:00:00");
+  const dias = (n) => { const d = new Date(H); d.setDate(d.getDate() - n); return d.toLocaleDateString("en-CA"); };
+  const cli = (over = {}) => ({ id: "o1", client_name: "Inmo Sol", etapa_actual: "Crear Pipeline", bloqueado: false, integraciones_pendientes: [], responsable: "Nico",
+    fecha_registro: dias(30), fecha_entrada_etapa_actual: dias(10), pausa_desde: null, pausa_motivo: null, pausa_dias_acum: 0, ...over });
+
+  it("un cliente muy atrasado figura 'atrasado general' y, en pausa, 'en pausa' (aunque también esté bloqueado)", () => {
+    expect(calcularEstado(cli(), H)).toBe("atrasado general");
+    expect(calcularEstado(cli({ pausa_desde: dias(5), pausa_motivo: "Cambio de nombre" }), H)).toBe("en pausa");
+    expect(calcularEstado(cli({ bloqueado: true, pausa_desde: dias(5), pausa_motivo: "Cambio de nombre" }), H)).toBe("en pausa");
+    expect(calcularEstado(cli({ bloqueado: true }), H)).toBe("bloqueado");
+  });
+
+  it("las etapas finales mandan sobre la pausa", () => {
+    expect(calcularEstado(cli({ etapa_actual: "Spicy Finalizado", pausa_desde: dias(2), pausa_motivo: "xxx" }), H)).toBe("esperando aha");
+    expect(calcularEstado(cli({ etapa_actual: "Aha confirmado", pausa_desde: dias(2), pausa_motivo: "xxx" }), H)).toBe("ok");
+  });
+
+  it("los días de pausas anteriores no cuentan para el atraso general de 20 días", () => {
+    expect(calcularEstado(cli({ fecha_registro: dias(25), fecha_entrada_etapa_actual: dias(1) }), H)).toBe("atrasado general");
+    expect(calcularEstado(cli({ fecha_registro: dias(25), fecha_entrada_etapa_actual: dias(1), pausa_dias_acum: 10 }), H)).toBe("verde"); // 15 días activos
+    expect(diasRegistroActivos(cli({ fecha_registro: dias(25), pausa_dias_acum: 10 }), H)).toBe(15);
+    expect(diasRegistroActivos(cli({ fecha_registro: dias(5), pausa_dias_acum: 99 }), H)).toBe(0); // nunca negativo
+    expect(diasRegistroActivos({ fecha_registro: null }, H)).toBeNull();
+  });
+
+  it("mientras está en pausa, los días registro quedan quietos", () => {
+    const r = cli({ fecha_registro: dias(30), pausa_desde: dias(5), pausa_motivo: "Esperando portfolio" });
+    expect(diasEnPausa(r, H)).toBe(5);
+    expect(diasRegistroActivos(r, H)).toBe(25);
+    expect(enPausa(r)).toBe(true);
+    expect(enPausa(cli())).toBe(false);
+    expect(diasEnPausa(cli(), H)).toBe(0);
+  });
+
+  it("armarPausa: valida el motivo y arma el patch y la nota", () => {
+    expect(armarPausa(cli(), { motivo: "ab" }, H).error).toMatch(/por qué/);
+    expect(armarPausa(cli(), { motivo: "x".repeat(201) }, H).error).toMatch(/largo/);
+    const r = armarPausa(cli(), { motivo: "  Cambió el nombre de   la inmobiliaria " }, H);
+    expect(r.patch).toEqual({ pausa_desde: "2026-11-27", pausa_motivo: "Cambió el nombre de la inmobiliaria" });
+    expect(r.nota).toBe("⏸ En pausa (esperando al cliente): Cambió el nombre de la inmobiliaria");
+  });
+
+  it("armarPausa con fecha de revisión crea el recordatorio (reemplaza el paso anterior); sin fecha no lo toca", () => {
+    const con = armarPausa(cli({ proximo_paso: "Algo viejo", proximo_paso_fecha: dias(0) }), { motivo: "Sin portfolio", revisar: "2026-12-04", quien: "Ticiana" }, H);
+    expect(con.patch).toMatchObject({ proximo_paso: "Revisar pausa: Sin portfolio", proximo_paso_fecha: "2026-12-04", proximo_paso_quien: "Ticiana" });
+    expect(con.nota).toMatch(/se revisa el 04\/12/);
+    const sin = armarPausa(cli({ proximo_paso: "Algo viejo", proximo_paso_fecha: dias(0) }), { motivo: "Sin portfolio" }, H);
+    expect(sin.patch).not.toHaveProperty("proximo_paso");
+    expect(armarPausa(cli(), { motivo: "Sin portfolio", revisar: "2026-11-20" }, H).error).toMatch(/anterior a hoy/);
+    expect(armarPausa(cli(), { motivo: "Sin portfolio", revisar: "2026-13-40" }, H).error).toMatch(/no es válida/);
+    expect(armarPausa(cli(), { motivo: "y".repeat(190), revisar: "2026-12-04" }, H).patch.proximo_paso.length).toBeLessThanOrEqual(200);
+  });
+
+  it("editar el motivo de una pausa en curso no reinicia la fecha de inicio", () => {
+    const r = armarPausa(cli({ pausa_desde: dias(8), pausa_motivo: "Viejo motivo" }), { motivo: "Nuevo motivo" }, H);
+    expect(r.patch.pausa_desde).toBe(dias(8));
+    expect(r.nota).toBe("⏸ Motivo de la pausa actualizado: Nuevo motivo");
+  });
+
+  it("armarRetomar: suma los días y corre la entrada a la etapa para que la pausa no cuente como demora", () => {
+    const r = cli({ fecha_entrada_etapa_actual: dias(20), pausa_desde: dias(8), pausa_motivo: "Cambio de nombre", pausa_dias_acum: 3 });
+    const x = armarRetomar(r, H);
+    expect(x.dias).toBe(8);
+    expect(x.patch).toMatchObject({ pausa_desde: null, pausa_motivo: null, pausa_dias_acum: 11, fecha_entrada_etapa_actual: dias(12) });
+    expect(x.nota).toBe("▶ Retomado después de 8 días en pausa (motivo: Cambio de nombre)");
+    // tras retomar: 20 días en etapa − 8 de pausa = 12 días en la etapa
+    expect(diasEntre(x.patch.fecha_entrada_etapa_actual, H)).toBe(12);
+  });
+
+  it("armarRetomar: si cambió de etapa durante la pausa, solo descuenta desde que entró a la etapa nueva", () => {
+    const r = cli({ fecha_entrada_etapa_actual: dias(2), pausa_desde: dias(8), pausa_motivo: "Esperando" });
+    const x = armarRetomar(r, H);
+    expect(x.patch.pausa_dias_acum).toBe(8);
+    expect(x.patch.fecha_entrada_etapa_actual).toBe(dias(0)); // 2 días en pausa dentro de la etapa → hoy
+  });
+
+  it("armarRetomar: el mismo día y sin pausa", () => {
+    expect(armarRetomar(cli({ pausa_desde: dias(0), pausa_motivo: "Prueba" }), H).nota).toBe("▶ Retomado el mismo día (motivo: Prueba)");
+    expect(armarRetomar(cli(), H).error).toMatch(/no está en pausa/);
+    expect(armarRetomar(cli({ pausa_desde: dias(1), pausa_motivo: "Prueba" }), H).nota).toMatch(/1 día en pausa/);
+  });
+
+  it("textoPausa y sinPaso (un cliente en pausa no es 'sin próximo paso')", () => {
+    expect(textoPausa(cli({ pausa_desde: dias(12), pausa_motivo: "x y z" }), H)).toBe("En pausa hace 12 días");
+    expect(textoPausa(cli({ pausa_desde: dias(0), pausa_motivo: "x y z" }), H)).toBe("En pausa desde hoy");
+    expect(sinPaso(cli())).toBe(true);
+    expect(sinPaso(cli({ pausa_desde: dias(1), pausa_motivo: "x y z" }))).toBe(false);
+  });
+});

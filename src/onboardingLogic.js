@@ -42,16 +42,17 @@ function quienEjecuta(etapaActual) {
 
 // Evalúa las reglas en orden, gana la primera que se cumple.
 export function calcularEstado(record, hoy = new Date()) {
-  const { etapa_actual, integraciones_pendientes, bloqueado, fecha_registro, fecha_entrada_etapa_actual } = record;
+  const { etapa_actual, integraciones_pendientes, bloqueado, fecha_entrada_etapa_actual } = record;
 
   if (etapa_actual === "Aha confirmado") {
     return (integraciones_pendientes && integraciones_pendientes.length > 0) ? "revisar" : "ok";
   }
   if (etapa_actual === "Spicy Finalizado") return "esperando aha";
+  if (record.pausa_desde) return "en pausa"; // esperando al cliente: no es atraso nuestro (gana sobre "bloqueado" y sobre los días)
   if (bloqueado) return "bloqueado";
   if (!fecha_entrada_etapa_actual) return "sin fecha";
 
-  const diasDesdeRegistro = diasEntre(fecha_registro, hoy);
+  const diasDesdeRegistro = diasRegistroActivos(record, hoy);
   if (diasDesdeRegistro != null && diasDesdeRegistro > ONBOARDING_THRESHOLDS.ATRASADO_GENERAL_DIAS) {
     return "atrasado general";
   }
@@ -68,6 +69,7 @@ export const ESTADO_BADGE = {
   ok:                { label: "OK",              color: "#16A34A", bg: "#EDFAF3" },
   revisar:           { label: "Revisar",         color: "#D97706", bg: "#FEF3C7" },
   "esperando aha":    { label: "Esperando aha",   color: "#5B5B63", bg: "#F4F4F5" },
+  "en pausa":         { label: "En pausa",        color: "#533AB7", bg: "#F1EEFB" },
   bloqueado:         { label: "Bloqueado",        color: "#EF3E3E", bg: "#FEF0F0" },
   "sin fecha":        { label: "Sin fecha",        color: "#9CA3AF", bg: "#F4F4F5" },
   "atrasado general": { label: "Atrasado",         color: "#EF3E3E", bg: "#FEF0F0" },
@@ -161,7 +163,7 @@ export function chipPaso(r, hoy = new Date()) {
 export const pasoParaHoy = (r, hoy = new Date()) => { const e = estadoPaso(r, hoy); return !!e && (e.kind === "vencido" || e.kind === "hoy"); };
 
 // Un cliente en curso sin ningún próximo paso cargado (para marcarlo en el Kanban).
-export const sinPaso = (r) => !!r && !tienePaso(r) && !ETAPAS_SIN_PASO.includes(r.etapa_actual);
+export const sinPaso = (r) => !!r && !tienePaso(r) && !r.pausa_desde && !ETAPAS_SIN_PASO.includes(r.etapa_actual);
 
 // ¿El paso es de esta persona? El responsable se guarda como nombre ("Nico"), no como usuario: se compara con el nombre o el mail de quien está conectado
 // ("Nico" coincide con "Nicolás" o con nicolas@…). Sin nombre no es de nadie.
@@ -180,3 +182,60 @@ export function pasosParaHacer(clientes, hoy = new Date(), filtro = null) {
 
 // Texto de la nota que queda en el cliente cuando se marca hecho.
 export const notaPasoHecho = (r) => `✓ Paso hecho: ${r.proximo_paso}${r.proximo_paso_fecha ? " (era para el " + fmtDiaMes(r.proximo_paso_fecha) + ")" : ""}`;
+
+// ── En pausa (esperando al cliente) ──────────────────────────────────────────────────────────────
+// Para cuando la demora no es nuestra (el cliente cambió el nombre de la empresa, no armó el portfolio…). Mientras está en pausa el cliente no figura
+// como atrasado y esos días no cuentan: ni los de la etapa ni los del atraso general. Quién la puso y por qué queda en las notas del cliente.
+export const PAUSA_MIN = 3;
+export const PAUSA_MAX = 200;
+export const PAUSA_VACIA = { pausa_desde: null, pausa_motivo: null };
+export const enPausa = (r) => !!(r && r.pausa_desde);
+
+const sumarDias = (iso, n) => { const [y, m, d] = iso.split("-").map(Number); return isoLocal(new Date(y, m - 1, d + n)); };
+const plural = (n) => `${n} día${n === 1 ? "" : "s"}`;
+
+// Días que lleva en la pausa actual (0 si no está en pausa).
+export const diasEnPausa = (r, hoy = new Date()) => (enPausa(r) ? Math.max(0, diasEntre(r.pausa_desde, hoy) ?? 0) : 0);
+
+// Días desde el registro sin contar el tiempo en pausa (el de pausas anteriores y el de la actual). null si no hay fecha de registro.
+export function diasRegistroActivos(r, hoy = new Date()) {
+  const d = diasEntre(r && r.fecha_registro, hoy);
+  if (d == null) return null;
+  return Math.max(0, d - (Number(r.pausa_dias_acum) || 0) - diasEnPausa(r, hoy));
+}
+
+// Pone (o actualiza) la pausa. Devuelve { patch, nota } para guardar y anotar, o { error }.
+// `revisar` (opcional, día) crea el recordatorio "Revisar pausa: …" como próximo paso del cliente: reemplaza el que tuviera.
+export function armarPausa(r, { motivo, revisar = "", quien = "" } = {}, hoy = new Date()) {
+  const m = String(motivo ?? "").replace(/\s+/g, " ").trim();
+  if (m.length < PAUSA_MIN) return { error: "Contá en una línea por qué está en pausa (al menos " + PAUSA_MIN + " letras)." };
+  if (m.length > PAUSA_MAX) return { error: "Quedó muy largo: máximo " + PAUSA_MAX + " letras. El detalle va en las notas." };
+  const hoyISO = isoLocal(hoy);
+  const yaEstaba = enPausa(r);
+  const patch = { pausa_desde: yaEstaba ? r.pausa_desde : hoyISO, pausa_motivo: m };
+  if (revisar) {
+    if (!esFechaISO(revisar)) return { error: "La fecha para revisarlo no es válida." };
+    if (revisar < hoyISO) return { error: "La fecha para revisarlo no puede ser anterior a hoy." };
+    patch.proximo_paso = ("Revisar pausa: " + m).slice(0, PASO_MAX);
+    patch.proximo_paso_fecha = revisar;
+    patch.proximo_paso_quien = String(quien || "").trim() || null;
+  }
+  return { patch, nota: yaEstaba ? `⏸ Motivo de la pausa actualizado: ${m}` : `⏸ En pausa (esperando al cliente): ${m}${revisar ? " · se revisa el " + fmtDiaMes(revisar) : ""}` };
+}
+
+// Saca de la pausa. Suma los días a lo acumulado y corre la fecha de entrada a la etapa para que esos días no cuenten como demora.
+export function armarRetomar(r, hoy = new Date()) {
+  if (!enPausa(r)) return { error: "Este cliente no está en pausa." };
+  const dias = diasEnPausa(r, hoy);
+  const patch = { pausa_desde: null, pausa_motivo: null, pausa_dias_acum: (Number(r.pausa_dias_acum) || 0) + dias };
+  if (r.fecha_entrada_etapa_actual) {
+    // Solo cuentan los días en pausa DENTRO de la etapa actual (si cambió de etapa durante la pausa, desde que entró a la nueva).
+    const desde = r.fecha_entrada_etapa_actual > r.pausa_desde ? r.fecha_entrada_etapa_actual : r.pausa_desde;
+    const enEtapa = Math.max(0, diasEntre(desde, hoy) ?? 0);
+    patch.fecha_entrada_etapa_actual = sumarDias(r.fecha_entrada_etapa_actual, enEtapa);
+  }
+  return { patch, dias, nota: `▶ Retomado ${dias === 0 ? "el mismo día" : "después de " + plural(dias) + " en pausa"} (motivo: ${r.pausa_motivo})` };
+}
+
+// "En pausa hace 12 días" / "En pausa desde hoy".
+export const textoPausa = (r, hoy = new Date()) => { const d = diasEnPausa(r, hoy); return d === 0 ? "En pausa desde hoy" : `En pausa hace ${plural(d)}`; };

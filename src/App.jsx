@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useSyncExternalStore, createContext, useContext } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { ONBOARDING_STAGES, ONBOARDING_LEAD_SOURCES, ONBOARDING_PAYMENT_STATUS, calcularEstado, calcularAvance, diasEntre, ESTADO_BADGE, companyOption, defaultCompanySearch, pasosParaHacer, pasoParaHoy, esMio, notaPasoHecho, PASO_VACIO } from "./onboardingLogic.js";
-import { PasoLinea, PasoEditor, PasosHoyCard } from "./onboardingPaso.jsx";
+import { ONBOARDING_STAGES, ONBOARDING_LEAD_SOURCES, ONBOARDING_PAYMENT_STATUS, calcularEstado, calcularAvance, diasEntre, ESTADO_BADGE, companyOption, defaultCompanySearch, pasosParaHacer, pasoParaHoy, esMio, notaPasoHecho, PASO_VACIO, armarPausa, armarRetomar, diasRegistroActivos } from "./onboardingLogic.js";
+import { PasoLinea, PasoEditor, PasosHoyCard, PausaLinea, PausaEditor } from "./onboardingPaso.jsx";
 import {
   formatClock, formatHM, formatHours, formatDiffHours, baDateISO, addDaysISO, weekRangeISO, monthRangeISO,
   baTimeToISO, formatTimeBA, formatDateBA, formatDateTimeBA, formatISODateShort, weekdayShort, estadoUI, liveSeconds,
@@ -5540,6 +5540,24 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
     return savePaso(record, PASO_VACIO);
   }
 
+  // Pausa (esperando al cliente): guarda el estado y deja la nota con el motivo (así el "por qué" queda en el historial del cliente).
+  async function notaDe(record, body) {
+    const { error } = await sb.from("comments").insert({ id:newLocalId("cm"), entity_type:"onboarding", entity_id:record.id, author_id:currentUserId, author_email:currentUserEmail, body });
+    return error ? { error: "Quedó guardado, pero no se pudo dejar la nota: " + error.message } : {};
+  }
+  async function pausarCliente(record, form) {
+    const a = armarPausa(record, form, new Date());
+    if (a.error) return a;
+    const r = await savePaso(record, a.patch);
+    return r.error ? r : notaDe(record, a.nota);
+  }
+  async function retomarCliente(record) {
+    const a = armarRetomar(record, new Date());
+    if (a.error) return a;
+    const r = await savePaso(record, a.patch);
+    return r.error ? r : notaDe(record, a.nota);
+  }
+
   async function toggleLeadSource(record, source, checked) {
     const current = record.fuente_de_leads || [];
     const next = checked ? [...current, source] : current.filter(s=>s!==source);
@@ -5637,6 +5655,7 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
                         <div style={{ height:4,background:"#F3F3F3",borderRadius:2,overflow:"hidden",marginBottom:6 }}>
                           <div style={{ height:"100%",width:`${Math.round(calcularAvance(r.etapa_actual)*100)}%`,background:"#533AB7",borderRadius:2 }}/>
                         </div>
+                        <PausaLinea r={r} hoy={hoy}/>
                         <PasoLinea r={r} hoy={hoy}/>
                         <div style={{ fontSize:11,color:"#aaa",display:"flex",gap:6,alignItems:"center",flexWrap:"wrap" }}>
                           <span>{r.responsable||"Sin asignar"}</span>
@@ -5674,6 +5693,7 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
                       <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:"#555" }}>{r.responsable||"—"}</td>
                       <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5" }}>
                         <span style={{ fontSize:10,padding:"2px 7px",borderRadius:5,fontWeight:600,background:badge.bg,color:badge.color }}>{badge.label}</span>
+                        {r.pausa_desde && <div title={r.pausa_motivo} style={{ fontSize:11,color:"#533AB7",marginTop:3,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>⏸ {r.pausa_motivo}</div>}
                       </td>
                       <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:"#555",minWidth:200,maxWidth:280 }}>
                         {r.proximo_paso ? <PasoLinea r={r} hoy={hoy}/> : "—"}
@@ -5683,7 +5703,7 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
                           <div style={{ height:"100%",width:`${Math.round(calcularAvance(r.etapa_actual)*100)}%`,background:"#533AB7" }}/>
                         </div>
                       </td>
-                      <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:"#555" }}>{diasEntre(r.fecha_registro)}</td>
+                      <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:"#555" }}>{diasRegistroActivos(r, hoy)}</td>
                       <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:"#555" }}>{diasEntre(r.fecha_entrada_etapa_actual)}</td>
                       <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:"#555" }}>{r.estado_de_pago}</td>
                       <td style={{ padding:"10px 12px",borderBottom:"1px solid #F5F5F5",fontSize:12,color:r.spicy_company_id?"#16A34A":"#B45309" }}>{r.spicy_company_id ? "✓ "+(r.spicy_company_name||"vinculada") : "sin vincular"}</td>
@@ -5791,6 +5811,7 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
                 </label>
               </div>
 
+              <PausaEditor key={"p"+detail.id} record={detail} team={TICKET_TEAM} canEdit={canCreate} onPausar={(f)=>pausarCliente(detail, f)} onRetomar={()=>retomarCliente(detail)}/>
               <PasoEditor key={detail.id} record={detail} team={TICKET_TEAM} canEdit={canCreate} onSave={(patch)=>savePaso(detail, patch)} onComplete={completePaso}/>
 
               {detail.deal_id && <div style={{ fontSize:11,color:"#533AB7",background:"#F1EEFB",border:"1px solid #DDD5F6",borderRadius:6,padding:"5px 9px" }}>Creado automáticamente desde el CRM al ganar el deal. El estado de pago se actualiza solo cuando cambia allá.</div>}
@@ -5829,7 +5850,7 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
               </div>
 
               <div style={{ fontSize:11,color:"#aaa" }}>
-                {diasEntre(detail.fecha_registro)} días desde registro · {diasEntre(detail.fecha_entrada_etapa_actual)} días en esta etapa
+                {diasRegistroActivos(detail, new Date())} días desde registro{(detail.pausa_dias_acum>0||detail.pausa_desde)?" (sin contar la pausa)":""} · {diasEntre(detail.fecha_entrada_etapa_actual)} días en esta etapa
               </div>
 
               <div>
