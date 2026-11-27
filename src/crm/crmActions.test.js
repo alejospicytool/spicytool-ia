@@ -7,6 +7,23 @@ const make = () => createCrm(A.cloneState(fixture()), { now: NOW });
 const baseForm = (d, over = {}) => ({ empresa: d.empresa, contacto: d.contacto || "", telefono: d.telefono || "", stage: d.stage, vendedor: d.vendedor, plan: d.plan, cierre: d.cierre, pais: d.pais || "", tipo: d.tipo || "", origen: d.origen || "", partner: d.partner || "", proxima: d.proxima || "", proximaFecha: d.proximaFecha || "", proximaTipo: d.proximaTipo || "followup", proximaHora: d.proximaHora || "09:00", motivo: d.motivo || "", motivoDetalle: d.motivoDetalle || "", notas: d.notas || "", estado: d.estado || "", mrr: d.mrr, promoMrr: d.promoMrr || 0, promoMeses: d.promoMeses || 0, tags: d.tags || [], calOn: true, calif: null, ...over });
 const last = (d) => d.hist[d.hist.length - 1].x;
 
+describe("vendedor por defecto = quien está logueado", () => {
+  const as = (me) => createCrm(A.cloneState(fixture()), { now: NOW, me });
+  it("un deal o una tarea nuevos quedan a nombre de quien los crea si es vendedor; si no, del primero de la lista como antes", () => {
+    const beto = as({ first_name: "Beto", email: "beto@spicytool.net" });
+    expect(A.blankDeal(beto, "lead").vendedor).toBe("Beto");
+    expect(A.blankTask(beto, "").vendedor).toBe("Beto");
+    const nico = as({ first_name: "Nico", email: "nicolas@spicytool.net" });
+    expect(A.blankDeal(nico, "lead").vendedor).toBe("Ana");
+    expect(A.blankTask(nico, "").vendedor).toBe("Ana");
+  });
+  it("una tarea de un deal conserva el vendedor del deal aunque quien la cree sea otro", () => {
+    const beto = as({ first_name: "Beto", email: "beto@spicytool.net" });
+    const d = beto.S.deals.find((x) => x.vendedor === "Ana");
+    expect(A.blankTask(beto, d.id).vendedor).toBe("Ana");
+  });
+});
+
 describe("saveDeal", () => {
   it("deal nuevo: queda en su etapa con recorrido e historial 'Deal creado'", () => {
     const crm = make();

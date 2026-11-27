@@ -2,6 +2,7 @@
 // (cálculo de MRR, forecast, conversión, "frenado", renovaciones, textos). Sin React ni Supabase.
 // Se usa como createCrm(estado, { now }) -> funciones ligadas a ese estado y a "hoy".
 // "Hoy" es la fecha de Buenos Aires (el original usaba la del navegador).
+import { sellerOfUser } from "./crmMe.js";
 import { baDateISO } from "../timeTracking.js";
 
 export const MES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
@@ -44,6 +45,9 @@ export function createCrm(S, opts = {}) {
   const isoPlus = (n) => baDateISO(new Date(now.getTime() + n * 864e5));
   const curMonth = () => today.slice(0, 7);
   const cfg = () => S.config;
+  // La persona logueada como vendedor del CRM ("" si no es ninguno): sus ítems van primero en los selectores y es el vendedor por defecto de lo que crea.
+  const mySeller = sellerOfUser(opts.me, S.config && S.config.sellers);
+  const sellersOrdered = () => { const l = (S.config && S.config.sellers) || []; return mySeller && l.includes(mySeller) ? [mySeller, ...l.filter((x) => x !== mySeller)] : l; };
   const tasks = () => S.tasks || [];
   const dealById = (id) => S.deals.find((d) => d.id === id);
 
@@ -420,6 +424,6 @@ export function createCrm(S, opts = {}) {
     S, now, today, curMonth, iso, isoPlus, dealById, tasks, stageById, tagById, prob, weighted, isOpen, overdue, nextItem, fmtWhen, dealKey, hasPromo, promoTxt, daysIn, rotLevel,
     priceAt, isClient, isActiveClient, estLabel, renewal, nextMilestone, lastContact, califScore, califFilled, califTxt, califState,
     fmtStampDate, fillTpl, waMsg, waCustom, waLink, forecastRows, chartSvg, groupBy, forecastData, convStats, kindOf, taskItems, dueCounts, fmtDay, nextDays,
-    taskGroups, hoyData, clientsData, weeklyText, aiData, dealAiInfo, pasteContext, pasteMatch, pasteTagIds,
+    mySeller, sellersOrdered, taskGroups, hoyData, clientsData, weeklyText, aiData, dealAiInfo, pasteContext, pasteMatch, pasteTagIds,
   };
 }

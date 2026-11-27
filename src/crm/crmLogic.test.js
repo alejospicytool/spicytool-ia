@@ -211,6 +211,23 @@ describe("tareas, hoy y alertas", () => {
   });
 });
 
+describe("el vendedor logueado va primero", () => {
+  const withMe = (me) => createCrm(fixture(), { now: NOW, me });
+  it("sellersOrdered pone al vendedor propio primero y no toca la lista de la config", () => {
+    const crm = withMe({ first_name: "Beto", email: "beto@spicytool.net" });
+    expect(crm.mySeller).toBe("Beto");
+    expect(crm.sellersOrdered()).toEqual(["Beto", "Ana"]);
+    expect(crm.S.config.sellers).toEqual(["Ana", "Beto"]);
+  });
+  it("quien no es vendedor (o no hay sesión) ve la lista como está", () => {
+    for (const me of [{ first_name: "Nico", email: "nicolas@spicytool.net" }, null, undefined]) {
+      const crm = withMe(me);
+      expect(crm.mySeller).toBe("");
+      expect(crm.sellersOrdered()).toEqual(["Ana", "Beto"]);
+    }
+  });
+});
+
 describe("Hoy filtrado por vendedor", () => {
   const crm = make();
   it("con vendedor solo trae sus tareas, demos, deals frenados, firmados sin pagar y hitos; sin vendedor trae todo como antes", () => {

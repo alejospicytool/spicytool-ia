@@ -27,7 +27,7 @@ export function markClosed(crm, d, prev) {
 // Valores por defecto de un deal nuevo (el original los armaba en openDeal)
 export function blankDeal(crm, stage, preset) {
   const c = crm.S.config;
-  const d = { id: newId("d"), empresa: "", contacto: "", pais: "", tipo: c.types[0] || "", origen: "", partner: "", vendedor: c.sellers[0] || "", stage: stage || c.stages[0].id, mrr: c.ticket || 200, plan: "Mensual", cierre: addMonthsStr(crm.curMonth(), 1), proxima: "", proximaFecha: "", tags: [], notas: "", motivo: "", aConfirmar: false, _new: true };
+  const d = { id: newId("d"), empresa: "", contacto: "", pais: "", tipo: c.types[0] || "", origen: "", partner: "", vendedor: crm.mySeller || c.sellers[0] || "", stage: stage || c.stages[0].id, mrr: c.ticket || 200, plan: "Mensual", cierre: addMonthsStr(crm.curMonth(), 1), proxima: "", proximaFecha: "", tags: [], notas: "", motivo: "", aConfirmar: false, _new: true };
   return preset ? Object.assign(d, preset) : d;
 }
 function addMonthsStr(ym, n) {
@@ -151,7 +151,7 @@ export function saveNext(crm, ctx, { titulo, fecha, hora, tipo }) {
     return { kind: "deal", titulo, fecha, hora };
   }
   const prevTask = ctx.taskId ? crm.tasks().find((x) => x.id === ctx.taskId) : null;
-  const t = { id: newId("k"), titulo, tipo, fecha, hora, dealId: d ? d.id : "", vendedor: (d && d.vendedor) || (prevTask && prevTask.vendedor) || crm.S.config.sellers[0] || "", notas: "", calOn: true, hecha: false };
+  const t = { id: newId("k"), titulo, tipo, fecha, hora, dealId: d ? d.id : "", vendedor: (d && d.vendedor) || (prevTask && prevTask.vendedor) || crm.mySeller || crm.S.config.sellers[0] || "", notas: "", calOn: true, hecha: false };
   crm.S.tasks = crm.tasks().concat([t]);
   if (d) logH(crm, d, "Tarea creada: " + titulo + " para el " + fmtDate(fecha));
   return { kind: "task", task: t, titulo, fecha, hora };
@@ -159,7 +159,7 @@ export function saveNext(crm, ctx, { titulo, fecha, hora, tipo }) {
 
 export function blankTask(crm, dealId, preset) {
   const dd = dealId && crm.dealById(dealId);
-  const t = { id: newId("k"), titulo: "", tipo: "tarea", fecha: crm.today, hora: "09:00", dealId: dealId || "", vendedor: (dd && dd.vendedor) || crm.S.config.sellers[0] || "", notas: "", calOn: true, hecha: false, _new: true };
+  const t = { id: newId("k"), titulo: "", tipo: "tarea", fecha: crm.today, hora: "09:00", dealId: dealId || "", vendedor: (dd && dd.vendedor) || crm.mySeller || crm.S.config.sellers[0] || "", notas: "", calOn: true, hecha: false, _new: true };
   return preset ? Object.assign(t, preset) : t;
 }
 // Port de submitTask. v: { titulo, tipo, fecha, hora, vendedor, dealId, notas, calOn }

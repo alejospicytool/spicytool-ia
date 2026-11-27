@@ -65,7 +65,7 @@ export function HoyView({ crm, commit, open, sb, view, setView }) {
   const mr = h.mr, meta = h.meta;
   return (
     <>
-      <div className="crm-toolbar" style={{ marginBottom: 8 }}><select className="spicy-select" aria-label="Vendedor" value={(view && view.tseller) || ""} onChange={(e) => setView({ tseller: e.target.value })}><option value="">Todos los vendedores</option>{S.config.sellers.map((x) => <option key={x}>{x}</option>)}</select></div>
+      <div className="crm-toolbar" style={{ marginBottom: 8 }}><select className="spicy-select" aria-label="Vendedor" value={(view && view.tseller) || ""} onChange={(e) => setView({ tseller: e.target.value })}><option value="">Todos los vendedores</option>{crm.sellersOrdered().map((x) => <option key={x}>{x}</option>)}</select></div>
       <div className="crm-hoy-h"><h1>Hoy, {dn} {fmtDate(crm.today)}</h1><span>MRR real <b>{money(S.config.mrrActual)}</b></span>
         <span>Proyectado a {monthLabel(mr.m)} <b>{money(mr.proj)}</b>{meta ? (mr.proj >= meta ? ", supera la meta" : ", faltan " + money(meta - mr.proj) + " para la meta") : ""}</span></div>
       {AI_ENABLED && <div className="crm-brief">
@@ -163,7 +163,7 @@ export function PipelineView({ crm, view, setView, commit, open, toast, setTab }
       {(dc.v || dc.h) ? <div className={"crm-due" + (dc.v ? " late" : "")}><span>{(dc.h ? "Hoy tenés " + dc.h + (dc.h === 1 ? " tarea" : " tareas") : "Nada para hoy") + (dc.v ? ", y " + dc.v + (dc.v === 1 ? " vencida" : " vencidas") : "")}.</span><button onClick={() => setTab("tareas")}>Ver tareas</button></div> : null}
       <section className="crm-toolbar">
         <input className="spicy-input" type="search" placeholder="Buscar empresa, contacto, partner o nota" aria-label="Buscar" value={view.q} onChange={(e) => setView({ q: e.target.value })} />
-        <select className="spicy-select" aria-label="Vendedor" value={view.seller} onChange={(e) => setView({ seller: e.target.value })}><option value="">Todos los vendedores</option>{c.sellers.map((x) => <option key={x}>{x}</option>)}</select>
+        <select className="spicy-select" aria-label="Vendedor" value={view.seller} onChange={(e) => setView({ seller: e.target.value })}><option value="">Todos los vendedores</option>{crm.sellersOrdered().map((x) => <option key={x}>{x}</option>)}</select>
         <select className="spicy-select" aria-label="País" value={view.country} onChange={(e) => setView({ country: e.target.value })}><option value="">Todos los países</option>{c.countries.map((x) => <option key={x}>{x}</option>)}</select>
         <select className="spicy-select" aria-label="Etiqueta" value={view.tag} onChange={(e) => setView({ tag: e.target.value })}><option value="">Todas las etiquetas</option>{groups.map((g) => <optgroup key={g} label={g}>{c.tags.filter((t) => t.group === g).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>)}</select>
         {AI_ENABLED && <button className="crm-btn" onClick={open.paste}>✦ Pegar conversación</button>}<button className="crm-btn primary" onClick={() => open.deal(null)}>Nuevo deal</button>
@@ -211,7 +211,7 @@ export function TasksView({ crm, view, setView, commit, open }) {
   return (
     <>
       <section className="crm-toolbar">
-        <select className="spicy-select" aria-label="Vendedor" value={view.tseller} onChange={(e) => setView({ tseller: e.target.value })}><option value="">Todos los vendedores</option>{crm.S.config.sellers.map((x) => <option key={x}>{x}</option>)}</select>
+        <select className="spicy-select" aria-label="Vendedor" value={view.tseller} onChange={(e) => setView({ tseller: e.target.value })}><option value="">Todos los vendedores</option>{crm.sellersOrdered().map((x) => <option key={x}>{x}</option>)}</select>
         <button className="crm-btn" aria-pressed={!!view.tdone} onClick={() => setView({ tdone: !view.tdone })}>{view.tdone ? "Ocultar hechas" : "Ver hechas"}</button>
         <button className="crm-btn primary" onClick={() => open.task(null)}>Nueva tarea</button>
       </section>

@@ -7,13 +7,15 @@ import { useAsync } from "./adminHooks.js";
 import { userFullName } from "./adminLogic.js";
 import { loadCrmContext, insertDeal, openStages, findExistingDeals, defaultSendForm, buildFreemiumDeal } from "./crmSend.js";
 import { baDateISO } from "../timeTracking.js";
+import { sellerOfUser } from "../crm/crmMe.js";
 
 const Field = ({ label, children }) => <div className="field"><label className="field-label">{label}</label>{children}</div>;
 const stageName = (config, id) => ((config.stages || []).find((s) => s.id === id) || {}).name || id || "—";
 
 function Form({ ctx, user, companyName, actor, onSent, onClose }) {
   const { config, deals } = ctx;
-  const [f, setF] = useState(() => defaultSendForm(config, baDateISO(new Date())));
+  const mine = sellerOfUser({ email: actor }, config ? config.sellers : []); // quien lo envía, si es uno de los vendedores del CRM
+  const [f, setF] = useState(() => defaultSendForm(config, baDateISO(new Date()), mine));
   const [busy, setBusy] = useState(false), [error, setError] = useState(""), [sure, setSure] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const stages = openStages(config), existing = findExistingDeals(deals, user, companyName);
@@ -57,7 +59,7 @@ function Form({ ctx, user, companyName, actor, onSent, onClose }) {
         </Field>
         <Field label="Vendedor">
           <select className="inp" value={f.vendedor} onChange={set("vendedor")} aria-label="Vendedor">
-            {(config.sellers || []).map((x) => <option key={x} value={x}>{x}</option>)}
+            {(mine ? [mine, ...(config.sellers || []).filter((x) => x !== mine)] : (config.sellers || [])).map((x) => <option key={x} value={x}>{x}</option>)}
           </select>
         </Field>
       </div>

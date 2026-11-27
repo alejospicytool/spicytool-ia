@@ -25,6 +25,7 @@ import ErrorBoundary from "./ErrorBoundary.jsx";
 import ConfirmHost from "./ConfirmHost.jsx";
 import CalendarConnect from "./calendar/CalendarConnect.jsx";
 import { configureCalendarApi, requestCalendarSync } from "./calendar/calendarApi.js";
+import { meFirstById, meFirstName } from "./meFirst.js";
 import { askConfirm } from "./confirmStore.js";
 import { canWriteOps, canDeleteOps, ROLE_HELP } from "./roles.js";
 
@@ -5445,7 +5446,7 @@ function SpicyCompanyLink({ record, canSearch, canEdit, onSave }) {
   );
 }
 
-function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, comments, currentUserId, currentUserEmail, onOpenCliente360, openId, onOpenHandled }) {
+function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, comments, currentUserId, currentUserEmail, me, onOpenCliente360, openId, onOpenHandled }) {
   const { canWriteOps: canCreate, canDeleteOps: canRemove } = useContext(RoleContext);
   const todayISO = new Date().toISOString().split("T")[0];
   const emptyForm = () => ({ client_name:"", fecha_registro:todayISO, responsable:"", fuente_de_leads:[], bloqueado:false });
@@ -5481,7 +5482,8 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
     (!filterPaso || pasoParaHoy(r, hoy))
   );
   const pasosHoy = onboarding.filter(r=>pasoParaHoy(r, hoy)).length;
-  const responsables = [...new Set(onboarding.map(r=>r.responsable).filter(Boolean))];
+  const team = meFirstName(TICKET_TEAM, me); // el equipo con quien está logueado primero
+  const responsables = meFirstName([...new Set(onboarding.map(r=>r.responsable).filter(Boolean))], me);
 
   const getHistory = (id) => history.filter(h=>h.onboarding_id===id).sort((a,b)=>a.fecha_entrada.localeCompare(b.fecha_entrada));
   // Notas del seguimiento (tabla comments, entity_type 'onboarding'): cuántas hay y cuándo fue la última
@@ -5742,7 +5744,7 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
             <label style={{ fontSize:12,color:"#666",fontWeight:500 }}>Responsable
               <select className="spicy-select" value={form.responsable} onChange={e=>setForm(f=>({...f,responsable:e.target.value}))} style={{ width:"100%",marginTop:4 }}>
                 <option value="">Sin asignar</option>
-                {TICKET_TEAM.map(n=><option key={n} value={n}>{n}</option>)}
+                {team.map(n=><option key={n} value={n}>{n}</option>)}
               </select>
             </label>
 
@@ -5799,7 +5801,7 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
                 <label style={{ fontSize:12,color:"#666",fontWeight:500,flex:1 }}>Responsable
                   <select className="spicy-select" value={detail.responsable||""} onChange={e=>updateRecord(detail,{responsable:e.target.value||null})} style={{ width:"100%",marginTop:4 }}>
                     <option value="">Sin asignar</option>
-                    {TICKET_TEAM.map(n=><option key={n} value={n}>{n}</option>)}
+                    {team.map(n=><option key={n} value={n}>{n}</option>)}
                   </select>
                 </label>
               </div>
@@ -5815,8 +5817,8 @@ function OnboardingView({ onboarding, history, onRefresh, canSearchSpicy, commen
                 </label>
               </div>
 
-              <PausaEditor key={"p"+detail.id} record={detail} team={TICKET_TEAM} canEdit={canCreate} onPausar={(f)=>pausarCliente(detail, f)} onRetomar={()=>retomarCliente(detail)}/>
-              <PasoEditor key={detail.id} record={detail} team={TICKET_TEAM} canEdit={canCreate} onSave={(patch)=>savePaso(detail, patch)} onComplete={completePaso}/>
+              <PausaEditor key={"p"+detail.id} record={detail} team={team} canEdit={canCreate} onPausar={(f)=>pausarCliente(detail, f)} onRetomar={()=>retomarCliente(detail)}/>
+              <PasoEditor key={detail.id} record={detail} team={team} canEdit={canCreate} onSave={(patch)=>savePaso(detail, patch)} onComplete={completePaso}/>
 
               {detail.deal_id && <div style={{ fontSize:11,color:"#533AB7",background:"#F1EEFB",border:"1px solid #DDD5F6",borderRadius:6,padding:"5px 9px" }}>Creado automáticamente desde el CRM al ganar el deal. El estado de pago se actualiza solo cuando cambia allá.</div>}
               <SpicyCompanyLink record={detail} canSearch={!!canSearchSpicy} canEdit={canCreate} onSave={(patch)=>updateRecord(detail, patch)}/>
@@ -5995,7 +5997,7 @@ export default function SpicyFinanzas() {
     setTickets(ticketsRes.data||[]);
     setTicketStatusHistory(ticketHistoryRes.data||[]);
     setTasks(tasksRes.data||[]);
-    setAllUsers(usersRes.data||[]);
+    setAllUsers(meFirstById(usersRes.data||[], session?.user?.id)); // quien está logueado, primero en todos los selectores de personas
     setAllowedSections(allowedRes.data||[]);
     setOnboarding(onboardingRes.data||[]);
     setOnboardingHistory(onboardingHistoryRes.data||[]);
@@ -6494,7 +6496,7 @@ export default function SpicyFinanzas() {
         onOpenDevTask={(id)=>{ setPendingLink({ type:"dev_task", id }); setView("devtasks"); }}
         renderComments={(ideaId)=><CommentsThread entityType="idea" entityId={ideaId} comments={comments} currentUserId={session.user.id} currentUserEmail={session.user.email} onChange={loadAll} multiline placeholder="Sumá un comentario o más contexto…" emptyText="Todavía no hay comentarios." sendLabel="Comentar"/>}/>}
       {view==="seguimiento"&&<SeguimientoApp sb={sb} rows={followup} allUsers={allUsers} me={{ id:session.user.id, email:session.user.email }} isAdmin={isAdmin} canWrite={canWriteOps(role)} canSearchSpicy={canSeeSection("Admin Spicy")} onRefresh={loadAll} onOpenCliente360={setCliente360Id}/>}
-      {view==="onboarding"&&<OnboardingView openId={pendingLink?.type==="onboarding"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)} onboarding={onboarding} history={onboardingHistory} onRefresh={refreshAndSyncCalendar} canSearchSpicy={canSeeSection("Admin Spicy")} comments={comments} currentUserId={session.user.id} currentUserEmail={session.user.email} onOpenCliente360={setCliente360Id}/>}
+      {view==="onboarding"&&<OnboardingView openId={pendingLink?.type==="onboarding"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)} onboarding={onboarding} history={onboardingHistory} onRefresh={refreshAndSyncCalendar} canSearchSpicy={canSeeSection("Admin Spicy")} comments={comments} currentUserId={session.user.id} currentUserEmail={session.user.email} me={meUser} onOpenCliente360={setCliente360Id}/>}
       {view==="devdash"&&<DevsMetricsView tickets={tickets} ticketHistory={ticketStatusHistory} devTasks={devTasks} devTaskHistory={devTaskStatusHistory} assignees={entityAssignees} allUsers={allUsers} setView={setView}/>}
       {view==="devtasks"&&<DevTasksView devTasks={devTasks} statusHistory={devTaskStatusHistory} allUsers={allUsers} currentUserEmail={session.user.email} currentUserId={session.user.id} assignees={entityAssignees} comments={comments} attachments={attachments} subtasks={subtasks} tickets={tickets} onRefresh={loadAll} openId={pendingLink?.type==="dev_task"?pendingLink.id:null} onOpenHandled={()=>setPendingLink(null)} setView={setView}/>}
       {view==="services"&&<ServicesView/>}

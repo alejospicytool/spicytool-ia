@@ -89,7 +89,7 @@ export function DealDialog({ crm, id, stage, preset, prefill, focusCalif, onClos
             <a className="crm-btn" target="_blank" rel="noopener" href={waHref || "#"} aria-disabled={!waHref} onClick={(e) => { if (!waHref) e.preventDefault(); else if (!isNew) commit((crmN) => { const lv = crmN.dealById(id); if (lv) A.logH(crmN, lv, "WhatsApp: " + (f.proxima || "mensaje general")); }); }} style={{ display: "inline-flex", gap: 6, alignItems: "center", justifyContent: "center", textDecoration: "none", opacity: waHref ? 1 : 0.5 }}><span className="crm-wa" style={{ width: 16 }}>{WA_ICON}</span>Abrir WhatsApp</a>
           </div>
           <Field label="Etapa"><Sel value={f.stage} onChange={(v) => set("stage", v)} options={c.stages.map((s) => [s.id, s.name + (s.kind === "open" ? " (" + s.prob + "%)" : "")])} /></Field>
-          <Field label="Vendedor"><Sel value={f.vendedor} onChange={(v) => set("vendedor", v)} options={c.sellers} blank="Sin asignar" /></Field>
+          <Field label="Vendedor"><Sel value={f.vendedor} onChange={(v) => set("vendedor", v)} options={crm.sellersOrdered()} blank="Sin asignar" /></Field>
           <Field label="MRR precio normal (USD/mes)"><input className="spicy-input" type="number" min="0" step="10" value={f.mrr} onChange={(e) => set("mrr", e.target.value)} /></Field>
           <Field label="Plan"><Sel value={f.plan} onChange={(v) => set("plan", v)} options={["Mensual", "Anual"]} /></Field>
           <Field label="Cierre estimado (primer mes de pago)"><input className="spicy-input" type="month" value={f.cierre} onChange={(e) => set("cierre", e.target.value)} /></Field>
@@ -218,7 +218,7 @@ export function TaskDialog({ crm, id, dealId, preset, onClose, commit, toast }) 
         <div className="crm-dlg-b">
           <div className="full"><Field label="Tarea"><input className="spicy-input" autoFocus={isNew} placeholder="Escribí o elegí una acción" value={f.titulo} onChange={(e) => set("titulo", e.target.value)} /></Field><QuickActions list={c.acciones} onPick={(a) => set("titulo", a)} /></div>
           <Field label="Tipo"><Sel value={f.tipo} onChange={(v) => set("tipo", v)} options={[["tarea", "Tarea (15 min)"], ["followup", "Follow-up (15 min)"], ["reunion", "Reunión (30 min)"]]} /></Field>
-          <Field label="Vendedor"><Sel value={f.vendedor} onChange={(v) => set("vendedor", v)} options={c.sellers} blank="Sin asignar" /></Field>
+          <Field label="Vendedor"><Sel value={f.vendedor} onChange={(v) => set("vendedor", v)} options={crm.sellersOrdered()} blank="Sin asignar" /></Field>
           <Field label="Fecha"><input className="spicy-input" type="date" value={f.fecha} onChange={(e) => set("fecha", e.target.value)} /></Field>
           <Field label="Hora"><input className="spicy-input" type="time" step="900" value={f.hora} onChange={(e) => set("hora", e.target.value)} /></Field>
           <Field label="Deal relacionado (opcional)" full><Sel value={f.dealId} onChange={(v) => set("dealId", v)} options={deals} blank="Sin deal" /></Field>

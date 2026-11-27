@@ -18,7 +18,7 @@ const VIEW_KEY = "crm-view";
 const loadView = () => { try { return { tab: "hoy", q: "", seller: null, tag: "", country: "", flag: "", tkind: "", tseller: null, tdone: false, ...(JSON.parse(sessionStorage.getItem(VIEW_KEY) || "null") || {}) }; } catch { return { tab: "hoy", q: "", seller: null, tag: "", country: "", flag: "", tkind: "", tseller: null, tdone: false }; } };
 
 // Estado del CRM + guardado de lo que cambia (con control de versión)
-function useCrmData(sb, onToast) {
+function useCrmData(sb, onToast, me) {
   const [S, setS] = useState(null);
   const [status, setStatus] = useState("loading");
   const [loadError, setLoadError] = useState("");
@@ -52,7 +52,7 @@ function useCrmData(sb, onToast) {
   const commit = useCallback((fn) => {
     const cur = ref.current;
     const next = A.cloneState(cur.S);
-    const res = fn(createCrm(next, { now: new Date() }));
+    const res = fn(createCrm(next, { now: new Date(), me }));
     if (res && res.error) return res;
     const diff = diffState(cur.S, next);
     cur.S = next; setS(next);
@@ -69,7 +69,7 @@ function useCrmData(sb, onToast) {
       }).finally(() => { cur.pending--; if (!cur.pending) setSaveState((s) => (s === "error" ? "error" : "saved")); });
     }
     return res;
-  }, [sb, load, onToast]);
+  }, [sb, load, onToast, me]);
 
   return { S, status, loadError, saveState, commit };
 }
@@ -80,13 +80,13 @@ export default function CrmApp({ sb, me = null, openId = null, onOpenHandled = n
   const [toastMsg, setToastMsg] = useState("");
   const toastTimer = useRef(null);
   const toast = useCallback((m) => { setToastMsg(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToastMsg(""), 2800); }, []);
-  const { S, status, loadError, saveState, commit } = useCrmData(sb, toast);
+  const { S, status, loadError, saveState, commit } = useCrmData(sb, toast, me);
   const [view, setViewState] = useState(loadView);
   const setView = (patch) => setViewState((v) => { const n = { ...v, ...patch }; try { sessionStorage.setItem(VIEW_KEY, JSON.stringify(n)); } catch { /* sin storage */ } return n; });
   const setTab = (tab) => { setView({ tab }); window.scrollTo(0, 0); };
   const [now, setNow] = useState(() => new Date());
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 60000); return () => clearInterval(t); }, []);
-  const crm = useMemo(() => (S && S.config ? createCrm(S, { now }) : null), [S, now]);
+  const crm = useMemo(() => (S && S.config ? createCrm(S, { now, me }) : null), [S, now, me]);
   const mySeller = useMemo(() => sellerOfUser(me, S && S.config ? S.config.sellers : []), [me, S]);
   const viewEff = useMemo(() => ({ ...view, seller: effectiveSeller(view.seller, mySeller), tseller: effectiveSeller(view.tseller, mySeller) }), [view, mySeller]);
   const [stack, setStack] = useState([]); // diálogos abiertos (uno encima del otro)

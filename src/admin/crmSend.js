@@ -30,11 +30,11 @@ export function findExistingDeals(deals, user, companyName = "") {
 // Deal ya enviado desde Admin Spicy para este usuario (para mostrar "En el CRM" en la lista).
 export const sentDealOf = (deals, user) => (deals || []).find((d) => user && d.spicyUserId && d.spicyUserId === user._id) || null;
 
-// Valores iniciales del formulario a partir de la config del CRM.
-export function defaultSendForm(config, today) {
+// Valores iniciales del formulario a partir de la config del CRM. `seller` (opcional): el vendedor de quien está logueado, que queda elegido de entrada.
+export function defaultSendForm(config, today, seller = "") {
   const c = config || {};
   const st = openStages(c);
-  return { stage: (st[0] || {}).id || "", vendedor: (c.sellers || [])[0] || "", proxima: (c.acciones || [])[0] || "", proximaFecha: today || "", nota: "" };
+  return { stage: (st[0] || {}).id || "", vendedor: ((c.sellers || []).includes(seller) ? seller : (c.sellers || [])[0]) || "", proxima: (c.acciones || [])[0] || "", proximaFecha: today || "", nota: "" };
 }
 
 const fmtDay = (iso) => { const p = String(iso || "").split("-"); return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : ""; };

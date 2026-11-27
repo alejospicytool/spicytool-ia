@@ -79,6 +79,11 @@ describe("buildFreemiumDeal", () => {
 });
 
 describe("helpers del formulario", () => {
+  it("defaultSendForm deja elegido de entrada al vendedor logueado si es uno de la lista", () => {
+    expect(defaultSendForm(config(), "2026-11-10", "Beto").vendedor).toBe("Beto");
+    expect(defaultSendForm(config(), "2026-11-10", "Nadie").vendedor).toBe("Ana");
+    expect(defaultSendForm(config(), "2026-11-10", "").vendedor).toBe("Ana");
+  });
   it("defaultSendForm toma la primera etapa abierta, el primer vendedor y la primera acción", () => {
     expect(defaultSendForm(config(), "2026-11-10")).toEqual({ stage: "lead", vendedor: "Ana", proxima: "Follow up", proximaFecha: "2026-11-10", nota: "" });
     expect(openStages(config()).map((s) => s.id)).toEqual(["lead", "demo", "prop", "nego"]);
