@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nextDay, taskEvent, onboardingEvent, usersForName, eventHash } from "./calendarEvents.js";
+import { nextDay, taskEvent, onboardingEvent, usersForName, eventHash, todayInBA } from "./calendarEvents.js";
 
 const APP = "https://backoffice.test";
 const task = (over = {}) => ({ id: "task_1", title: "Armar portfolio", start_date: "2026-12-01", end_date: "2026-12-03", priority: "Alta", stage: "En Curso", description: "Con las fotos nuevas", ...over });
@@ -96,5 +96,44 @@ describe("usersForName", () => {
     expect(usersForName("Nico", dos).users.map((u) => u.user_id)).toEqual(["u4"]);
     const tres = [{ user_id: "a", email: "nicolas@x.com", first_name: "Nicolás" }, { user_id: "b", email: "nicole@x.com", first_name: "Nicole" }];
     expect(usersForName("Nico", tres)).toEqual({ users: [], ambiguous: true });
+  });
+});
+
+describe("lo vencido se arrastra hasta hoy", () => {
+  const TODAY = "2026-12-10";
+  it("tarea Alta vencida: se estira hasta hoy, con 'Vencida', en rojo y aclarando cuándo venció", () => {
+    const e = taskEvent(task({ end_date: "2026-12-03" }), { appUrl: APP, today: TODAY });
+    expect(e.summary).toBe("Vencida · Tarea: Armar portfolio");
+    expect(e.start).toEqual({ date: "2026-12-01" });
+    expect(e.end).toEqual({ date: "2026-12-11" });
+    expect(e.colorId).toBe("11");
+    expect(e.description).toContain("Venció el 03/12");
+  });
+  it("tarea Alta que vence hoy o más adelante no cambia", () => {
+    expect(taskEvent(task({ end_date: TODAY }), { appUrl: APP, today: TODAY }).summary).toBe("Tarea: Armar portfolio");
+    expect(taskEvent(task({ end_date: "2026-12-20" }), { appUrl: APP, today: TODAY }).end).toEqual({ date: "2026-12-21" });
+  });
+  it("tareas Media/Baja no se arrastran, ni las finalizadas", () => {
+    expect(taskEvent(task({ priority: "Media", end_date: "2026-12-03" }), { appUrl: APP, today: TODAY }).end).toEqual({ date: "2026-12-04" });
+    expect(taskEvent(task({ priority: "Baja", end_date: "2026-12-03" }), { appUrl: APP, today: TODAY }).summary).toBe("Tarea: Armar portfolio");
+    const f = taskEvent(task({ stage: "Finalizado", end_date: "2026-12-03" }), { appUrl: APP, today: TODAY, hasLink: true });
+    expect(f.summary).toBe("✓ Tarea: Armar portfolio");
+    expect(f.end).toEqual({ date: "2026-12-04" });
+  });
+  it("sin 'today' no se arrastra nada", () => {
+    expect(taskEvent(task({ end_date: "2026-12-03" }), { appUrl: APP }).end).toEqual({ date: "2026-12-04" });
+    expect(onboardingEvent(step({ proximo_paso_fecha: "2026-12-01" }), { appUrl: APP }).end).toEqual({ date: "2026-12-02" });
+  });
+  it("paso de Onboarding vencido: desde su fecha hasta hoy, con 'Vencido'", () => {
+    const e = onboardingEvent(step({ proximo_paso_fecha: "2026-12-07" }), { appUrl: APP, today: TODAY });
+    expect(e.summary).toMatch(/^Vencido · Onboarding · Miraglia/);
+    expect(e.start).toEqual({ date: "2026-12-07" });
+    expect(e.end).toEqual({ date: "2026-12-11" });
+    expect(e.description).toContain("Venció el 07/12");
+    expect(onboardingEvent(step({ proximo_paso_fecha: TODAY }), { appUrl: APP, today: TODAY }).summary).toMatch(/^Onboarding/);
+  });
+  it("todayInBA usa la fecha de Argentina, no la del servidor", () => {
+    expect(todayInBA(Date.parse("2026-11-27T01:30:00Z"))).toBe("2026-11-26"); // 22:30 del 26 en Buenos Aires
+    expect(todayInBA(Date.parse("2026-11-27T15:00:00Z"))).toBe("2026-11-27");
   });
 });

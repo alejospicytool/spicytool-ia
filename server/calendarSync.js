@@ -4,12 +4,12 @@
 // falta sin duplicar nada. Nunca toca los eventos que no creó él (solo los que tiene vinculados en calendar_links).
 import { decryptToken, encryptToken, signState, verifyState } from "./calendarCrypto.js";
 import { GoogleError } from "./googleCalendar.js";
-import { taskEvent, onboardingEvent, usersForName, eventHash } from "./calendarEvents.js";
+import { taskEvent, onboardingEvent, usersForName, eventHash, todayInBA } from "./calendarEvents.js";
 
 const keyOf = (type, id, userId) => `${type}|${id}|${userId}`;
 const NEEDS_CAL = "https://www.googleapis.com/auth/calendar.events";
 
-export function makeCalendarSync({ store, google, secret, appUrl = "https://backoffice.wearespicy.net", log = console.error } = {}) {
+export function makeCalendarSync({ store, google, secret, appUrl = "https://backoffice.wearespicy.net", now = () => Date.now(), log = console.error } = {}) {
   const configured = !!(store && store.configured && google && google.configured && secret && String(secret).length >= 16);
   let running = null, again = false;
 
@@ -40,16 +40,17 @@ export function makeCalendarSync({ store, google, secret, appUrl = "https://back
     const linkOf = new Map(links.map((l) => [keyOf(l.entity_type, l.entity_id, l.user_id), l]));
 
     // 1) Lo que tiene que haber: clave → { type, id, userId, event }
+    const today = todayInBA(now()); // lo vencido se arrastra hasta hoy (ver calendarEvents.js)
     const wanted = new Map();
     const want = (type, id, userId, event) => { if (event) wanted.set(keyOf(type, id, userId), { type, id, userId, event }); };
     for (const t of tasks) {
-      for (const a of taskAsg.filter((x) => x.entity_id === t.id)) if (connOf.has(a.user_id)) want("task", t.id, a.user_id, taskEvent(t, { appUrl, hasLink: linkOf.has(keyOf("task", t.id, a.user_id)) }));
+      for (const a of taskAsg.filter((x) => x.entity_id === t.id)) if (connOf.has(a.user_id)) want("task", t.id, a.user_id, taskEvent(t, { appUrl, hasLink: linkOf.has(keyOf("task", t.id, a.user_id)), today }));
     }
     for (const o of onboarding) {
       if (!o.proximo_paso_quien) continue;
       const r = usersForName(o.proximo_paso_quien, people);
       if (r.ambiguous) { stats.skipped.push(`Onboarding ${o.client_name}: "${o.proximo_paso_quien}" coincide con más de una persona`); continue; }
-      for (const u of r.users) if (connOf.has(u.user_id)) want("onboarding", o.id, u.user_id, onboardingEvent(o, { appUrl }));
+      for (const u of r.users) if (connOf.has(u.user_id)) want("onboarding", o.id, u.user_id, onboardingEvent(o, { appUrl, today }));
     }
 
     const token = tokenCache();

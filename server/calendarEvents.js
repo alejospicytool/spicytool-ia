@@ -13,6 +13,10 @@ export function nextDay(iso) {
   return d.toISOString().slice(0, 10);
 }
 
+// "Hoy" en Argentina (YYYY-MM-DD), que es como trabaja el equipo: el servidor puede estar en otra zona horaria.
+export const todayInBA = (ms = Date.now()) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Argentina/Buenos_Aires", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ms));
+const fmtDM = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+
 export const eventHash = (event) => createHash("sha1").update(JSON.stringify(event)).digest("hex");
 
 const PRIO_COLOR = { Alta: "11", Media: "5", Baja: "8" }; // colores de Google: rojo, amarillo, gris
@@ -33,28 +37,34 @@ function base({ key, summary, lines, url, start, end, colorId }) {
 
 // Tarea de Operaciones → evento (o null si no tiene que haber evento).
 // Archivada: sin evento. Finalizada: solo si ya tenía uno (queda con ✓, para no llenar el calendario con tareas viejas al conectar).
-export function taskEvent(task, { appUrl, hasLink = false } = {}) {
+// Arrastre de lo vencido: si pasó la fecha y sigue pendiente, el evento se estira hasta hoy (así no desaparece del calendario). `today` en YYYY-MM-DD; sin `today` no se arrastra nada.
+// Solo para las tareas de prioridad Alta (el resto queda en su fecha, para no llenar el calendario) y para los pasos de Onboarding.
+export function taskEvent(task, { appUrl, hasLink = false, today = null } = {}) {
   if (!task || !ISO_RE.test(String(task.start_date)) || !ISO_RE.test(String(task.end_date))) return null;
   if (task.stage === "Archivado") return null;
   const done = task.stage === "Finalizado";
   if (done && !hasLink) return null;
-  const end = task.end_date < task.start_date ? task.start_date : task.end_date;
+  let end = task.end_date < task.start_date ? task.start_date : task.end_date;
+  const overdue = !done && task.priority === "Alta" && !!today && ISO_RE.test(today) && end < today;
+  const dueDay = end;
+  if (overdue) end = today;
   return base({
     key: "task:" + task.id,
-    summary: `${done ? "✓ " : ""}Tarea: ${clip(task.title || "Sin título", 150)}`,
-    lines: [task.priority ? `Prioridad: ${task.priority}` : "", task.stage ? `Etapa: ${task.stage}` : "", task.description ? clip(task.description, 600) : ""],
-    url: link(appUrl, "task", task.id), start: task.start_date, end, colorId: done ? "8" : (PRIO_COLOR[task.priority] || "5"),
+    summary: `${done ? "✓ " : overdue ? "Vencida · " : ""}Tarea: ${clip(task.title || "Sin título", 150)}`,
+    lines: [overdue ? `Venció el ${fmtDM(dueDay)}` : "", task.priority ? `Prioridad: ${task.priority}` : "", task.stage ? `Etapa: ${task.stage}` : "", task.description ? clip(task.description, 600) : ""],
+    url: link(appUrl, "task", task.id), start: task.start_date, end, colorId: overdue ? "11" : done ? "8" : (PRIO_COLOR[task.priority] || "5"),
   });
 }
 
 // Próximo paso de un cliente de Onboarding → evento de día completo (o null si no tiene paso con fecha).
-export function onboardingEvent(row, { appUrl } = {}) {
+export function onboardingEvent(row, { appUrl, today = null } = {}) {
   if (!row || !row.proximo_paso || !ISO_RE.test(String(row.proximo_paso_fecha))) return null;
+  const overdue = !!today && ISO_RE.test(today) && row.proximo_paso_fecha < today;
   return base({
     key: "onboarding:" + row.id,
-    summary: `Onboarding · ${clip(row.client_name || "Cliente", 60)}: ${clip(row.proximo_paso, 120)}`,
-    lines: [`Cliente: ${row.client_name || "—"}`, row.etapa_actual ? `Etapa: ${row.etapa_actual}` : "", `Paso: ${row.proximo_paso}`, row.proximo_paso_quien ? `Responsable: ${row.proximo_paso_quien}` : ""],
-    url: link(appUrl, "onboarding", row.id), start: row.proximo_paso_fecha, end: row.proximo_paso_fecha, colorId: "3",
+    summary: `${overdue ? "Vencido · " : ""}Onboarding · ${clip(row.client_name || "Cliente", 60)}: ${clip(row.proximo_paso, 120)}`,
+    lines: [overdue ? `Venció el ${fmtDM(row.proximo_paso_fecha)}` : "", `Cliente: ${row.client_name || "—"}`, row.etapa_actual ? `Etapa: ${row.etapa_actual}` : "", `Paso: ${row.proximo_paso}`, row.proximo_paso_quien ? `Responsable: ${row.proximo_paso_quien}` : ""],
+    url: link(appUrl, "onboarding", row.id), start: row.proximo_paso_fecha, end: overdue ? today : row.proximo_paso_fecha, colorId: overdue ? "11" : "3",
   });
 }
 

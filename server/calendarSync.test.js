@@ -16,7 +16,7 @@ function world(over = {}) {
     asg: [{ entity_id: "t1", user_id: NICO }],
     onboarding: [{ id: "ob1", client_name: "Miraglia", etapa_actual: "Conectar WhatsApp", proximo_paso: "Llamar", proximo_paso_fecha: "2026-12-04", proximo_paso_quien: "Nico" }],
     people: [{ user_id: NICO, email: "nicolas@spicytool.net", first_name: "Nicolás" }, { user_id: TICI, email: "ticiana@spicytool.net", first_name: "Ticiana" }],
-    events: new Map(), nextId: 1, calls: [], revoked: [], synced: [],
+    events: new Map(), nextId: 1, calls: [], revoked: [], synced: [], now: Date.parse("2026-11-27T15:00:00Z"),
     ...over,
   };
   w.store = {
@@ -43,7 +43,7 @@ function world(over = {}) {
     authUrl: vi.fn((state) => "https://accounts.google.com/x?state=" + state),
     revoke: vi.fn(async () => {}),
   };
-  w.sync = makeCalendarSync({ store: w.store, google: w.google, secret: SECRET, appUrl: APP, log: () => {} });
+  w.sync = makeCalendarSync({ store: w.store, google: w.google, secret: SECRET, appUrl: APP, now: () => w.now, log: () => {} });
   return w;
 }
 
@@ -177,6 +177,41 @@ describe("conciliar", () => {
     await Promise.all([w.sync.reconcile(), w.sync.reconcile(), w.sync.reconcile()]);
     expect(maxActive).toBe(1);
     expect(w.events.size).toBe(2); // y sin duplicados
+  });
+
+  it("lo vencido se arrastra: cada día el evento se estira hasta hoy, y al hacerlo desaparece", async () => {
+    w.onboarding[0].proximo_paso_fecha = "2026-11-25"; // venció hace 2 días
+    w.tasks[0].start_date = "2026-11-24"; w.tasks[0].end_date = "2026-11-26"; // Alta y vencida
+    await w.sync.reconcile();
+    const ob = () => [...w.events.values()].find((e) => /Onboarding/.test(e.summary));
+    const tk = () => [...w.events.values()].find((e) => /Tarea/.test(e.summary));
+    expect(ob().summary).toMatch(/^Vencido · Onboarding/);
+    expect(ob().start).toEqual({ date: "2026-11-25" });
+    expect(ob().end).toEqual({ date: "2026-11-28" }); // hasta hoy (27) inclusive
+    expect(tk().summary).toMatch(/^Vencida · Tarea/);
+    expect(tk().end).toEqual({ date: "2026-11-28" });
+    // misma fecha: no vuelve a llamar a Google
+    w.google.updateEvent.mockClear();
+    expect((await w.sync.reconcile()).unchanged).toBe(2);
+    // pasa un día: se estira (actualiza el mismo evento, no crea otro)
+    w.now = Date.parse("2026-11-28T15:00:00Z");
+    const s2 = await w.sync.reconcile();
+    expect(s2).toMatchObject({ updated: 2, created: 0 });
+    expect(ob().end).toEqual({ date: "2026-11-29" });
+    // se hace el paso: se va; la tarea se finaliza: queda con ✓ en su rango original
+    w.onboarding = []; w.tasks[0].stage = "Finalizado";
+    await w.sync.reconcile();
+    expect([...w.events.values()].some((e) => /Onboarding/.test(e.summary))).toBe(false);
+    expect(tk().summary).toBe("✓ Tarea: Armar portfolio");
+    expect(tk().end).toEqual({ date: "2026-11-27" });
+  });
+
+  it("una tarea vencida que NO es de prioridad Alta no se arrastra", async () => {
+    w.tasks[0].priority = "Media"; w.tasks[0].start_date = "2026-11-18"; w.tasks[0].end_date = "2026-11-20";
+    await w.sync.reconcile();
+    const tk = [...w.events.values()].find((e) => /Tarea/.test(e.summary));
+    expect(tk.summary).toBe("Tarea: Armar portfolio");
+    expect(tk.end).toEqual({ date: "2026-11-21" });
   });
 
   it("sin nadie conectado no hace nada; sin configurar tampoco", async () => {

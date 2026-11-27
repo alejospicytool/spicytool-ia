@@ -40,6 +40,7 @@ Barra de arriba → **Calendar → Conectar mi Google Calendar** → elegir la c
 - **No cambiar `GOOGLE_TOKEN_KEY`** una vez en uso: con otra clave los permisos guardados no se pueden leer y cada persona tiene que volver a conectar (la pantalla lo avisa).
 - Si alguien saca el acceso desde su cuenta de Google, el botón pasa a "Calendar: reconectar".
 - **Desconectar** borra de Google los eventos que creó el backoffice y limpia lo guardado.
+- **Lo vencido se arrastra:** si pasó la fecha y sigue pendiente, el evento se estira hasta hoy y lleva "Vencido/a" en el título (en rojo). Vale para los pasos de Onboarding y para las tareas de prioridad **Alta**; las demás quedan en su fecha. Al hacerlo/finalizarlo deja de arrastrarse. "Hoy" se calcula con la fecha de Argentina.
 - Una tarea finalizada que ya estaba en el calendario queda con ✓; si se archiva, el evento se borra. Las tareas ya finalizadas antes de conectar no se agendan.
 - Si Google falla, la tarea o el paso se guardan igual; el motivo del último error se ve en la ventana de Calendar y el servidor reintenta en la próxima corrida.
 - Tabla `supabase_calendar.sql` (ya aplicada el 2026-11-27).
