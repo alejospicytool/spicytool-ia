@@ -14,7 +14,8 @@ import { requestCalendarSync } from "../calendar/calendarApi.js";
 import { clearedSearch } from "../deepLinks.js";
 import { sellerOfUser, effectiveSeller } from "./crmMe.js";
 
-const VIEW_KEY = "crm-view";
+// v2: antes la vista guardaba "todos los vendedores" como si lo hubiera elegido la persona; con la clave nueva se ignora lo viejo y se abre filtrado por el vendedor logueado.
+const VIEW_KEY = "crm-view-v2";
 const loadView = () => { try { return { tab: "hoy", q: "", seller: null, tag: "", country: "", flag: "", tkind: "", tseller: null, tdone: false, ...(JSON.parse(sessionStorage.getItem(VIEW_KEY) || "null") || {}) }; } catch { return { tab: "hoy", q: "", seller: null, tag: "", country: "", flag: "", tkind: "", tseller: null, tdone: false }; } };
 
 // Estado del CRM + guardado de lo que cambia (con control de versión)
