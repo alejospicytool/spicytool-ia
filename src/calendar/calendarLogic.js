@@ -25,6 +25,13 @@ export function connectionBadge(status) {
   return { tone: "off", label: "Calendar" };
 }
 
+// Texto del renglón en el menú lateral (más descriptivo que el de la barra de arriba).
+export function sidebarLabel(status) {
+  if (!status || !status.configured) return "Google Calendar";
+  if (status.needsReconnect) return "Google Calendar · reconectar";
+  return status.connected ? "Google Calendar · conectado" : "Conectar Google Calendar";
+}
+
 // "hace 5 min", "hace 2 h", "ayer"… a partir de una fecha ISO.
 export function timeAgo(iso, now = Date.now()) {
   const t = Date.parse(iso || "");

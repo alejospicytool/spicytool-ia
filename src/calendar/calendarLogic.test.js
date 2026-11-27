@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { explainReturn, connectionBadge, timeAgo, withoutCalendarParam } from "./calendarLogic.js";
+import { explainReturn, connectionBadge, sidebarLabel, timeAgo, withoutCalendarParam } from "./calendarLogic.js";
 import { configureCalendarApi, calendarStatus, calendarConnectUrl, calendarDisconnect, calendarSyncNow, requestCalendarSync } from "./calendarApi.js";
 
 describe("explainReturn", () => {
@@ -24,6 +24,16 @@ describe("connectionBadge", () => {
     expect(connectionBadge({ configured: true, connected: false }).tone).toBe("off");
     expect(connectionBadge({ configured: false }).tone).toBe("off");
     expect(connectionBadge(null).tone).toBe("off");
+  });
+});
+
+describe("sidebarLabel", () => {
+  it("dice claramente en qué estado está", () => {
+    expect(sidebarLabel({ configured: true, connected: true })).toBe("Google Calendar · conectado");
+    expect(sidebarLabel({ configured: true, connected: false, needsReconnect: true })).toBe("Google Calendar · reconectar");
+    expect(sidebarLabel({ configured: true, connected: false })).toBe("Conectar Google Calendar");
+    expect(sidebarLabel({ configured: false })).toBe("Google Calendar");
+    expect(sidebarLabel(null)).toBe("Google Calendar");
   });
 });
 

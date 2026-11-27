@@ -1,13 +1,15 @@
 // Botón de la barra de arriba + ventanita para conectar (o desconectar) tu Google Calendar.
 // Qué se agenda: tus tareas de Operaciones y los próximos pasos de Onboarding que tengan tu nombre.
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { calendarStatus, calendarConnectUrl, calendarDisconnect, calendarSyncNow } from "./calendarApi.js";
-import { explainReturn, connectionBadge, timeAgo, withoutCalendarParam } from "./calendarLogic.js";
+import { explainReturn, connectionBadge, sidebarLabel, timeAgo, withoutCalendarParam } from "./calendarLogic.js";
 
 const DOT = { ok: "#16A34A", warn: "#D97706", off: "#C4C4CC" };
 const RED = "#EF3E3E";
 
-export default function CalendarConnect() {
+// variant "sidebar": renglón discreto para el pie del menú lateral (oscuro). "bar": botón común.
+export default function CalendarConnect({ variant = "bar" }) {
   // Si Google nos devolvió acá (?calendar=ok / error), se muestra el resultado apenas abre y se limpia la dirección.
   const [back] = useState(() => new URLSearchParams(window.location.search).get("calendar") || "");
   const [status, setStatus] = useState(null);
@@ -37,13 +39,21 @@ export default function CalendarConnect() {
   const s = status || {};
   return (
     <>
-      <button type="button" className="spicy-btn-secondary" onClick={() => { setMsg(null); setOpen(true); load(); }} title="Conectar tus tareas y pasos con Google Calendar"
-        style={{ display: "flex", alignItems: "center", gap: 7 }}>
-        <span style={{ width: 8, height: 8, borderRadius: "50%", background: DOT[badge.tone] }} aria-hidden="true"/>
-        {badge.label}
-      </button>
+      {variant === "sidebar" ? (
+        <button type="button" onClick={() => { setMsg(null); setOpen(true); load(); }} title="Conectar tus tareas y pasos con Google Calendar"
+          style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.7)", fontSize: 12.5, fontFamily: "inherit", padding: "9px 12px", textAlign: "left" }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: DOT[badge.tone], flexShrink: 0 }} aria-hidden="true"/>
+          {sidebarLabel(status)}
+        </button>
+      ) : (
+        <button type="button" className="spicy-btn-secondary" onClick={() => { setMsg(null); setOpen(true); load(); }} title="Conectar tus tareas y pasos con Google Calendar"
+          style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: DOT[badge.tone] }} aria-hidden="true"/>
+          {badge.label}
+        </button>
+      )}
 
-      {open && (
+      {open && createPortal(
         <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 250, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div role="dialog" aria-label="Google Calendar" onClick={(e) => e.stopPropagation()} style={{ background: "white", borderRadius: 16, width: "100%", maxWidth: 460, padding: 24, display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ fontSize: 16, fontWeight: 700, color: "#111" }}>Google Calendar</div>
@@ -63,8 +73,8 @@ export default function CalendarConnect() {
                     <li>tus <b>tareas</b> de Operaciones (del inicio al fin)</li>
                     <li>los <b>próximos pasos de Onboarding</b> que tengan tu nombre</li>
                   </ul>
-                  Las <b>tareas del CRM comercial</b> y la próxima acción de tus deals van con su <b>hora</b> (las reuniones duran 30 minutos y ocupan ese horario; el resto son avisos de 15 minutos que no bloquean).
-                  Si cambiás una fecha, el evento se actualiza; si finalizás, borrás o hacés el paso, se saca o queda con ✓. Lo vencido (pasos de Onboarding y tareas de prioridad Alta) se va estirando hasta hoy con “Vencido/a” en el título. Cada evento trae el link para volver acá.
+                  <div style={{ marginTop: 8 }}>Las <b>tareas del CRM comercial</b> y la próxima acción de tus deals van con su <b>hora</b> (las reuniones duran 30 minutos y ocupan ese horario; el resto son avisos de 15 minutos que no bloquean).</div>
+                  <div style={{ marginTop: 8 }}>Si cambiás una fecha, el evento se actualiza; si finalizás, borrás o hacés el paso, se saca o queda con ✓. Lo vencido (pasos de Onboarding y tareas de prioridad Alta) se va estirando hasta hoy con “Vencido/a” en el título. Cada evento trae el link para volver acá.</div>
                 </div>
 
                 {s.connected && (
@@ -85,7 +95,8 @@ export default function CalendarConnect() {
 
             <div style={{ display: "flex", justifyContent: "flex-end" }}><button className="spicy-btn-secondary" onClick={() => setOpen(false)}>Cerrar</button></div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );

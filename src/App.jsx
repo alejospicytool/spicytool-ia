@@ -4499,7 +4499,7 @@ function TaskTimeInfo({ entityType, entityId }) {
 }
 
 // `center` = lo que va en el medio de la barra superior (hoy, el buscador global): así hay UNA sola barra fija arriba y nada se tapa.
-function TimeTrackerBar({ center = null, actions = null }) {
+function TimeTrackerBar({ center = null }) {
   const [sessionId] = useState(getTimeSessionId);
   const { estado, receivedAt } = useTimeSnapshot();
   const [now, setNow] = useState(Date.now());
@@ -4657,7 +4657,6 @@ function TimeTrackerBar({ center = null, actions = null }) {
         {center && <div className="spicy-timebar-center">{center}</div>}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {error && <span style={{ fontSize: 12, color: ST_RED }}>{error}</span>}
-          {actions}
           {otherSessionActive && (
             <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#92400E", background: "#FEF3C7", borderRadius: 8, padding: "5px 10px" }}>
               Tu jornada está siendo seguida desde otra pestaña
@@ -6307,6 +6306,7 @@ export default function SpicyFinanzas() {
           })}
         </nav>
 
+        <div style={{ borderTop:"1px solid rgba(255,255,255,0.08)" }}><CalendarConnect variant="sidebar"/></div>
         <div className="spicy-user">
           <div className="spicy-avatar">{userInitials}</div>
           <div style={{ flex:1,minWidth:0 }}>
@@ -6326,7 +6326,7 @@ export default function SpicyFinanzas() {
 
       {/* Main content */}
       <div className="spicy-main">
-        <TimeTrackerBar center={<GlobalSearch data={searchData} canSpicy={canSeeSection("Admin Spicy")} onPick={openSearchResult}/>} actions={<CalendarConnect/>}/>
+        <TimeTrackerBar center={<GlobalSearch data={searchData} canSpicy={canSeeSection("Admin Spicy")} onPick={openSearchResult}/>}/>
         {role==="reader"&&<div role="status" style={{ fontSize:13,color:"#185FA5",marginBottom:16,padding:"10px 14px",background:"#EEF4FB",borderRadius:10,border:"1px solid #CFE0F3" }}>Tu usuario es de <b>solo lectura</b>: podés ver tickets, tareas y onboarding, pero no crearlos ni cambiarlos. Si necesitás editar, pedile a un admin que te pase a editor.</div>}
         {syncError&&<div style={{ fontSize:13,color:ST_RED,marginBottom:16,padding:"10px 14px",background:ST_RED_BG,borderRadius:10,border:`1px solid ${ST_RED}22` }}>{syncError}</div>}
 
